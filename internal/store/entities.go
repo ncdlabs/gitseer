@@ -365,7 +365,8 @@ func scanRun(row scanner) (*models.WorkflowRun, error) {
 type ListRunsOpts struct {
 	UserID       int64
 	BootstrapAll bool
-	Status       string
+	Status       string   // single status; ignored when Statuses is non-empty
+	Statuses     []string // multi-status IN (...); preferred over Status when set
 	Conclusion   string
 	Query        string
 	Limit        int
@@ -384,7 +385,14 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, opts ListRunsOpts) ([]mode
 		join += " INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
 		args = append(args, opts.UserID)
 	}
-	if opts.Status != "" {
+	if len(opts.Statuses) > 0 {
+		ph := make([]string, len(opts.Statuses))
+		for i, st := range opts.Statuses {
+			ph[i] = "?"
+			args = append(args, st)
+		}
+		where = append(where, "wr.status IN ("+strings.Join(ph, ",")+")")
+	} else if opts.Status != "" {
 		where = append(where, "wr.status = ?")
 		args = append(args, opts.Status)
 	}
@@ -518,6 +526,36 @@ FROM jobs WHERE run_id=? ORDER BY id`, runID)
 	return out, rows.Err()
 }
 
+// ListJobsByRunIDs returns jobs grouped by run ID. Empty map when runIDs is empty.
+func (s *Store) ListJobsByRunIDs(ctx context.Context, runIDs []int64) (map[int64][]models.Job, error) {
+	out := make(map[int64][]models.Job)
+	if len(runIDs) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(runIDs))
+	args := make([]any, len(runIDs))
+	for i, id := range runIDs {
+		ph[i] = "?"
+		args[i] = id
+	}
+	rows, err := s.query(ctx, `
+SELECT id, run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
+       runner_id, runner_name, html_url, started_at, completed_at, steps_json
+FROM jobs WHERE run_id IN (`+strings.Join(ph, ",")+`) ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[j.RunID] = append(out[j.RunID], *j)
+	}
+	return out, rows.Err()
+}
+
 func scanJob(row scanner) (*models.Job, error) {
 	var j models.Job
 	var runnerID sql.NullInt64
@@ -627,6 +665,7 @@ type ListAttentionOpts struct {
 	BootstrapAll bool
 	Severity     string
 	Type         string
+	Query        string
 	OpenOnly     bool
 	Limit        int
 	Offset       int
@@ -654,6 +693,12 @@ func (s *Store) ListAttention(ctx context.Context, opts ListAttentionOpts) ([]mo
 	if opts.Type != "" {
 		where = append(where, "a.type = ?")
 		args = append(args, opts.Type)
+	}
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		if like := likePattern(q); like != "" {
+			where = append(where, "(a.title LIKE ? OR a.type LIKE ? OR r.full_name LIKE ?)")
+			args = append(args, like, like, like)
+		}
 	}
 	clause := strings.Join(where, " AND ")
 	var total int
@@ -688,9 +733,15 @@ LIMIT ? OFFSET ?`, args...)
 // When since is non-nil, time-based metrics are limited to activity at or after that instant:
 // open PRs by created_at, open attention by opened_at, failed runs by completed_at/started_at,
 // running runs by started_at. Repositories remain a current inventory count.
-func (s *Store) Summary(ctx context.Context, userID int64, bootstrapAll bool, since *time.Time) (*models.Summary, error) {
+// When snapshot is true (dashboard "Now"), counters reflect current open/running state with no
+// lookback: open PRs, open attention, and running runs are unfiltered; failed runs count only
+// failures that still have an open attention item (not historical failure volume).
+func (s *Store) Summary(ctx context.Context, userID int64, bootstrapAll bool, since *time.Time, snapshot bool) (*models.Summary, error) {
 	if err := requireListScope(userID, bootstrapAll); err != nil {
 		return nil, err
+	}
+	if snapshot {
+		since = nil
 	}
 	join := ""
 	args := []any{}
@@ -734,7 +785,13 @@ WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL`
 SELECT COUNT(*) FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id ` + join + `
 WHERE r.deleted_at IS NULL AND wr.conclusion = 'failure'`
 	failArgs := append([]any{}, args...)
-	if since != nil {
+	if snapshot {
+		failSQL += `
+AND EXISTS (
+  SELECT 1 FROM attention_items a
+  WHERE a.entity_type = 'workflow_run' AND a.entity_id = wr.id AND a.resolved_at IS NULL
+)`
+	} else if since != nil {
 		failSQL += ` AND COALESCE(wr.completed_at, wr.started_at) >= ?`
 		failArgs = append(failArgs, sum.Since)
 	}

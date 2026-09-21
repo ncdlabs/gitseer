@@ -8,6 +8,7 @@ import {
   type TestConnectionResponse,
   type WebhookPreview,
 } from "../api/client";
+import { Brand } from "../components/Brand";
 import { InfoTip } from "../components/InfoTip";
 import { PasswordInput } from "../components/PasswordInput";
 import {
@@ -149,9 +150,44 @@ type Props = {
   onLogout: () => void;
 };
 
+function WizardTopBar({
+  allowSkip,
+  skipping,
+  onSkip,
+  onLogout,
+}: {
+  allowSkip: boolean;
+  skipping: boolean;
+  onSkip: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="setup-wizard__top">
+      <Brand variant="logo" className="setup-wizard__logo" />
+      <div className="setup-wizard__top-actions">
+        {allowSkip && (
+          <button
+            className="setup-wizard__logout"
+            type="button"
+            onClick={onSkip}
+            disabled={skipping}
+          >
+            {skipping ? "Skipping…" : "Skip Setup"}
+          </button>
+        )}
+        <button className="setup-wizard__logout" type="button" onClick={onLogout} disabled={skipping}>
+          Log Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SetupWizardPage({ onComplete, onLogout }: Props) {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const uiConfigQuery = useQuery({ queryKey: ["ui-config"], queryFn: api.uiConfig });
+  const allowSkipSetup = uiConfigQuery.data?.allow_skip_setup === true;
   const [step, setStep] = useState<Step>("connect");
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [hydrated, setHydrated] = useState(false);
@@ -534,6 +570,21 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     }
   }
 
+  async function skipSetup() {
+    if (!allowSkipSetup || finishing) return;
+    setFinishing(true);
+    setError(null);
+    try {
+      await api.completeSetup();
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      onComplete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to skip setup");
+    } finally {
+      setFinishing(false);
+    }
+  }
+
   function back() {
     setError(null);
     setFieldErrors({});
@@ -544,14 +595,12 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   if (settingsQuery.isLoading && !hydrated) {
     return (
       <div className="setup-wizard">
-        <div className="setup-wizard__top">
-          <p className="setup-wizard__brand">
-            Gitea <span className="brand__mark">Lens</span>
-          </p>
-          <button className="setup-wizard__logout" type="button" onClick={onLogout}>
-            Log Out
-          </button>
-        </div>
+        <WizardTopBar
+          allowSkip={allowSkipSetup}
+          skipping={finishing}
+          onSkip={() => void skipSetup()}
+          onLogout={onLogout}
+        />
         <div className="setup-wizard__dialog" role="dialog" aria-modal="true" aria-busy="true">
           <div className="loading">Loading setup…</div>
         </div>
@@ -562,14 +611,12 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   if (settingsQuery.isError) {
     return (
       <div className="setup-wizard">
-        <div className="setup-wizard__top">
-          <p className="setup-wizard__brand">
-            Gitea <span className="brand__mark">Lens</span>
-          </p>
-          <button className="setup-wizard__logout" type="button" onClick={onLogout}>
-            Log Out
-          </button>
-        </div>
+        <WizardTopBar
+          allowSkip={allowSkipSetup}
+          skipping={finishing}
+          onSkip={() => void skipSetup()}
+          onLogout={onLogout}
+        />
         <div className="setup-wizard__dialog" role="dialog" aria-modal="true" aria-label="Setup error">
           <div className="error">{(settingsQuery.error as Error).message}</div>
         </div>
@@ -579,14 +626,12 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
 
   return (
     <div className="setup-wizard">
-      <div className="setup-wizard__top">
-        <p className="setup-wizard__brand">
-          Gitea <span className="brand__mark">Lens</span>
-        </p>
-        <button className="setup-wizard__logout" type="button" onClick={onLogout}>
-          Log Out
-        </button>
-      </div>
+      <WizardTopBar
+        allowSkip={allowSkipSetup}
+        skipping={finishing}
+        onSkip={() => void skipSetup()}
+        onLogout={onLogout}
+      />
       <div
         className="setup-wizard__dialog"
         role="dialog"

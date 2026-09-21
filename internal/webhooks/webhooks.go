@@ -340,14 +340,15 @@ func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 	var payload struct {
 		WorkflowJob struct {
-			ID          int64  `json:"id"`
-			RunID       int64  `json:"run_id"`
-			Name        string `json:"name"`
-			Status      string `json:"status"`
-			Conclusion  string `json:"conclusion"`
-			HTMLURL     string `json:"html_url"`
-			StartedAt   string `json:"started_at"`
-			CompletedAt string `json:"completed_at"`
+			ID          int64           `json:"id"`
+			RunID       int64           `json:"run_id"`
+			Name        string          `json:"name"`
+			Status      string          `json:"status"`
+			Conclusion  string          `json:"conclusion"`
+			HTMLURL     string          `json:"html_url"`
+			StartedAt   string          `json:"started_at"`
+			CompletedAt string          `json:"completed_at"`
+			Steps       json.RawMessage `json:"steps"`
 		} `json:"workflow_job"`
 		Repository struct {
 			ID    int64  `json:"id"`
@@ -377,6 +378,11 @@ func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 		conc = forge.NormalizeConclusion(payload.WorkflowJob.Conclusion)
 		st = models.StatusCompleted
 	}
+	var steps *string
+	if len(payload.WorkflowJob.Steps) > 0 && string(payload.WorkflowJob.Steps) != "null" {
+		s := string(payload.WorkflowJob.Steps)
+		steps = &s
+	}
 	job, err := p.store.UpsertJob(ctx, repo.ID, run.ID, models.Job{
 		ExternalID:         payload.WorkflowJob.ID,
 		Name:               payload.WorkflowJob.Name,
@@ -387,12 +393,16 @@ func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 		HTMLURL:            payload.WorkflowJob.HTMLURL,
 		StartedAt:          parseWebhookTime(payload.WorkflowJob.StartedAt),
 		CompletedAt:        parseWebhookTime(payload.WorkflowJob.CompletedAt),
+		StepsJSON:          steps,
 	})
 	if err != nil {
 		return err
 	}
 	if p.att != nil {
 		_ = p.att.EvaluateJob(ctx, ev.InstanceID, job, run)
+	}
+	if p.hub != nil {
+		p.hub.Publish(realtime.Event{Type: "workflow_job", ID: job.ID, RepoID: repo.ID})
 	}
 	return nil
 }

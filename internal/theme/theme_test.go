@@ -15,6 +15,7 @@ func TestMapGitea(t *testing.T) {
 		{"gitea-dark-tritanopia", "", false},
 		{"arc-green", "", false},
 		{"gruvbox", "", false},
+		{"terminal", "", false},
 		{"", "", false},
 		{"custom-neon", "", false},
 	}

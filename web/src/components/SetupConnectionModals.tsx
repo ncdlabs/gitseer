@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef } from "react";
 import type { OAuthAppPreview, ProbeCheck, ProbeCheckStatus, WebhookPreview } from "../api/client";
+import { Glyph, type ShellIconName } from "./Glyph";
 
 type ProbeGroup = "connectivity" | "permissions";
 
@@ -31,37 +32,25 @@ function resolveGroup(check: ProbeCheck): ProbeGroup {
   return CONNECTIVITY_IDS.has(check.id) ? "connectivity" : "permissions";
 }
 
+function statusGlyph(status: ProbeCheckStatus): ShellIconName {
+  switch (status) {
+    case "ok":
+      return "ok";
+    case "fail":
+      return "fail";
+    case "warn":
+      return "warn";
+    case "skip":
+      return "skip";
+    case "running":
+      return "running";
+    default:
+      return "pending";
+  }
+}
+
 function StatusIcon({ status }: { status: ProbeCheckStatus }) {
-  if (status === "ok") {
-    return (
-      <svg className="probe-list__icon" viewBox="0 0 16 16" aria-hidden="true">
-        <path
-          d="M3.5 8.5 6.5 11.5 12.5 4.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-  if (status === "fail") {
-    return (
-      <svg className="probe-list__icon" viewBox="0 0 16 16" aria-hidden="true">
-        <path
-          d="M4 4 12 12M12 4 4 12"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
-  const glyph =
-    status === "warn" ? "!" : status === "skip" ? "–" : status === "running" ? "…" : "";
-  return <span aria-hidden="true">{glyph}</span>;
+  return <Glyph name={statusGlyph(status)} className="probe-list__icon" />;
 }
 
 type CheckModalProps = {

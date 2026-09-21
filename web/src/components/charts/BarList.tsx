@@ -1,3 +1,6 @@
+import { useIsTerminalTheme } from "../../hooks/useIsTerminalTheme";
+import { asciiBarFromCount } from "../../lib/asciiGraphics";
+
 export type BarListItem = {
   key: string;
   count: number;
@@ -24,6 +27,7 @@ export function BarList({
   empty = "No data.",
   colorForKey,
 }: Props) {
+  const terminal = useIsTerminalTheme();
   const sorted = [...items].sort((a, b) => b.count - a.count);
   const max = Math.max(1, ...sorted.map((i) => i.count));
   const total = sorted.reduce((sum, i) => sum + i.count, 0);
@@ -41,7 +45,7 @@ export function BarList({
   }
 
   return (
-    <div className="chart" role="img" aria-labelledby={descId}>
+    <div className={`chart${terminal ? " chart--ascii" : ""}`} role="img" aria-labelledby={descId}>
       <div className="chart__header">
         <h3 className="chart__title" id={descId}>
           {title}
@@ -62,12 +66,18 @@ export function BarList({
                   <span className="muted"> · {share}%</span>
                 </span>
               </div>
-              <div className="bar-list__track" aria-hidden="true">
-                <div
-                  className="bar-list__fill"
-                  style={{ width: `${pct}%`, background: color }}
-                />
-              </div>
+              {terminal ? (
+                <pre className="bar-list__ascii mono" aria-hidden="true">
+                  {asciiBarFromCount(item.count, max)}
+                </pre>
+              ) : (
+                <div className="bar-list__track" aria-hidden="true">
+                  <div
+                    className="bar-list__fill"
+                    style={{ width: `${pct}%`, background: color }}
+                  />
+                </div>
+              )}
             </li>
           );
         })}

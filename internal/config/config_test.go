@@ -40,6 +40,7 @@ ui:
 	t.Setenv("LENS_UI_INSTANCE_NAME", "FromEnv")
 	t.Setenv("LENS_SYNC_HISTORY_DAYS", "7")
 	t.Setenv("LENS_SYNC_RECONCILE_INTERVAL", "2m")
+	t.Setenv("LENS_ALLOW_SKIP_SETUP", "true")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -59,6 +60,9 @@ ui:
 	}
 	if cfg.Sync.ReconcileInterval != 2*time.Minute {
 		t.Fatalf("reconcile = %s", cfg.Sync.ReconcileInterval)
+	}
+	if !cfg.Dev.AllowSkipSetup {
+		t.Fatal("expected Dev.AllowSkipSetup from LENS_ALLOW_SKIP_SETUP")
 	}
 }
 

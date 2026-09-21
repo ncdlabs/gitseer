@@ -1,26 +1,45 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, ciBadgeClass, ciLabel, repoLabel, safeExternalHref } from "../api/client";
-import { ViewModeToggle } from "../components/ViewModeToggle";
+import { ListControls } from "../components/ListControls";
 import { useViewMode } from "../hooks/useViewMode";
 
 export function RepositoriesPage() {
   const { mode, setMode } = useViewMode();
-  const q = useQuery({ queryKey: ["repositories"], queryFn: () => api.repositories() });
-  if (q.isLoading) return <div className="loading">Loading repositories…</div>;
+  const [filter, setFilter] = useState("");
+  const q = useQuery({
+    queryKey: ["repositories", filter],
+    queryFn: () => api.repositories(filter),
+    placeholderData: keepPreviousData,
+  });
+  if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading repositories…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
   const items = q.data?.items ?? [];
+  const empty = filter
+    ? "No repositories match this filter."
+    : "No repositories yet. Use Sync in the header (bootstrap admin).";
   return (
     <>
       <div className="topbar">
         <div className="page-header">
           <h1>Repositories</h1>
-          <p className="muted">{q.data?.total ?? 0} repositories visible to you.</p>
+          <p className="muted">
+            {q.data?.total ?? 0} repositor{q.data?.total === 1 ? "y" : "ies"} visible to you
+            {filter ? ` matching “${filter}”` : ""}.
+          </p>
         </div>
-        <ViewModeToggle mode={mode} onMode={setMode} />
+        <ListControls
+          mode={mode}
+          onMode={setMode}
+          filter={filter}
+          onFilter={setFilter}
+          filterPlaceholder="Filter repositories…"
+          filterLabel="Filter repositories"
+        />
       </div>
       {mode === "cards" ? (
         items.length === 0 ? (
-          <div className="empty">No repositories yet. Use Sync in the sidebar (bootstrap admin).</div>
+          <div className="empty">{empty}</div>
         ) : (
           <div className="item-grid">
             {items.map((repo) => {
@@ -83,7 +102,7 @@ export function RepositoriesPage() {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={3} className="empty">
-                    No repositories yet. Use Sync in the sidebar (bootstrap admin).
+                    {empty}
                   </td>
                 </tr>
               )}
@@ -97,10 +116,16 @@ export function RepositoriesPage() {
 
 export function PullRequestsPage() {
   const { mode, setMode } = useViewMode();
-  const q = useQuery({ queryKey: ["prs"], queryFn: api.pullRequests });
-  if (q.isLoading) return <div className="loading">Loading pull requests…</div>;
+  const [filter, setFilter] = useState("");
+  const q = useQuery({
+    queryKey: ["prs", filter],
+    queryFn: () => api.pullRequests(filter),
+    placeholderData: keepPreviousData,
+  });
+  if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pull requests…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
   const items = q.data?.items ?? [];
+  const empty = filter ? "No pull requests match this filter." : "No open pull requests.";
   return (
     <>
       <div className="topbar">
@@ -108,11 +133,18 @@ export function PullRequestsPage() {
           <h1>Pull Requests</h1>
           <p className="muted">Open PRs across accessible repositories.</p>
         </div>
-        <ViewModeToggle mode={mode} onMode={setMode} />
+        <ListControls
+          mode={mode}
+          onMode={setMode}
+          filter={filter}
+          onFilter={setFilter}
+          filterPlaceholder="Filter pull requests…"
+          filterLabel="Filter pull requests"
+        />
       </div>
       {mode === "cards" ? (
         items.length === 0 ? (
-          <div className="empty">No open pull requests.</div>
+          <div className="empty">{empty}</div>
         ) : (
           <div className="item-grid">
             {items.map((pr) => {
@@ -185,7 +217,7 @@ export function PullRequestsPage() {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={4} className="empty">
-                    No open pull requests.
+                    {empty}
                   </td>
                 </tr>
               )}

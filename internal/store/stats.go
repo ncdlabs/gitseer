@@ -11,7 +11,9 @@ import (
 
 // StatsReport returns authz-scoped dashboard series for the [since, now] window.
 // Day series are zero-filled; run_duration is nil when there are no completed samples.
-func (s *Store) StatsReport(ctx context.Context, userID int64, bootstrapAll bool, since time.Time) (*models.StatsReport, error) {
+// When snapshot is true (dashboard "Now"), only current-state breakdowns are returned:
+// open PR CI states and open attention by severity/type. Historical series are empty.
+func (s *Store) StatsReport(ctx context.Context, userID int64, bootstrapAll bool, since time.Time, snapshot bool) (*models.StatsReport, error) {
 	if err := requireListScope(userID, bootstrapAll); err != nil {
 		return nil, err
 	}
@@ -21,20 +23,58 @@ func (s *Store) StatsReport(ctx context.Context, userID int64, bootstrapAll bool
 		join = "INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
 		args = append(args, userID)
 	}
-	now := time.Now().UTC()
-	sinceUTC := since.UTC()
-	sinceStr := formatTime(sinceUTC)
-	days := dayKeys(sinceUTC, now)
 
 	out := &models.StatsReport{
-		Since:               sinceStr,
-		RunsByDay:           make([]models.DayRunBucket, 0, len(days)),
+		RunsByDay:           []models.DayRunBucket{},
 		RunConclusions:      []models.CountBucket{},
-		PRsByDay:            make([]models.DayPRBucket, 0, len(days)),
+		PRsByDay:            []models.DayPRBucket{},
 		PRCIStates:          []models.CountBucket{},
 		AttentionBySeverity: []models.CountBucket{},
 		AttentionByType:     []models.CountBucket{},
 	}
+
+	var err error
+	out.PRCIStates, err = s.statsCountBuckets(ctx, `
+SELECT COALESCE(NULLIF(pr.ci_state, ''), 'unknown') AS k, COUNT(*)
+FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
+WHERE r.deleted_at IS NULL AND pr.state = 'open'
+GROUP BY k
+ORDER BY COUNT(*) DESC, k`, args)
+	if err != nil {
+		return nil, err
+	}
+
+	out.AttentionBySeverity, err = s.statsCountBuckets(ctx, `
+SELECT a.severity AS k, COUNT(*)
+FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
+WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
+GROUP BY k
+ORDER BY COUNT(*) DESC, k`, args)
+	if err != nil {
+		return nil, err
+	}
+
+	out.AttentionByType, err = s.statsCountBuckets(ctx, `
+SELECT a.type AS k, COUNT(*)
+FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
+WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
+GROUP BY k
+ORDER BY COUNT(*) DESC, k`, args)
+	if err != nil {
+		return nil, err
+	}
+
+	if snapshot {
+		return out, nil
+	}
+
+	now := time.Now().UTC()
+	sinceUTC := since.UTC()
+	sinceStr := formatTime(sinceUTC)
+	days := dayKeys(sinceUTC, now)
+	out.Since = sinceStr
+	out.RunsByDay = make([]models.DayRunBucket, 0, len(days))
+	out.PRsByDay = make([]models.DayPRBucket, 0, len(days))
 
 	runByDay, err := s.statsRunsByDay(ctx, join, args, sinceStr)
 	if err != nil {
@@ -95,36 +135,6 @@ GROUP BY day`, args, sinceStr)
 			Merged: prMerged[d],
 			Closed: prClosed[d],
 		})
-	}
-
-	out.PRCIStates, err = s.statsCountBuckets(ctx, `
-SELECT COALESCE(NULLIF(pr.ci_state, ''), 'unknown') AS k, COUNT(*)
-FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND pr.state = 'open'
-GROUP BY k
-ORDER BY COUNT(*) DESC, k`, args)
-	if err != nil {
-		return nil, err
-	}
-
-	out.AttentionBySeverity, err = s.statsCountBuckets(ctx, `
-SELECT a.severity AS k, COUNT(*)
-FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
-GROUP BY k
-ORDER BY COUNT(*) DESC, k`, args)
-	if err != nil {
-		return nil, err
-	}
-
-	out.AttentionByType, err = s.statsCountBuckets(ctx, `
-SELECT a.type AS k, COUNT(*)
-FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
-GROUP BY k
-ORDER BY COUNT(*) DESC, k`, args)
-	if err != nil {
-		return nil, err
 	}
 
 	return out, nil

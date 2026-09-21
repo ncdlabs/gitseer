@@ -1,12 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { AttentionCards } from "../components/AttentionCards";
 import { BarList } from "../components/charts/BarList";
 import { StackedAreaChart } from "../components/charts/StackedAreaChart";
 import { StatCallout } from "../components/charts/StatCallout";
+import { ListControls } from "../components/ListControls";
 import { RangeToggle } from "../components/RangeToggle";
-import { ViewModeToggle } from "../components/ViewModeToggle";
 import { useDashboardRange } from "../hooks/useDashboardRange";
 import { useViewMode } from "../hooks/useViewMode";
 
@@ -53,6 +54,8 @@ function bucketColor(key: string): string {
 export function DashboardPage() {
   const { mode, setMode } = useViewMode();
   const { days, setDays } = useDashboardRange();
+  const [filter, setFilter] = useState("");
+  const isNow = days === 0;
   const summary = useQuery({
     queryKey: ["summary", days],
     queryFn: () => api.summary(days),
@@ -61,7 +64,11 @@ export function DashboardPage() {
     queryKey: ["stats", days],
     queryFn: () => api.stats(days),
   });
-  const attention = useQuery({ queryKey: ["attention"], queryFn: api.attention });
+  const attention = useQuery({
+    queryKey: ["attention", filter],
+    queryFn: () => api.attention(filter),
+    placeholderData: keepPreviousData,
+  });
 
   if (summary.isLoading) return <div className="loading">Loading dashboard…</div>;
   if (summary.isError) return <div className="error">{(summary.error as Error).message}</div>;
@@ -78,11 +85,14 @@ export function DashboardPage() {
         <div className="page-header">
           <h1>Dashboard</h1>
           <p className="muted">
-            Operational report for the {rangeLabel} across repositories you can access.
+            {isNow
+              ? "Current snapshot across repositories you can access."
+              : `Operational report for the ${rangeLabel} across repositories you can access.`}
           </p>
         </div>
         <RangeToggle days={days} onDays={setDays} />
       </div>
+
       <div className="metrics">
         <Link className="metric" to="/repositories">
           <div className="metric__label">Repositories</div>
@@ -106,49 +116,51 @@ export function DashboardPage() {
         </Link>
       </div>
 
-      <section className="report-section">
-        <div className="panel__header report-section__header">
-          <h2>Trends</h2>
-        </div>
-        {stats.isLoading ? (
-          <div className="loading">Loading trends…</div>
-        ) : stats.isError ? (
-          <div className="error">{(stats.error as Error).message}</div>
-        ) : (
-          <div className="charts-grid charts-grid--trends">
-            <div className="charts-grid__cell">
-              <StackedAreaChart
-                title="Workflow runs"
-                description={`Daily workflow run outcomes for the ${rangeLabel}.`}
-                data={report?.runs_by_day || []}
-                xKey="day"
-                series={[...RUN_SERIES]}
-                empty="No workflow runs in this range."
-              />
-              <StatCallout
-                title="Run duration"
-                p50Seconds={duration?.p50_seconds}
-                p95Seconds={duration?.p95_seconds}
-                sampleCount={duration?.sample_count ?? 0}
-              />
-            </div>
-            <div className="charts-grid__cell">
-              <StackedAreaChart
-                title="Pull request activity"
-                description={`Daily pull request opened, merged, and closed counts for the ${rangeLabel}.`}
-                data={report?.prs_by_day || []}
-                xKey="day"
-                series={[...PR_SERIES]}
-                empty="No pull request activity in this range."
-              />
-            </div>
+      {!isNow && (
+        <section className="report-section">
+          <div className="panel__header report-section__header">
+            <h2>Trends</h2>
           </div>
-        )}
-      </section>
+          {stats.isLoading ? (
+            <div className="loading">Loading trends…</div>
+          ) : stats.isError ? (
+            <div className="error">{(stats.error as Error).message}</div>
+          ) : (
+            <div className="charts-grid charts-grid--trends">
+              <div className="charts-grid__cell">
+                <StackedAreaChart
+                  title="Workflow runs"
+                  description={`Daily workflow run outcomes for the ${rangeLabel}.`}
+                  data={report?.runs_by_day || []}
+                  xKey="day"
+                  series={[...RUN_SERIES]}
+                  empty="No workflow runs in this range."
+                />
+                <StatCallout
+                  title="Run duration"
+                  p50Seconds={duration?.p50_seconds}
+                  p95Seconds={duration?.p95_seconds}
+                  sampleCount={duration?.sample_count ?? 0}
+                />
+              </div>
+              <div className="charts-grid__cell">
+                <StackedAreaChart
+                  title="Pull request activity"
+                  description={`Daily pull request opened, merged, and closed counts for the ${rangeLabel}.`}
+                  data={report?.prs_by_day || []}
+                  xKey="day"
+                  series={[...PR_SERIES]}
+                  empty="No pull request activity in this range."
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="report-section">
         <div className="panel__header report-section__header">
-          <h2>Breakdowns</h2>
+          <h2>{isNow ? "Current State" : "Breakdowns"}</h2>
         </div>
         {stats.isLoading ? (
           <div className="loading">Loading breakdowns…</div>
@@ -156,12 +168,14 @@ export function DashboardPage() {
           <div className="error">{(stats.error as Error).message}</div>
         ) : (
           <div className="charts-grid charts-grid--breakdowns">
-            <BarList
-              title="Run conclusions"
-              items={report?.run_conclusions || []}
-              colorForKey={bucketColor}
-              empty="No run conclusions in this range."
-            />
+            {!isNow && (
+              <BarList
+                title="Run conclusions"
+                items={report?.run_conclusions || []}
+                colorForKey={bucketColor}
+                empty="No run conclusions in this range."
+              />
+            )}
             <BarList
               title="Open PR CI state"
               items={report?.pr_ci_states || []}
@@ -186,14 +200,21 @@ export function DashboardPage() {
 
       <section className="report-section">
         <div className="panel__header report-section__header">
-          <h2>Needs attention now</h2>
+          <h2>Needs Attention</h2>
           <div className="report-section__actions">
             {items.length > 0 && (
               <Link className="muted" to="/attention">
                 View all ({attention.data?.total ?? items.length})
               </Link>
             )}
-            <ViewModeToggle mode={mode} onMode={setMode} />
+            <ListControls
+              mode={mode}
+              onMode={setMode}
+              filter={filter}
+              onFilter={setFilter}
+              filterPlaceholder="Filter attention…"
+              filterLabel="Filter attention"
+            />
           </div>
         </div>
         {attention.isLoading ? (
@@ -201,7 +222,12 @@ export function DashboardPage() {
         ) : attention.isError ? (
           <div className="error">{(attention.error as Error).message}</div>
         ) : (
-          <AttentionCards items={items} limit={12} empty="No open attention items." mode={mode} />
+          <AttentionCards
+            items={items}
+            limit={12}
+            empty={filter ? "No attention items match this filter." : "No open attention items."}
+            mode={mode}
+          />
         )}
       </section>
     </>

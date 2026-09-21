@@ -7,10 +7,11 @@ import "strings"
 type ID string
 
 const (
-	Light   ID = "light"
-	Dark    ID = "dark"
-	System  ID = "system"
-	Gruvbox ID = "gruvbox"
+	Light    ID = "light"
+	Dark     ID = "dark"
+	System   ID = "system"
+	Gruvbox  ID = "gruvbox"
+	Terminal ID = "terminal"
 )
 
 // MapGitea maps a Gitea user theme name to a Lens theme.

@@ -1,4 +1,4 @@
-export type LensTheme = "light" | "dark" | "system" | "gruvbox";
+export type LensTheme = "light" | "dark" | "system" | "gruvbox" | "terminal";
 
 export type User = {
   id: number;
@@ -51,6 +51,22 @@ export type WorkflowRun = {
   started_at?: string;
   completed_at?: string;
   html_url: string;
+};
+
+export type Job = {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string;
+  steps_json?: string;
+  started_at?: string;
+  completed_at?: string;
+  html_url?: string;
+};
+
+export type ActiveRunItem = {
+  run: WorkflowRun;
+  jobs: Job[];
 };
 
 export type AttentionItem = {
@@ -208,6 +224,9 @@ export type UIConfig = {
   base_path?: string;
   oauth_enabled?: boolean;
   bootstrap_enabled?: boolean;
+  allow_skip_setup?: boolean;
+  /** Present only when allow_skip_setup is true (local npm start). */
+  dev_bootstrap_password?: string;
   csrf_token?: string;
 };
 
@@ -387,18 +406,26 @@ export const api = {
     return out;
   },
   logout: () => request<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
-  summary: (days = 7) => request<Summary>(`/api/v1/summary?days=${days}`),
-  stats: (days = 7) => request<StatsReport>(`/api/v1/stats?days=${days}`),
+  summary: (days = 0) => request<Summary>(`/api/v1/summary?days=${days}`),
+  stats: (days = 0) => request<StatsReport>(`/api/v1/stats?days=${days}`),
   repositories: (q = "") =>
     request<{ items: Repository[]; total: number }>(`/api/v1/repositories?limit=100&q=${encodeURIComponent(q)}`),
-  pullRequests: () =>
-    request<{ items: PullRequest[]; total: number }>("/api/v1/pull-requests?state=open&limit=100"),
-  workflowRuns: () =>
-    request<{ items: WorkflowRun[]; total: number }>("/api/v1/workflow-runs?limit=100"),
+  pullRequests: (q = "") =>
+    request<{ items: PullRequest[]; total: number }>(
+      `/api/v1/pull-requests?state=open&limit=100&q=${encodeURIComponent(q)}`,
+    ),
+  workflowRuns: (q = "") =>
+    request<{ items: WorkflowRun[]; total: number }>(
+      `/api/v1/workflow-runs?limit=100&q=${encodeURIComponent(q)}`,
+    ),
+  activeWorkflowRuns: () =>
+    request<{ items: ActiveRunItem[]; total: number }>("/api/v1/workflow-runs/active"),
   workflowRun: (id: number) =>
-    request<{ run: WorkflowRun; jobs: unknown[]; graph: WorkflowNode[] | null }>(`/api/v1/workflow-runs/${id}`),
-  attention: () =>
-    request<{ items: AttentionItem[]; total: number }>("/api/v1/attention?limit=100"),
+    request<{ run: WorkflowRun; jobs: Job[]; graph: WorkflowNode[] | null }>(`/api/v1/workflow-runs/${id}`),
+  attention: (q = "") =>
+    request<{ items: AttentionItem[]; total: number }>(
+      `/api/v1/attention?limit=100&q=${encodeURIComponent(q)}`,
+    ),
   syncRepos: () => request<unknown>("/api/v1/setup/sync-repos", { method: "POST" }),
   systemStatus: () => request<Record<string, unknown>>("/api/v1/system/status"),
   settings: () => request<SettingsResponse>("/api/v1/settings"),

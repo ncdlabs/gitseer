@@ -1,3 +1,6 @@
+import { useIsTerminalTheme } from "../../hooks/useIsTerminalTheme";
+import { asciiStackedGrid, seriesGlyph } from "../../lib/asciiGraphics";
+
 export type ChartSeries = {
   key: string;
   label: string;
@@ -78,6 +81,7 @@ export function StackedAreaChart({
   series,
   empty = "No data in this range.",
 }: Props) {
+  const terminal = useIsTerminalTheme();
   const descId = `${title.replace(/\s+/g, "-").toLowerCase()}-desc`;
   const hasData =
     data.length > 0 &&
@@ -90,6 +94,62 @@ export function StackedAreaChart({
           <h3 className="chart__title">{title}</h3>
         </div>
         <p className="chart__empty muted">{empty}</p>
+      </div>
+    );
+  }
+
+  if (terminal) {
+    const glyphs = series.map((s, i) => ({ key: s.key, glyph: seriesGlyph(i) }));
+    const lines = asciiStackedGrid(data, glyphs, 8);
+    const first = formatXLabel(String(data[0][xKey]));
+    const last = formatXLabel(String(data[data.length - 1][xKey]));
+    const axisPad = Math.max(0, data.length - first.length - last.length);
+    return (
+      <div className="chart chart--ascii">
+        <div className="chart__header">
+          <h3 className="chart__title">{title}</h3>
+          <ul className="chart__legend" aria-hidden="true">
+            {series.map((s, i) => (
+              <li key={s.key} className="chart__legend-item mono">
+                <span className="chart__swatch chart__swatch--ascii">{seriesGlyph(i)}</span>
+                {s.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <pre className="chart__ascii mono" role="img" aria-labelledby={descId}>
+          <span className="visually-hidden" id={descId}>
+            {description ||
+              `${title}: stacked daily counts for ${series.map((s) => s.label).join(", ")}.`}
+          </span>
+          {`${lines.join("\n")}\n${first}${" ".repeat(axisPad)}${last}`}
+        </pre>
+        <details className="chart__fallback">
+          <summary>Data table</summary>
+          <table>
+            <caption className="visually-hidden">{title}</caption>
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                {series.map((s) => (
+                  <th key={s.key} scope="col">
+                    {s.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row) => (
+                <tr key={String(row[xKey])}>
+                  <th scope="row">{String(row[xKey])}</th>
+                  {series.map((s) => (
+                    <td key={s.key}>{Number(row[s.key]) || 0}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
       </div>
     );
   }

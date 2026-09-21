@@ -1,14 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, type UIConfig } from "../api/client";
+import { Brand } from "../components/Brand";
 
 type Props = { onLoggedIn: () => void };
-
-type UIConfig = {
-  base_path?: string;
-  oauth_enabled?: boolean;
-  bootstrap_enabled?: boolean;
-  csrf_token?: string;
-};
 
 type ConfigState = "loading" | "ready" | "error";
 
@@ -24,6 +18,10 @@ export function LoginPage({ onLoggedIn }: Props) {
       .uiConfig()
       .then((cfg) => {
         setUI(cfg);
+        // Local npm start only: ui-config includes the bootstrap password when allow_skip_setup is on.
+        if (cfg.allow_skip_setup && cfg.dev_bootstrap_password) {
+          setPassword(cfg.dev_bootstrap_password);
+        }
         setConfigState("ready");
       })
       .catch(() => {
@@ -55,9 +53,7 @@ export function LoginPage({ onLoggedIn }: Props) {
     <div className="login">
       <div className="login__compose">
         <div className="login__brand">
-          <h1>
-            Gitea <span className="brand__mark">Lens</span>
-          </h1>
+          <Brand variant="logo" className="login__logo" />
           <p className="muted">CI/CD and PR operations for your Gitea instance.</p>
         </div>
 
@@ -86,7 +82,7 @@ export function LoginPage({ onLoggedIn }: Props) {
                 />
                 {error && <p className="error">{error}</p>}
                 <button className="btn" disabled={loading || !password} type="submit">
-                  {loading ? "Signing in…" : "Bootstrap sign-in"}
+                  {loading ? "Signing In…" : "Bootstrap Sign-In"}
                 </button>
               </form>
             </>

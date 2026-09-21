@@ -312,6 +312,26 @@ func TestStatsAllowlistAndOK(t *testing.T) {
 	if success != 1 {
 		t.Fatalf("success runs=%d", success)
 	}
+
+	nowReq := httptest.NewRequest(http.MethodGet, "/api/v1/stats?days=0", nil)
+	for _, c := range cookies {
+		nowReq.AddCookie(c)
+	}
+	nowRec := httptest.NewRecorder()
+	r.ServeHTTP(nowRec, nowReq)
+	if nowRec.Code != http.StatusOK {
+		t.Fatalf("now status=%d body=%s", nowRec.Code, nowRec.Body.String())
+	}
+	var nowPayload models.StatsReport
+	if err := json.Unmarshal(nowRec.Body.Bytes(), &nowPayload); err != nil {
+		t.Fatal(err)
+	}
+	if nowPayload.Days != 0 || nowPayload.Since != "" || len(nowPayload.RunsByDay) != 0 || len(nowPayload.PRsByDay) != 0 {
+		t.Fatalf("now snapshot payload = %+v", nowPayload)
+	}
+	if nowPayload.RunDuration != nil || len(nowPayload.RunConclusions) != 0 {
+		t.Fatalf("now snapshot should omit historical series, got %+v", nowPayload)
+	}
 }
 
 func TestSettingsGetAndPut(t *testing.T) {
@@ -451,5 +471,110 @@ func TestSettingsIntegrationSecretsNotLeaked(t *testing.T) {
 	}
 	if got.SetupCompleted {
 		t.Fatal("setup should be incomplete")
+	}
+}
+
+func TestListActiveWorkflowRuns(t *testing.T) {
+	h, st, authsvc := setupAPI(t)
+	ctx := context.Background()
+	inst, err := st.UpsertInstanceByURL(ctx, "test", "https://git.example.com", "1.26.0", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 9, Owner: "acme", Name: "widgets", FullName: "acme/widgets", DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeRun, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 1, Name: "ci-active", Status: models.StatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertJob(ctx, repo.ID, activeRun.ID, models.Job{
+		ExternalID: 101, Name: "build", Status: models.StatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 2, Name: "ci-done", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 3, Name: "ci-waiting", Status: models.StatusWaiting,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = waiting
+
+	r := chi.NewRouter()
+	h.Routes(r)
+
+	loginBody, _ := json.Marshal(map[string]string{"password": "test-pass"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/bootstrap/login", bytes.NewReader(loginBody))
+	probe := httptest.NewRecorder()
+	csrf, err := authsvc.IssueCSRFToken(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range probe.Result().Cookies() {
+		loginReq.AddCookie(c)
+	}
+	loginReq.Header.Set(auth.CSRFHeaderName, csrf)
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginRec.Code, loginRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflow-runs/active", nil)
+	for _, c := range loginRec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Items []struct {
+			Run  models.WorkflowRun `json:"run"`
+			Jobs []models.Job       `json:"jobs"`
+		} `json:"items"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Total != 2 || len(payload.Items) != 2 {
+		t.Fatalf("payload=%+v", payload)
+	}
+	foundActive := false
+	for _, item := range payload.Items {
+		if item.Run.Status == models.StatusCompleted {
+			t.Fatalf("completed run in active list: %+v", item.Run)
+		}
+		if item.Jobs == nil {
+			t.Fatal("jobs must be [] not null")
+		}
+		if item.Run.ID == activeRun.ID {
+			foundActive = true
+			if len(item.Jobs) != 1 || item.Jobs[0].Name != "build" {
+				t.Fatalf("active jobs=%+v", item.Jobs)
+			}
+		}
+		if item.Run.ID == waiting.ID && len(item.Jobs) != 0 {
+			t.Fatalf("waiting run should have empty jobs, got %+v", item.Jobs)
+		}
+	}
+	if !foundActive {
+		t.Fatal("expected active run with jobs")
 	}
 }

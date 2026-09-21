@@ -1,14 +1,21 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { AttentionCards } from "../components/AttentionCards";
-import { ViewModeToggle } from "../components/ViewModeToggle";
+import { ListControls } from "../components/ListControls";
 import { useViewMode } from "../hooks/useViewMode";
 
 export function AttentionPage() {
   const { mode, setMode } = useViewMode();
-  const q = useQuery({ queryKey: ["attention"], queryFn: api.attention });
-  if (q.isLoading) return <div className="loading">Loading attention…</div>;
+  const [filter, setFilter] = useState("");
+  const q = useQuery({
+    queryKey: ["attention", filter],
+    queryFn: () => api.attention(filter),
+    placeholderData: keepPreviousData,
+  });
+  if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading attention…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
+  const empty = filter ? "No attention items match this filter." : "Nothing needs attention.";
   return (
     <>
       <div className="topbar">
@@ -18,9 +25,16 @@ export function AttentionPage() {
             Prioritized operational items. Open an item for Lens detail or Gitea.
           </p>
         </div>
-        <ViewModeToggle mode={mode} onMode={setMode} />
+        <ListControls
+          mode={mode}
+          onMode={setMode}
+          filter={filter}
+          onFilter={setFilter}
+          filterPlaceholder="Filter attention…"
+          filterLabel="Filter attention"
+        />
       </div>
-      <AttentionCards items={q.data?.items} empty="Nothing needs attention." mode={mode} />
+      <AttentionCards items={q.data?.items} empty={empty} mode={mode} />
     </>
   );
 }

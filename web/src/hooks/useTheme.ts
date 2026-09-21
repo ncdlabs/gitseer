@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type Theme = "light" | "dark" | "gruvbox" | "system";
+export type Theme = "light" | "dark" | "gruvbox" | "terminal" | "system";
 
 export type ThemeOption = {
   id: Theme;
@@ -12,16 +12,17 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
   { id: "gruvbox", label: "Gruvbox" },
+  { id: "terminal", label: "Terminal" },
 ];
 
 const THEME_KEY = "lens-theme";
 const MANUAL_KEY = "lens-theme-manual";
 
 function isTheme(v: string | null | undefined): v is Theme {
-  return v === "light" || v === "dark" || v === "gruvbox" || v === "system";
+  return v === "light" || v === "dark" || v === "gruvbox" || v === "terminal" || v === "system";
 }
 
-function resolveTheme(theme: Theme, prefersDark: boolean): "light" | "dark" | "gruvbox" {
+function resolveTheme(theme: Theme, prefersDark: boolean): Exclude<Theme, "system"> {
   if (theme === "system") return prefersDark ? "dark" : "light";
   return theme;
 }

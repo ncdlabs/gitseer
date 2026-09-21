@@ -49,6 +49,9 @@ if [[ -z "${LENS_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
 fi
 export LENS_AUTH_BOOTSTRAP_PASSWORD
 
+# Local npm start only: let bootstrap admins skip the first-run setup wizard.
+export LENS_ALLOW_SKIP_SETUP="${LENS_ALLOW_SKIP_SETUP:-true}"
+
 resolve_config() {
   if [[ -n "${LENS_CONFIG:-}" ]]; then
     echo "$LENS_CONFIG"

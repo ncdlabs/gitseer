@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -117,8 +118,18 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		} else {
 			csrf, _ = authsvc.IssueCSRFToken(w)
 		}
-		fmt.Fprintf(w, `{"base_path":%q,"oauth_enabled":%v,"bootstrap_enabled":%v,"csrf_token":%q}`,
-			prefix, authsvc.OAuthEnabled(), cfg.Auth.BootstrapPassword != "", csrf)
+		payload := map[string]any{
+			"base_path":         prefix,
+			"oauth_enabled":     authsvc.OAuthEnabled(),
+			"bootstrap_enabled": cfg.Auth.BootstrapPassword != "",
+			"allow_skip_setup":  cfg.Dev.AllowSkipSetup,
+			"csrf_token":        csrf,
+		}
+		// Local npm start only (LENS_ALLOW_SKIP_SETUP): prefill login with the bootstrap password.
+		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" {
+			payload["dev_bootstrap_password"] = cfg.Auth.BootstrapPassword
+		}
+		_ = json.NewEncoder(w).Encode(payload)
 	})
 
 	apiHandler.Routes(r)

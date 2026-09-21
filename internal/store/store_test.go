@@ -366,14 +366,14 @@ func TestSummaryTimeRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+	oldFail, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
 		ExternalID: 10, Name: "old-fail", Status: models.StatusCompleted, Conclusion: models.ConclusionFailure,
 		StartedAt: &old, CompletedAt: &old,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+	recentFail, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
 		ExternalID: 11, Name: "recent-fail", Status: models.StatusCompleted, Conclusion: models.ConclusionFailure,
 		StartedAt: &recent, CompletedAt: &recent,
 	})
@@ -390,7 +390,7 @@ func TestSummaryTimeRange(t *testing.T) {
 
 	_, err = st.UpsertAttention(ctx, models.AttentionItem{
 		InstanceID: inst.ID, RepoID: repo.ID, Type: "workflow_failure", Severity: "critical",
-		EntityType: "workflow_run", EntityID: 1, Title: "fail", Fingerprint: "fp-recent",
+		EntityType: "workflow_run", EntityID: recentFail.ID, Title: "fail", Fingerprint: "fp-recent",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -398,22 +398,22 @@ func TestSummaryTimeRange(t *testing.T) {
 	_, err = db.ExecContext(ctx, `
 INSERT INTO attention_items (
   instance_id, repo_id, type, severity, entity_type, entity_id, title, metadata_json, fingerprint, opened_at, resolved_at, updated_at
-) VALUES (?, ?, 'workflow_failure', 'critical', 'workflow_run', 2, 'old fail', '{}', 'fp-old', ?, NULL, ?)`,
-		inst.ID, repo.ID, old.Format(time.RFC3339Nano), old.Format(time.RFC3339Nano))
+) VALUES (?, ?, 'workflow_failure', 'critical', 'workflow_run', ?, 'old fail', '{}', 'fp-old', ?, ?, ?)`,
+		inst.ID, repo.ID, oldFail.ID, old.Format(time.RFC3339Nano), old.Format(time.RFC3339Nano), old.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	all, err := st.Summary(ctx, 0, true, nil)
+	all, err := st.Summary(ctx, 0, true, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all.Repositories != 1 || all.OpenPRs != 2 || all.Attention != 2 || all.FailedRuns != 2 || all.RunningRuns != 1 {
+	if all.Repositories != 1 || all.OpenPRs != 2 || all.Attention != 1 || all.FailedRuns != 2 || all.RunningRuns != 1 {
 		t.Fatalf("all-time summary = %+v", all)
 	}
 
 	since7 := now.AddDate(0, 0, -7)
-	week, err := st.Summary(ctx, 0, true, &since7)
+	week, err := st.Summary(ctx, 0, true, &since7, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,6 +425,21 @@ INSERT INTO attention_items (
 	}
 	if week.Since == "" {
 		t.Fatal("expected since timestamp")
+	}
+
+	snap, err := st.Summary(ctx, 0, true, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Repositories != 1 || snap.OpenPRs != 2 || snap.Attention != 1 || snap.RunningRuns != 1 {
+		t.Fatalf("snapshot summary = %+v", snap)
+	}
+	// Snapshot failed runs only count failures with open attention, not historical volume.
+	if snap.FailedRuns != 1 {
+		t.Fatalf("snapshot failed_runs = %d, want 1 (attention-linked only)", snap.FailedRuns)
+	}
+	if snap.Since != "" {
+		t.Fatalf("snapshot should omit since, got %q", snap.Since)
 	}
 }
 
@@ -532,7 +547,7 @@ INSERT INTO attention_items (
 	}
 
 	since := day0.AddDate(0, 0, -7)
-	rep, err := st.StatsReport(ctx, 0, true, since)
+	rep, err := st.StatsReport(ctx, 0, true, since, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -682,7 +697,7 @@ func TestStatsReportAuthzScope(t *testing.T) {
 	}
 
 	since := now.AddDate(0, 0, -7)
-	rep, err := st.StatsReport(ctx, user.ID, false, since)
+	rep, err := st.StatsReport(ctx, user.ID, false, since, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,7 +736,7 @@ func TestStatsReportAuthzScope(t *testing.T) {
 	}
 
 	// bootstrap sees both repos
-	all, err := st.StatsReport(ctx, 0, true, since)
+	all, err := st.StatsReport(ctx, 0, true, since, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,5 +747,108 @@ func TestStatsReportAuthzScope(t *testing.T) {
 	if allFail != 2 {
 		t.Fatalf("bootstrap failures=%d want 2", allFail)
 	}
+}
+
+func TestListWorkflowRunsStatusesAndJobsByRunIDs(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "runs-active.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceByURL(ctx, "lab", "https://git.example.com", "1.25.5", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 1, Owner: "org", Name: "repo", FullName: "org/repo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queued, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 1, Name: "ci-queued", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 2, Name: "ci-running", Status: models.StatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 3, Name: "ci-done", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	active, total, err := st.ListWorkflowRuns(ctx, store.ListRunsOpts{
+		BootstrapAll: true,
+		Statuses:     []string{models.StatusQueued, models.StatusWaiting, models.StatusRunning},
+		Limit:        50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(active) != 2 {
+		t.Fatalf("active total=%d len=%d", total, len(active))
+	}
+	for _, run := range active {
+		if run.Status == models.StatusCompleted {
+			t.Fatalf("completed run leaked: %+v", run)
+		}
+	}
+
+	single, total, err := st.ListWorkflowRuns(ctx, store.ListRunsOpts{
+		BootstrapAll: true, Status: models.StatusCompleted, Limit: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(single) != 1 || single[0].Name != "ci-done" {
+		t.Fatalf("single status filter: total=%d items=%+v", total, single)
+	}
+
+	empty, err := st.ListJobsByRunIDs(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty runIDs: map=%v err=%v", empty, err)
+	}
+
+	jobA, err := st.UpsertJob(ctx, repo.ID, queued.ID, models.Job{
+		ExternalID: 10, Name: "job-a", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobB, err := st.UpsertJob(ctx, repo.ID, running.ID, models.Job{
+		ExternalID: 11, Name: "job-b", Status: models.StatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertJob(ctx, repo.ID, running.ID, models.Job{
+		ExternalID: 12, Name: "job-c", Status: models.StatusWaiting,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byRun, err := st.ListJobsByRunIDs(ctx, []int64{queued.ID, running.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byRun[queued.ID]) != 1 || byRun[queued.ID][0].ID != jobA.ID {
+		t.Fatalf("queued jobs=%+v", byRun[queued.ID])
+	}
+	if len(byRun[running.ID]) != 2 {
+		t.Fatalf("running jobs=%+v", byRun[running.ID])
+	}
+	_ = jobB
 }
 

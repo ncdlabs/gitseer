@@ -23,6 +23,13 @@ type Config struct {
 	UI        UIConfig        `yaml:"ui"`
 	Log       LogConfig       `yaml:"log"`
 	Retention RetentionConfig `yaml:"retention"`
+	Dev       DevConfig       `yaml:"dev"`
+}
+
+// DevConfig holds local-development-only toggles. Never enable in production.
+type DevConfig struct {
+	// AllowSkipSetup exposes a Skip Setup control in the wizard (npm run start sets this).
+	AllowSkipSetup bool `yaml:"allow_skip_setup"`
 }
 
 type ServerConfig struct {
@@ -414,6 +421,9 @@ func applyEnv(cfg *Config) error {
 		return err
 	}
 	if err := setInt(&cfg.Retention.AttentionDays, "LENS_RETENTION_ATTENTION_DAYS"); err != nil {
+		return err
+	}
+	if err := setBool(&cfg.Dev.AllowSkipSetup, "LENS_ALLOW_SKIP_SETUP"); err != nil {
 		return err
 	}
 	return nil

@@ -5,6 +5,7 @@ import { api, setUnauthorizedHandler, type User } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { useTheme } from "./hooks/useTheme";
 import { AttentionPage } from "./pages/AttentionPage";
+import { ActionsPopoutPage } from "./pages/ActionsPopoutPage";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { PipelineDetailPage, PipelinesPage } from "./pages/PipelinesPage";
@@ -101,19 +102,27 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
   }
 
   return (
-    <AppShell user={user} theme={theme} onTheme={setTheme} onLogout={onLogout} onSync={syncNow} syncing={syncing}>
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/attention" element={<AttentionPage />} />
-        <Route path="/repositories" element={<RepositoriesPage />} />
-        <Route path="/pull-requests" element={<PullRequestsPage />} />
-        <Route path="/pipelines" element={<PipelinesPage />} />
-        <Route path="/pipelines/:id" element={<PipelineDetailPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/setup" element={<Navigate to="/" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AppShell>
+    <Routes>
+      <Route path="/actions-popout" element={<ActionsPopoutPage />} />
+      <Route
+        path="*"
+        element={
+          <AppShell user={user} theme={theme} onTheme={setTheme} onLogout={onLogout} onSync={syncNow} syncing={syncing}>
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/attention" element={<AttentionPage />} />
+              <Route path="/repositories" element={<RepositoriesPage />} />
+              <Route path="/pull-requests" element={<PullRequestsPage />} />
+              <Route path="/pipelines" element={<PipelinesPage />} />
+              <Route path="/pipelines/:id" element={<PipelineDetailPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/setup" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppShell>
+        }
+      />
+    </Routes>
   );
 }
 

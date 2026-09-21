@@ -1,8 +1,9 @@
 import { Fragment, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, repoLabel, safeExternalHref, type WorkflowNode, type WorkflowRun } from "../api/client";
-import { ViewModeToggle } from "../components/ViewModeToggle";
+import { ExpandCollapseControls } from "../components/ExpandCollapseControls";
+import { ListControls } from "../components/ListControls";
 import { WorkflowDAG } from "../components/WorkflowDAG";
 import { useViewMode } from "../hooks/useViewMode";
 
@@ -92,17 +93,32 @@ function RunList({ runs }: { runs: WorkflowRun[] }) {
 
 export function PipelinesPage() {
   const { mode, setMode } = useViewMode();
-  const q = useQuery({ queryKey: ["runs"], queryFn: api.workflowRuns });
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const q = useQuery({
+    queryKey: ["runs", filter],
+    queryFn: () => api.workflowRuns(filter),
+    placeholderData: keepPreviousData,
+  });
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
   const groups = useMemo(() => groupByAction(q.data?.items ?? []), [q.data?.items]);
 
-  if (q.isLoading) return <div className="loading">Loading pipelines…</div>;
+  if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pipelines…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
 
   const toggle = (key: string) => {
-    setOpenKey((cur) => (cur === key ? null : key));
+    setOpenKeys((cur) => {
+      const next = new Set(cur);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
+  const allOpen = groups.length > 0 && groups.every((group) => openKeys.has(group.key));
+  const anyOpen = groups.some((group) => openKeys.has(group.key));
+  const expandAll = () => setOpenKeys(new Set(groups.map((group) => group.key)));
+  const collapseAll = () => setOpenKeys(new Set());
+  const empty = filter ? "No pipelines match this filter." : "No workflow runs indexed yet.";
 
   return (
     <>
@@ -113,14 +129,30 @@ export function PipelinesPage() {
             Workflow actions grouped across accessible repositories. Expand an action to see individual runs.
           </p>
         </div>
-        <ViewModeToggle mode={mode} onMode={setMode} />
+        <ListControls
+          mode={mode}
+          onMode={setMode}
+          filter={filter}
+          onFilter={setFilter}
+          filterPlaceholder="Filter pipelines…"
+          filterLabel="Filter pipelines"
+        >
+          {groups.length > 0 && (
+            <ExpandCollapseControls
+              onExpandAll={expandAll}
+              onCollapseAll={collapseAll}
+              canExpandAll={!allOpen}
+              canCollapseAll={anyOpen}
+            />
+          )}
+        </ListControls>
       </div>
       {groups.length === 0 ? (
-        <div className="empty">No workflow runs indexed yet.</div>
+        <div className="empty">{empty}</div>
       ) : mode === "cards" ? (
         <div className="item-grid item-grid--actions">
           {groups.map((group) => {
-            const open = openKey === group.key;
+            const open = openKeys.has(group.key);
             return (
               <div
                 key={group.key}
@@ -165,7 +197,7 @@ export function PipelinesPage() {
             </thead>
             <tbody>
               {groups.map((group) => {
-                const open = openKey === group.key;
+                const open = openKeys.has(group.key);
                 return (
                   <Fragment key={group.key}>
                     <tr className={open ? "is-open" : undefined}>
@@ -225,7 +257,7 @@ export function PipelineDetailPage() {
 
   const jobStatus = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const job of (q.data?.jobs as Array<{ name: string; status: string; conclusion: string }> | undefined) || []) {
+    for (const job of q.data?.jobs || []) {
       map[job.name] = job.conclusion || job.status;
     }
     return map;
@@ -267,7 +299,7 @@ export function PipelineDetailPage() {
             <tr><th>Job</th><th>Status</th><th>Logs</th></tr>
           </thead>
           <tbody>
-            {(jobs as Array<{ id: number; name: string; status: string; conclusion: string }>).map((job) => (
+            {jobs.map((job) => (
               <tr key={job.id}>
                 <td>{job.name}</td>
                 <td><span className={`badge ${job.conclusion || job.status}`}>{job.conclusion || job.status}</span></td>
@@ -276,7 +308,7 @@ export function PipelineDetailPage() {
                 </td>
               </tr>
             ))}
-            {(jobs as unknown[]).length === 0 && (
+            {jobs.length === 0 && (
               <tr><td colSpan={3} className="empty">No jobs for this run.</td></tr>
             )}
           </tbody>

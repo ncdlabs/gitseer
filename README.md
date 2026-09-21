@@ -12,7 +12,7 @@ Built and maintained by **[ncdLabs](https://ncdlabs.com)**.
 
 ## Features
 
-- **Dashboard** — time-scoped summary and trends (1 / 7 / 30 / 90 days)
+- **Dashboard** — time-scoped summary and trends (Now / 1 / 7 / 30 / 90 days)
 - **Attention** — discrete rules for CI failures, review waits, long-running runs, merge conflicts, and more
 - **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
 - **Setup wizard** — Connect → Validate → Finish (webhook + OAuth app helpers)

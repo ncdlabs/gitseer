@@ -112,6 +112,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}", h.getRepository)
 		r.With(h.requireAuth).Get("/pull-requests", h.listPRs)
 		r.With(h.requireAuth).Get("/workflow-runs", h.listRuns)
+		r.With(h.requireAuth).Get("/workflow-runs/active", h.listActiveRuns)
 		r.With(h.requireAuth).Get("/workflow-runs/{id}", h.getRun)
 		r.With(h.requireAuth).Get("/jobs/{id}", h.getJob)
 		r.With(h.requireAuth).Get("/jobs/{id}/logs", h.getJobLogs)
@@ -827,27 +828,41 @@ func (h *Handler) syncRepos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// summaryDaysAllowlist is the set of dashboard range presets (default 7).
-var summaryDaysAllowlist = map[int]struct{}{1: {}, 7: {}, 30: {}, 90: {}}
+// summaryDaysAllowlist is the set of dashboard range presets (default 0 = Now).
+// 0 = "Now": current snapshot with no historical lookback.
+var summaryDaysAllowlist = map[int]struct{}{0: {}, 1: {}, 7: {}, 30: {}, 90: {}}
+
+var errSummaryDaysAllowlist = errors.New("days must be one of 0, 1, 7, 30, 90")
+
+func parseSummaryDays(raw string) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("days must be an integer")
+	}
+	if _, ok := summaryDaysAllowlist[parsed]; !ok {
+		return 0, errSummaryDaysAllowlist
+	}
+	return parsed, nil
+}
 
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	user := userFromCtx(r.Context())
 	sc := h.scope(user)
-	days := 7
-	if raw := strings.TrimSpace(r.URL.Query().Get("days")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "days must be an integer")
-			return
-		}
-		if _, ok := summaryDaysAllowlist[parsed]; !ok {
-			writeError(w, http.StatusBadRequest, "days must be one of 1, 7, 30, 90")
-			return
-		}
-		days = parsed
+	days, err := parseSummaryDays(r.URL.Query().Get("days"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	since := time.Now().UTC().AddDate(0, 0, -days)
-	sum, err := h.store.Summary(r.Context(), sc.UserID, sc.BootstrapAll, &since)
+	snapshot := days == 0
+	var sincePtr *time.Time
+	if !snapshot {
+		since := time.Now().UTC().AddDate(0, 0, -days)
+		sincePtr = &since
+	}
+	sum, err := h.store.Summary(r.Context(), sc.UserID, sc.BootstrapAll, sincePtr, snapshot)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -859,21 +874,17 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 	user := userFromCtx(r.Context())
 	sc := h.scope(user)
-	days := 7
-	if raw := strings.TrimSpace(r.URL.Query().Get("days")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "days must be an integer")
-			return
-		}
-		if _, ok := summaryDaysAllowlist[parsed]; !ok {
-			writeError(w, http.StatusBadRequest, "days must be one of 1, 7, 30, 90")
-			return
-		}
-		days = parsed
+	days, err := parseSummaryDays(r.URL.Query().Get("days"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	since := time.Now().UTC().AddDate(0, 0, -days)
-	rep, err := h.store.StatsReport(r.Context(), sc.UserID, sc.BootstrapAll, since)
+	snapshot := days == 0
+	since := time.Now().UTC()
+	if !snapshot {
+		since = since.AddDate(0, 0, -days)
+	}
+	rep, err := h.store.StatsReport(r.Context(), sc.UserID, sc.BootstrapAll, since, snapshot)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -891,7 +902,7 @@ func (h *Handler) listAttention(w http.ResponseWriter, r *http.Request) {
 	limit = limitOr(limit, 50)
 	items, total, err := h.store.ListAttention(r.Context(), store.ListAttentionOpts{
 		UserID: sc.UserID, BootstrapAll: sc.BootstrapAll, Severity: q.Get("severity"),
-		Type: q.Get("type"), OpenOnly: q.Get("resolved") != "1", Limit: limit, Offset: offset,
+		Type: q.Get("type"), Query: q.Get("q"), OpenOnly: q.Get("resolved") != "1", Limit: limit, Offset: offset,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -983,6 +994,42 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 		items = []models.WorkflowRun{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
+}
+
+func (h *Handler) listActiveRuns(w http.ResponseWriter, r *http.Request) {
+	user := userFromCtx(r.Context())
+	sc := h.scope(user)
+	runs, total, err := h.store.ListWorkflowRuns(r.Context(), store.ListRunsOpts{
+		UserID: sc.UserID, BootstrapAll: sc.BootstrapAll,
+		Statuses: []string{models.StatusQueued, models.StatusWaiting, models.StatusRunning},
+		Limit:    50,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	runIDs := make([]int64, len(runs))
+	for i, run := range runs {
+		runIDs[i] = run.ID
+	}
+	jobsByRun, err := h.store.ListJobsByRunIDs(r.Context(), runIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	type activeItem struct {
+		Run  models.WorkflowRun `json:"run"`
+		Jobs []models.Job       `json:"jobs"`
+	}
+	items := make([]activeItem, 0, len(runs))
+	for _, run := range runs {
+		jobs := jobsByRun[run.ID]
+		if jobs == nil {
+			jobs = []models.Job{}
+		}
+		items = append(items, activeItem{Run: run, Jobs: jobs})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
 }
 
 func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {

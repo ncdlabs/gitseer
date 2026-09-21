@@ -84,7 +84,7 @@ func RefreshGauges(ctx context.Context, st *store.Store) {
 	if st == nil {
 		return
 	}
-	sum, err := st.Summary(ctx, 0, true, nil)
+	sum, err := st.Summary(ctx, 0, true, nil, false)
 	if err != nil || sum == nil {
 		return
 	}

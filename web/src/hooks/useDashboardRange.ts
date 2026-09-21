@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
-export const DASHBOARD_RANGE_OPTIONS = [1, 7, 30, 90] as const;
+export const DASHBOARD_RANGE_OPTIONS = [0, 1, 7, 30, 90] as const;
 export type DashboardRangeDays = (typeof DASHBOARD_RANGE_OPTIONS)[number];
 
 const STORAGE_KEY = "lens-dashboard-range-days";
-export const DEFAULT_DASHBOARD_RANGE_DAYS: DashboardRangeDays = 7;
+export const DEFAULT_DASHBOARD_RANGE_DAYS: DashboardRangeDays = 0;
 
 function isRangeDays(n: number): n is DashboardRangeDays {
   return (DASHBOARD_RANGE_OPTIONS as readonly number[]).includes(n);

@@ -35,13 +35,14 @@ Base path: `/api/v1` unless noted. JSON request/response. Session cookie auth un
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/summary?days=` | Allowlist 1/7/30/90; default 7 |
-| GET | `/stats?days=` | Same allowlist; day series field `day` |
-| GET | `/attention` | Attention items |
+| GET | `/summary?days=` | Allowlist 0/1/7/30/90 (`0` = Now snapshot); default 0 |
+| GET | `/stats?days=` | Same allowlist; `0` = current-state breakdowns only; day series field `day` |
+| GET | `/attention` | `q`, severity, type, limit |
 | GET | `/repositories` | `q`, `limit` |
 | GET | `/repositories/{owner}/{repo}` | One repo |
 | GET | `/pull-requests` | e.g. `state=open` |
 | GET | `/workflow-runs` | Run list |
+| GET | `/workflow-runs/active` | In-flight runs (`queued`/`waiting`/`running`) with jobs |
 | GET | `/workflow-runs/{id}` | Run + jobs + graph |
 | GET | `/jobs/{id}` | Job |
 | GET | `/jobs/{id}/logs` | On-demand logs |
@@ -67,4 +68,4 @@ Series include repository/PR/run gauges, webhook counters, sync histograms, and 
 
 ## UI config
 
-The SPA also loads `/api/v1/ui-config` for CSRF issuance and client bootstrap (see `web/src/api/client.ts`).
+The SPA also loads `/api/v1/ui-config` for CSRF issuance and client bootstrap (see `web/src/api/client.ts`). Fields: `base_path`, `oauth_enabled`, `bootstrap_enabled`, `allow_skip_setup` (true only when `dev.allow_skip_setup` / `LENS_ALLOW_SKIP_SETUP` is set — local `npm run start`), `dev_bootstrap_password` (only when `allow_skip_setup` is true — login prefill), `csrf_token`.

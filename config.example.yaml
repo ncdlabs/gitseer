@@ -46,3 +46,8 @@ retention:
   runs_days: 90
   webhooks_days: 30
   attention_days: 180
+
+# Local development only (npm run start sets LENS_ALLOW_SKIP_SETUP=true).
+# Never enable in production/k3s.
+# dev:
+#   allow_skip_setup: true

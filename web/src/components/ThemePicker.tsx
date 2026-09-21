@@ -1,12 +1,29 @@
 import type { Theme } from "../hooks/useTheme";
 import { THEME_OPTIONS } from "../hooks/useTheme";
+import { useIsTerminalTheme } from "../hooks/useIsTerminalTheme";
 
 type Props = {
   theme: Theme;
   onTheme: (t: Theme) => void;
 };
 
-function ThemeIcon({ id }: { id: Theme }) {
+const ASCII_THEME: Record<Theme, string> = {
+  system: "auto",
+  light: "lt",
+  dark: "dk",
+  gruvbox: "gv",
+  terminal: "trm",
+};
+
+function ThemeIcon({ id, ascii }: { id: Theme; ascii: boolean }) {
+  if (ascii) {
+    return (
+      <span className="ascii-glyph ascii-glyph--theme" aria-hidden="true">
+        {ASCII_THEME[id]}
+      </span>
+    );
+  }
+
   const common = {
     width: 18,
     height: 18,
@@ -50,10 +67,18 @@ function ThemeIcon({ id }: { id: Theme }) {
           <circle cx="15.5" cy="14" r="1.5" fill="#8ec07c" stroke="none" />
         </svg>
       );
+    case "terminal":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M7 10l3 2-3 2M12 14h5" stroke="#39ff14" />
+        </svg>
+      );
   }
 }
 
 export function ThemePicker({ theme, onTheme }: Props) {
+  const ascii = useIsTerminalTheme();
   return (
     <div className="theme-picker" role="radiogroup" aria-label="Color theme">
       {THEME_OPTIONS.map((opt) => {
@@ -69,7 +94,7 @@ export function ThemePicker({ theme, onTheme }: Props) {
             title={opt.label}
             onClick={() => onTheme(opt.id)}
           >
-            <ThemeIcon id={opt.id} />
+            <ThemeIcon id={opt.id} ascii={ascii} />
           </button>
         );
       })}

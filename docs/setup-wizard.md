@@ -2,6 +2,8 @@
 
 Shown at `/setup` for bootstrap admins when `setup_completed` is false (gated in the SPA). Other users do not drive setup.
 
+**Local skip:** When `dev.allow_skip_setup` / `LENS_ALLOW_SKIP_SETUP=true` (set automatically by `npm run start`), the wizard shows **Skip Setup** in the top bar. That marks setup complete without Connect/Validate/Finish. Do not enable in production.
+
 ## Steps
 
 ### 1. Connect
