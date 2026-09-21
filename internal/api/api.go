@@ -102,6 +102,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/test-connection", h.setupTestConnection)
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/check-gitea-url", h.setupCheckGiteaURL)
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/create-webhook", h.setupCreateWebhook)
+		r.With(h.requireAuth, h.requireCSRF).Post("/setup/create-oauth", h.setupCreateOAuth)
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/complete", h.setupComplete)
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/sync-repos", h.syncRepos)
 		r.With(h.requireAuth).Get("/summary", h.summary)
@@ -590,13 +591,114 @@ func (h *Handler) setupTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delivery := h.webhookDeliveryURL()
-	probe, err := client.ProbeConnection(r.Context(), delivery)
+	redirectURI := h.auth.RedirectURI()
+	probe, err := client.ProbeConnection(r.Context(), delivery, redirectURI)
 	if err != nil {
 		h.log.Error("setup test-connection", "err", err)
 		writeError(w, http.StatusBadGateway, "connection probe failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, probe)
+}
+
+type setupOAuthBody struct {
+	GiteaURL                 string `json:"gitea_url"`
+	GiteaToken               string `json:"gitea_token"`
+	GiteaAllowPrivateNetwork *bool  `json:"gitea_allow_private_network"`
+	Create                   bool   `json:"create"` // true = create/update on Gitea
+	OAuthClientID            string `json:"oauth_client_id"`
+	OAuthClientSecret        string `json:"oauth_client_secret"`
+}
+
+func (h *Handler) setupCreateOAuth(w http.ResponseWriter, r *http.Request) {
+	user := userFromCtx(r.Context())
+	if user == nil || !user.IsBootstrapAdmin {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if h.settings == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings unavailable")
+		return
+	}
+	var body setupOAuthBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	redirectURI := h.auth.RedirectURI()
+	if redirectURI == "" || strings.HasPrefix(redirectURI, "/api/") {
+		writeError(w, http.StatusBadRequest, "Lens public URL (server.external_url) is required to build the OAuth redirect URI")
+		return
+	}
+
+	integ := h.effectiveIntegration()
+	allowPrivate := integ.AllowPrivateNetwork
+	if body.GiteaAllowPrivateNetwork != nil {
+		allowPrivate = *body.GiteaAllowPrivateNetwork
+	}
+	giteaURL := strings.TrimSpace(body.GiteaURL)
+	if giteaURL == "" {
+		giteaURL = integ.URL
+	}
+	token := strings.TrimSpace(body.GiteaToken)
+
+	clientID := strings.TrimSpace(body.OAuthClientID)
+	clientSecret := strings.TrimSpace(body.OAuthClientSecret)
+	created := false
+	updated := false
+
+	if body.Create {
+		client, err := h.setupClientFromBody(setupTestConnectionBody{
+			GiteaURL:                 body.GiteaURL,
+			GiteaToken:               body.GiteaToken,
+			GiteaAllowPrivateNetwork: body.GiteaAllowPrivateNetwork,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		app, wasCreated, err := client.EnsureOAuthApplication(r.Context(), gitea.DefaultOAuthAppName, redirectURI)
+		if err != nil {
+			h.log.Error("setup create-oauth", "err", err)
+			writeError(w, http.StatusBadGateway, "failed to create OAuth application: "+err.Error())
+			return
+		}
+		created = wasCreated
+		updated = !wasCreated
+		clientID = app.ClientID
+		clientSecret = app.ClientSecret
+	} else {
+		if clientID == "" || clientSecret == "" {
+			writeError(w, http.StatusBadRequest, "oauth_client_id and oauth_client_secret are required when create is false")
+			return
+		}
+	}
+
+	patch := settings.IntegrationPatch{
+		GiteaURL:                   giteaURL,
+		GiteaToken:                 token,
+		GiteaAllowPrivateNetwork:   allowPrivate,
+		GiteaAllowUnsignedWebhooks: integ.AllowUnsignedWebhooks,
+		OAuthClientID:              clientID,
+		OAuthClientSecret:          clientSecret,
+	}
+	pub, err := h.settings.UpdateIntegration(r.Context(), patch)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"created":      created,
+		"updated":      updated,
+		"manual":       !body.Create,
+		"redirect_uri": redirectURI,
+		"oauth_app":    gitea.NewOAuthAppPreview(redirectURI),
+		"client_id":    clientID,
+		"integration":  pub,
+	})
 }
 
 func (h *Handler) setupCreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -671,14 +773,14 @@ func (h *Handler) setupCreateWebhook(w http.ResponseWriter, r *http.Request) {
 
 	preview := gitea.NewWebhookPreview(delivery, secret)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":            true,
-		"created":       created,
-		"updated":       body.Create && !created,
-		"manual":        !body.Create,
-		"hook_id":       hookID(hook),
-		"webhook":       preview,
-		"integration":   pub,
-		"delivery_url":  delivery,
+		"ok":           true,
+		"created":      created,
+		"updated":      body.Create && !created,
+		"manual":       !body.Create,
+		"hook_id":      hookID(hook),
+		"webhook":      preview,
+		"integration":  pub,
+		"delivery_url": delivery,
 	})
 }
 

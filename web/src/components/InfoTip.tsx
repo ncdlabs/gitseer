@@ -15,6 +15,7 @@ export function InfoTip({ label, children }: Props) {
     <button
       type="button"
       className="info-tip"
+      tabIndex={-1}
       aria-label={label}
       onClick={stopLabelActivation}
       onMouseDown={stopLabelActivation}

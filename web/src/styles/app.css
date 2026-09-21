@@ -618,6 +618,11 @@ tbody tr:hover td {
   font-size: var(--font-size-xs);
   color: var(--danger);
 }
+.settings-form__field > .settings-form__hint,
+.settings-form__field > .settings-form__error,
+.settings-form__field > .settings-form__saved {
+  padding-left: 0.85rem;
+}
 .settings-form__field input[aria-invalid="true"],
 .settings-form__field .password-input:has(input[aria-invalid="true"]) input {
   border-color: var(--danger);
@@ -722,6 +727,14 @@ tbody tr:hover td {
   padding-top: var(--space-4);
   border-top: 1px solid var(--line);
 }
+/* Pin Back/Cancel to the left; primary cluster stays rightmost. */
+.settings-form__actions-back,
+.modal__actions-back {
+  margin-right: auto;
+}
+.setup-wizard .settings-form__actions > .btn:first-child:not(.primary) {
+  margin-right: auto;
+}
 .settings-form__saved {
   margin: 0;
   font-size: var(--font-size-sm);
@@ -736,8 +749,9 @@ tbody tr:hover td {
 /* —— Setup wizard —— */
 .setup-wizard {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
   padding: var(--space-4);
   background: var(--bg);
   box-sizing: border-box;
@@ -747,12 +761,14 @@ tbody tr:hover td {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  margin-block: auto;
+  align-self: center;
   padding: var(--space-6);
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: 0 6px 16px color-mix(in srgb, var(--ink) 8%, transparent);
-  max-height: calc(100vh - 2 * var(--space-4));
+  max-height: calc(100vh - 2 * var(--space-4) - 3.5rem);
   overflow-y: auto;
   box-sizing: border-box;
 }
@@ -766,6 +782,8 @@ tbody tr:hover td {
   justify-content: space-between;
   align-items: baseline;
   gap: var(--space-4);
+  flex-shrink: 0;
+  width: 100%;
 }
 .setup-wizard__brand {
   margin: 0;
@@ -789,8 +807,6 @@ tbody tr:hover td {
   font-size: var(--font-size-sm);
   line-height: 1.3;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 0.15em;
 }
 .setup-wizard__logout:hover {
   color: var(--accent);
@@ -913,6 +929,9 @@ tbody tr:hover td {
 .setup-wizard__connect-col .password-input {
   max-width: none;
 }
+.setup-wizard__connect-col .settings-form__check {
+  padding-left: 0.85rem;
+}
 @media (max-width: 40rem) {
   .setup-wizard__connect-row {
     grid-template-columns: 1fr;
@@ -976,6 +995,48 @@ tbody tr:hover td {
   padding-top: var(--space-3);
   border-top: 1px solid var(--line);
   flex-shrink: 0;
+}
+.oauth-confirm-summary {
+  margin: 0 0 var(--space-3);
+}
+.oauth-confirm-summary__list {
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.oauth-confirm-summary__list > div {
+  display: grid;
+  gap: var(--space-1);
+}
+.oauth-confirm-summary__list dt {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.oauth-confirm-summary__list dd {
+  margin: 0;
+}
+.oauth-manual {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+.oauth-manual__steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: var(--space-2);
+}
+.oauth-manual__steps li {
+  line-height: 1.45;
+}
+.oauth-manual__redirect {
+  display: block;
+  margin-top: var(--space-2);
+  word-break: break-all;
 }
 .probe-groups {
   display: grid;
@@ -1461,7 +1522,6 @@ td.empty {
   }
   .setup-wizard {
     padding: var(--space-3);
-    align-items: stretch;
   }
   .setup-wizard__dialog {
     width: 100%;

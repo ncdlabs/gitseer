@@ -37,14 +37,16 @@ const (
 
 // ProbeResult is the full test-connection outcome.
 type ProbeResult struct {
-	OK             bool                 `json:"ok"`
-	Version        string               `json:"version"`
-	Login          string               `json:"login,omitempty"`
-	IsAdmin        bool                 `json:"is_admin"`
-	Checks         []ProbeCheck         `json:"checks"`
-	Capabilities   *models.Capabilities `json:"capabilities,omitempty"`
-	CanCreateHook  bool                 `json:"can_create_webhook"`
-	WebhookPreview *WebhookPreview      `json:"webhook_preview,omitempty"`
+	OK              bool                 `json:"ok"`
+	Version         string               `json:"version"`
+	Login           string               `json:"login,omitempty"`
+	IsAdmin         bool                 `json:"is_admin"`
+	Checks          []ProbeCheck         `json:"checks"`
+	Capabilities    *models.Capabilities `json:"capabilities,omitempty"`
+	CanCreateHook   bool                 `json:"can_create_webhook"`
+	CanCreateOAuth  bool                 `json:"can_create_oauth"`
+	WebhookPreview  *WebhookPreview      `json:"webhook_preview,omitempty"`
+	OAuthAppPreview *OAuthAppPreview     `json:"oauth_app_preview,omitempty"`
 }
 
 func (c *Client) displayBaseURL() string {
@@ -52,8 +54,8 @@ func (c *Client) displayBaseURL() string {
 }
 
 // ProbeConnection verifies reachability, auth, and permissions Lens needs now and for setup.
-func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL string) (*ProbeResult, error) {
-	out := &ProbeResult{Checks: make([]ProbeCheck, 0, 10)}
+func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL, oauthRedirectURI string) (*ProbeResult, error) {
+	out := &ProbeResult{Checks: make([]ProbeCheck, 0, 12)}
 	reachLabel := fmt.Sprintf("Can reach %s", c.displayBaseURL())
 
 	// Connectivity: reachability + version
@@ -83,19 +85,6 @@ func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL string)
 		ID: "authenticate", Group: GroupConnectivity, Label: "Authenticate with token", Status: ProbeOK,
 		Detail: fmt.Sprintf("Signed in as %s", user.Login),
 	})
-
-	// Connectivity: Lens public URL (webhook delivery target)
-	if webhookDeliveryURL == "" {
-		out.Checks = append(out.Checks, ProbeCheck{
-			ID: "webhook_url", Group: GroupConnectivity, Label: "Lens public URL", Status: ProbeWarn,
-			Detail: "Lens public URL is unset; webhook delivery URL unknown",
-		})
-	} else {
-		out.Checks = append(out.Checks, ProbeCheck{
-			ID: "webhook_url", Group: GroupConnectivity, Label: "Lens public URL", Status: ProbeOK,
-			Detail: webhookDeliveryURL,
-		})
-	}
 
 	// Permissions: site administrator (system hooks + future admin APIs)
 	if admin {
@@ -235,13 +224,32 @@ func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL string)
 		})
 	}
 
+	// Permissions: OAuth2 applications API (optional — setup can skip or do manually)
+	if err := c.probeOK(ctx, http.MethodGet, "/user/applications/oauth2", nil); err != nil {
+		out.Checks = append(out.Checks, ProbeCheck{
+			ID: "oauth_apps", Group: GroupPermissions, Label: "Manage OAuth applications", Status: ProbeWarn, Detail: err.Error(),
+		})
+	} else {
+		out.CanCreateOAuth = true
+		out.Checks = append(out.Checks, ProbeCheck{
+			ID: "oauth_apps", Group: GroupPermissions, Label: "Manage OAuth applications", Status: ProbeOK,
+			Detail: "Can list OAuth2 applications via user API",
+		})
+	}
+
 	out.Capabilities = caps
 	if webhookDeliveryURL == "" {
 		out.CanCreateHook = false
 	}
+	if oauthRedirectURI == "" {
+		out.CanCreateOAuth = false
+	}
 	out.OK = allRequiredOK(out.Checks)
 	if webhookDeliveryURL != "" {
 		out.WebhookPreview = NewWebhookPreview(webhookDeliveryURL, "")
+	}
+	if oauthRedirectURI != "" {
+		out.OAuthAppPreview = NewOAuthAppPreview(oauthRedirectURI)
 	}
 	return out, nil
 }

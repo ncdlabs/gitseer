@@ -1,21 +1,26 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
-  type IntegrationPatch,
   type IntegrationPublic,
+  type OAuthAppPreview,
   type ProbeCheck,
   type TestConnectionResponse,
   type WebhookPreview,
 } from "../api/client";
 import { InfoTip } from "../components/InfoTip";
 import { PasswordInput } from "../components/PasswordInput";
-import { ConnectionCheckModal, WebhookConfirmModal } from "../components/SetupConnectionModals";
+import {
+  ConnectionCheckModal,
+  OAuthConfirmModal,
+  WebhookConfirmModal,
+  type OAuthModalPhase,
+  type WebhookModalPhase,
+} from "../components/SetupConnectionModals";
 
 type FieldKey =
   | "gitea_url"
   | "gitea_token"
-  | "gitea_webhook_secret"
   | "gitea_allow_private_network"
   | "server_external_url";
 type FieldErrors = Partial<Record<FieldKey, string>>;
@@ -23,7 +28,6 @@ type FieldErrors = Partial<Record<FieldKey, string>>;
 const FIELD_INPUT_IDS: Record<FieldKey, string> = {
   gitea_url: "wiz_gitea_url",
   gitea_token: "wiz_gitea_token",
-  gitea_webhook_secret: "wiz_webhook_secret",
   gitea_allow_private_network: "wiz_allow_private_network",
   server_external_url: "wiz_server_external_url",
 };
@@ -74,22 +78,7 @@ function validateConnectFields(
   return { ok: !firstInvalid, errors, firstInvalid };
 }
 
-function validateWebhookFields(
-  draft: Draft,
-  secretConfigured: boolean,
-): { ok: boolean; errors: FieldErrors; firstInvalid?: FieldKey } {
-  const errors: FieldErrors = {};
-  if (!draft.gitea_webhook_secret.trim() && !secretConfigured && !draft.gitea_allow_unsigned_webhooks) {
-    errors.gitea_webhook_secret = "Provide a webhook HMAC secret, or allow unsigned webhooks.";
-  }
-  return {
-    ok: !errors.gitea_webhook_secret,
-    errors,
-    firstInvalid: errors.gitea_webhook_secret ? "gitea_webhook_secret" : undefined,
-  };
-}
-
-type Step = "connect" | "webhooks" | "oauth" | "validate" | "finish";
+type Step = "connect" | "validate" | "finish";
 
 const STEPS: { id: Step; label: string; description: string }[] = [
   {
@@ -99,22 +88,10 @@ const STEPS: { id: Step; label: string; description: string }[] = [
       "Point Lens at your Gitea instance and set the public Lens URL Gitea will use for webhooks and OAuth callbacks.",
   },
   {
-    id: "webhooks",
-    label: "Webhooks",
-    description:
-      "Configure the shared HMAC secret so Gitea can deliver live workflow and pull-request events to Lens securely.",
-  },
-  {
-    id: "oauth",
-    label: "OAuth",
-    description:
-      "Add Gitea OAuth application credentials so users can sign in with their Gitea accounts instead of only the bootstrap admin.",
-  },
-  {
     id: "validate",
     label: "Validate",
     description:
-      "Test that Lens can reach Gitea with the saved URL and token before you mark setup complete.",
+      "Lens checks connectivity and token permissions, then walks you through the system webhook and OAuth app.",
   },
   {
     id: "finish",
@@ -167,31 +144,18 @@ function draftFromIntegration(
   };
 }
 
-function toPatch(draft: Draft): IntegrationPatch {
-  return {
-    gitea_url: draft.gitea_url.trim(),
-    gitea_token: draft.gitea_token,
-    gitea_webhook_secret: draft.gitea_webhook_secret,
-    gitea_allow_private_network: draft.gitea_allow_private_network,
-    gitea_allow_unsigned_webhooks: draft.gitea_allow_unsigned_webhooks,
-    oauth_client_id: draft.oauth_client_id.trim(),
-    oauth_client_secret: draft.oauth_client_secret,
-  };
-}
-
 type Props = {
   onComplete: () => void;
   onLogout: () => void;
-  login: string;
 };
 
-export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
+export function SetupWizardPage({ onComplete, onLogout }: Props) {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const [step, setStep] = useState<Step>("connect");
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [hydrated, setHydrated] = useState(false);
-  const [busy, setBusy] = useState<"save" | "test" | "webhook" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "webhook" | "oauth" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
@@ -203,9 +167,18 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
   const [checkRows, setCheckRows] = useState<ProbeCheck[] | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [webhookOpen, setWebhookOpen] = useState(false);
+  const [webhookPhase, setWebhookPhase] = useState<WebhookModalPhase>("confirm");
   const [webhookPreview, setWebhookPreview] = useState<WebhookPreview | null>(null);
   const [webhookError, setWebhookError] = useState<string | null>(null);
   const [canCreateWebhook, setCanCreateWebhook] = useState(false);
+  const [oauthOpen, setOauthOpen] = useState(false);
+  const [oauthPhase, setOauthPhase] = useState<OAuthModalPhase>("confirm");
+  const [oauthPreview, setOauthPreview] = useState<OAuthAppPreview | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [canCreateOAuth, setCanCreateOAuth] = useState(false);
+  const [oauthClientId, setOauthClientId] = useState("");
+  const [oauthClientSecret, setOauthClientSecret] = useState("");
+  const validateProbeStarted = useRef(false);
 
   useEffect(() => {
     if (!settingsQuery.data || hydrated) return;
@@ -218,7 +191,6 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
 
   const stepIndex = useMemo(() => STEPS.findIndex((s) => s.id === step), [step]);
   const currentStep = STEPS[stepIndex] ?? STEPS[0];
-  const redirectURI = String(settingsQuery.data?.status?.oauth_redirect_uri ?? "—");
   const integ = settingsQuery.data?.integration;
   const isBusy = busy !== null;
   const checksPassed = Boolean(testResult?.ok);
@@ -232,20 +204,12 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
     setDraft((prev) => ({ ...prev, [key]: value }));
     setError(null);
     setTestResult(null);
-    if (key === "gitea_url" || key === "gitea_token" || key === "gitea_webhook_secret" || key === "server_external_url") {
+    if (key === "gitea_url" || key === "gitea_token" || key === "server_external_url") {
       const field = key as FieldKey;
       setFieldErrors((prev) => {
         if (!prev[field]) return prev;
         const next = { ...prev };
         delete next[field];
-        return next;
-      });
-    }
-    if (key === "gitea_allow_unsigned_webhooks") {
-      setFieldErrors((prev) => {
-        if (!prev.gitea_webhook_secret) return prev;
-        const next = { ...prev };
-        delete next.gitea_webhook_secret;
         return next;
       });
     }
@@ -324,13 +288,6 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
     return !firstInvalid;
   }
 
-  function runWebhookValidation(): boolean {
-    const result = validateWebhookFields(draft, Boolean(integ?.gitea_webhook_secret_configured));
-    setFieldErrors(result.errors);
-    if (!result.ok && result.firstInvalid) focusField(result.firstInvalid);
-    return result.ok;
-  }
-
   function connectionBody() {
     const body: {
       gitea_url?: string;
@@ -342,18 +299,6 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
     };
     if (draft.gitea_token) body.gitea_token = draft.gitea_token;
     return body;
-  }
-
-  async function saveIntegration() {
-    const res = await api.updateSettings({ integration: toPatch(draft) });
-    setDraft((prev) => ({
-      ...draftFromIntegration(res.integration, prev.server_external_url),
-      gitea_token: prev.gitea_token,
-      gitea_webhook_secret: prev.gitea_webhook_secret,
-      oauth_client_secret: prev.oauth_client_secret,
-    }));
-    await queryClient.invalidateQueries({ queryKey: ["settings"] });
-    return res;
   }
 
   async function savePublicURL() {
@@ -382,33 +327,16 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
     e.preventDefault();
     if (isBusy) return;
     setError(null);
+    if (step !== "connect") return;
+    if (!runConnectValidation()) return;
+    setBusy("save");
     try {
-      if (step === "connect") {
-        if (!runConnectValidation()) return;
-        if (!checksPassed) {
-          setError("Run Test Connection and pass all required checks before continuing.");
-          return;
-        }
-        if (!testResult?.webhook_preview) {
-          setError("Lens public URL is required to install the webhook.");
-          return;
-        }
-        setWebhookPreview(testResult.webhook_preview);
-        setCanCreateWebhook(Boolean(testResult.can_create_webhook));
-        setWebhookError(null);
-        setWebhookOpen(true);
-        return;
-      }
-      setBusy("save");
-      if (step === "webhooks") {
-        if (!runWebhookValidation()) return;
-        await saveIntegration();
-        setStep("oauth");
-      } else if (step === "oauth") {
-        await saveIntegration();
-        setStep("validate");
-        setTestResult(null);
-      }
+      await savePublicURL();
+      setTestResult(null);
+      setCheckRows(null);
+      setCheckError(null);
+      validateProbeStarted.current = false;
+      setStep("validate");
     } catch (err) {
       setError(err instanceof Error ? err.message : "save failed");
     } finally {
@@ -416,33 +344,43 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
     }
   }
 
+  function openWebhookFlow() {
+    if (!testResult?.ok || !testResult.webhook_preview) return;
+    setCheckOpen(false);
+    setWebhookPreview(testResult.webhook_preview);
+    setCanCreateWebhook(Boolean(testResult.can_create_webhook));
+    setWebhookError(null);
+    setWebhookPhase("confirm");
+    setWebhookOpen(true);
+  }
+
   async function runTest() {
     if (isBusy) return;
     setError(null);
-    if (!runConnectValidation()) return;
+    if (!runConnectValidation()) {
+      setStep("connect");
+      return;
+    }
 
     setBusy("test");
+    setCheckRunning(true);
+    setCheckOpen(true);
     setTestResult(null);
     setCheckError(null);
     setCheckRows(null);
     try {
-      if (step !== "connect") {
-        await saveIntegration();
-      } else {
-        await savePublicURL();
-      }
-      // Run probe before opening the modal so private-network / URL errors stay on the form.
       const res = await api.testConnection(connectionBody());
       setCheckRows(res.checks ?? []);
       setTestResult(res);
-      setCheckOpen(true);
       if (!res.ok) {
         setCheckError("One or more required checks failed.");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "connection test failed";
+      setCheckOpen(false);
       if (isPrivateNetworkMessage(msg)) {
         setFieldErrors((prev) => ({ ...prev, gitea_url: msg }));
+        setStep("connect");
         focusField("gitea_url");
       } else {
         setError(msg);
@@ -453,6 +391,36 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
     }
   }
 
+  useEffect(() => {
+    if (step !== "validate") {
+      validateProbeStarted.current = false;
+      return;
+    }
+    if (validateProbeStarted.current || checksPassed) return;
+    validateProbeStarted.current = true;
+    void runTest();
+    // Probe once per visit to validate; runTest reads latest draft/state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per validate entry
+  }, [step]);
+
+  function openOAuthModal() {
+    setOauthPreview(
+      testResult?.oauth_app_preview ?? {
+        name: "Gitea Lens",
+        redirect_uri: String(settingsQuery.data?.status?.oauth_redirect_uri ?? ""),
+        confidential_client: true,
+        gitea_settings_path: "/user/settings/applications",
+        gitea_admin_apps_path: "/admin/applications",
+      },
+    );
+    setCanCreateOAuth(Boolean(testResult?.can_create_oauth));
+    setOauthError(null);
+    setOauthPhase("confirm");
+    setOauthClientId("");
+    setOauthClientSecret("");
+    setOauthOpen(true);
+  }
+
   async function finishWebhook(create: boolean) {
     if (busy === "webhook") return;
     setBusy("webhook");
@@ -461,20 +429,84 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
       const res = await api.createWebhook({ ...connectionBody(), create });
       const secret = res.webhook?.config?.secret ?? "";
       applyWebhookResult(secret, res.integration);
+      if (res.webhook) setWebhookPreview(res.webhook);
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setWebhookOpen(false);
       setCheckOpen(false);
       if (create) {
-        // Secret is stored; skip manual webhooks entry.
-        setStep("oauth");
+        setWebhookOpen(false);
+        setWebhookPhase("confirm");
+        openOAuthModal();
       } else {
-        setStep("webhooks");
+        // Secret stored; show copy payload so the admin can add the hook in Gitea.
+        setWebhookPhase("manual");
       }
     } catch (err) {
       setWebhookError(err instanceof Error ? err.message : "webhook setup failed");
     } finally {
       setBusy(null);
     }
+  }
+
+  function continueAfterWebhook() {
+    setWebhookOpen(false);
+    setWebhookPhase("confirm");
+    setCheckOpen(false);
+    openOAuthModal();
+  }
+
+  function backFromWebhook() {
+    setWebhookOpen(false);
+    setWebhookPhase("confirm");
+    setWebhookError(null);
+    setStep("validate");
+  }
+
+  function applyOAuthResult(clientId: string, integPublic: IntegrationPublic) {
+    setDraft((prev) => ({
+      ...draftFromIntegration(integPublic, prev.server_external_url),
+      gitea_token: prev.gitea_token,
+      gitea_webhook_secret: prev.gitea_webhook_secret,
+      oauth_client_id: clientId,
+      oauth_client_secret: "",
+    }));
+  }
+
+  async function finishOAuth(create: boolean) {
+    if (busy === "oauth") return;
+    setBusy("oauth");
+    setOauthError(null);
+    try {
+      const res = await api.createOAuth({
+        ...connectionBody(),
+        create,
+        oauth_client_id: create ? undefined : oauthClientId.trim(),
+        oauth_client_secret: create ? undefined : oauthClientSecret,
+      });
+      applyOAuthResult(res.client_id, res.integration);
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      setOauthOpen(false);
+      setOauthPhase("confirm");
+      setStep("finish");
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : "oauth setup failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function skipOAuth() {
+    setOauthOpen(false);
+    setOauthPhase("confirm");
+    setOauthError(null);
+    setStep("finish");
+  }
+
+  function backFromOAuth() {
+    setOauthOpen(false);
+    setOauthPhase("confirm");
+    setOauthError(null);
+    setWebhookPhase("confirm");
+    setWebhookOpen(true);
   }
 
   async function finish() {
@@ -512,6 +544,14 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
   if (settingsQuery.isLoading && !hydrated) {
     return (
       <div className="setup-wizard">
+        <div className="setup-wizard__top">
+          <p className="setup-wizard__brand">
+            Gitea <span className="brand__mark">Lens</span>
+          </p>
+          <button className="setup-wizard__logout" type="button" onClick={onLogout}>
+            Log Out
+          </button>
+        </div>
         <div className="setup-wizard__dialog" role="dialog" aria-modal="true" aria-busy="true">
           <div className="loading">Loading setup…</div>
         </div>
@@ -522,6 +562,14 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
   if (settingsQuery.isError) {
     return (
       <div className="setup-wizard">
+        <div className="setup-wizard__top">
+          <p className="setup-wizard__brand">
+            Gitea <span className="brand__mark">Lens</span>
+          </p>
+          <button className="setup-wizard__logout" type="button" onClick={onLogout}>
+            Log Out
+          </button>
+        </div>
         <div className="setup-wizard__dialog" role="dialog" aria-modal="true" aria-label="Setup error">
           <div className="error">{(settingsQuery.error as Error).message}</div>
         </div>
@@ -531,6 +579,14 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
 
   return (
     <div className="setup-wizard">
+      <div className="setup-wizard__top">
+        <p className="setup-wizard__brand">
+          Gitea <span className="brand__mark">Lens</span>
+        </p>
+        <button className="setup-wizard__logout" type="button" onClick={onLogout}>
+          Log Out
+        </button>
+      </div>
       <div
         className="setup-wizard__dialog"
         role="dialog"
@@ -538,14 +594,6 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
         aria-labelledby="setup-wizard-title"
       >
       <header className="setup-wizard__header">
-        <div className="setup-wizard__top">
-          <p className="setup-wizard__brand">
-            Gitea <span className="brand__mark">Lens</span>
-          </p>
-          <button className="setup-wizard__logout" type="button" onClick={onLogout}>
-            Log Out ({login})
-          </button>
-        </div>
         <div className="setup-wizard__intro">
           <h1 id="setup-wizard-title">{currentStep.label}</h1>
           <p className="muted">{currentStep.description}</p>
@@ -582,10 +630,9 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
       </ol>
 
       <div className="settings-form">
-        {(step === "connect" || step === "webhooks" || step === "oauth") && (
+        {step === "connect" && (
           <form onSubmit={advance} noValidate>
-            {step === "connect" && (
-              <fieldset className="settings-form__section" disabled={isBusy}>
+            <fieldset className="settings-form__section" disabled={isBusy}>
                 <legend>Connect</legend>
                 <div className="setup-wizard__connect-row">
                   <div className="setup-wizard__connect-col">
@@ -701,119 +748,11 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
                     </p>
                   ) : (
                     <p id="wiz_server_external_url_hint" className="settings-form__hint">
-                      Public URL where Gitea can reach Lens (webhooks and OAuth callback). Same value as{" "}
-                      <code className="mono">server.external_url</code>.
+                      Public URL where Gitea can reach Lens (webhooks and OAuth callback).
                     </p>
                   )}
                 </div>
-              </fieldset>
-            )}
-
-            {step === "webhooks" && (
-              <fieldset className="settings-form__section" disabled={isBusy}>
-                <legend>Webhooks</legend>
-                <div className="settings-form__field">
-                  <input
-                    id="wiz_webhook_secret"
-                    type="password"
-                    value={draft.gitea_webhook_secret}
-                    onChange={(e) => setField("gitea_webhook_secret", e.target.value)}
-                    placeholder={
-                      integ?.gitea_webhook_secret_configured
-                        ? "Webhook HMAC secret (leave blank to keep)"
-                        : "Webhook HMAC secret"
-                    }
-                    aria-label="Webhook HMAC secret"
-                    autoComplete="new-password"
-                    aria-invalid={fieldErrors.gitea_webhook_secret ? true : undefined}
-                    aria-describedby={
-                      fieldErrors.gitea_webhook_secret
-                        ? "wiz_webhook_secret_error"
-                        : "wiz_webhook_secret_hint"
-                    }
-                  />
-                  {fieldErrors.gitea_webhook_secret ? (
-                    <p id="wiz_webhook_secret_error" className="settings-form__error" role="alert">
-                      {fieldErrors.gitea_webhook_secret}
-                    </p>
-                  ) : (
-                    <p id="wiz_webhook_secret_hint" className="settings-form__hint">
-                      {integ?.gitea_webhook_secret_configured
-                        ? "Secret is configured. Leave blank to keep it."
-                        : "Must match the secret on the Gitea system webhook. Create the hook under Site Administration → Webhooks."}
-                    </p>
-                  )}
-                </div>
-                {webhookPreview && (
-                  <div className="settings-form__field">
-                    <span className="settings-form__label-like">Suggested hook</span>
-                    <pre className="webhook-preview mono" tabIndex={0}>
-                      {JSON.stringify(
-                        {
-                          ...webhookPreview,
-                          config: {
-                            ...webhookPreview.config,
-                            secret: draft.gitea_webhook_secret || webhookPreview.config.secret,
-                          },
-                        },
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </div>
-                )}
-                <label className="settings-form__check">
-                  <input
-                    type="checkbox"
-                    checked={draft.gitea_allow_unsigned_webhooks}
-                    onChange={(e) => setField("gitea_allow_unsigned_webhooks", e.target.checked)}
-                  />
-                  Allow Unsigned Webhooks (Not Recommended)
-                </label>
-              </fieldset>
-            )}
-
-            {step === "oauth" && (
-              <fieldset className="settings-form__section" disabled={isBusy}>
-                <legend>OAuth</legend>
-                <div className="settings-form__field">
-                  <input
-                    id="wiz_oauth_client_id"
-                    type="text"
-                    value={draft.oauth_client_id}
-                    onChange={(e) => setField("oauth_client_id", e.target.value)}
-                    placeholder="OAuth client ID"
-                    aria-label="OAuth client ID"
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="wiz_oauth_client_secret"
-                    type="password"
-                    value={draft.oauth_client_secret}
-                    onChange={(e) => setField("oauth_client_secret", e.target.value)}
-                    placeholder={
-                      integ?.oauth_client_secret_configured
-                        ? "OAuth client secret (leave blank to keep)"
-                        : "OAuth client secret"
-                    }
-                    aria-label="OAuth client secret"
-                    autoComplete="new-password"
-                  />
-                  <p className="settings-form__hint">
-                    {integ?.oauth_client_secret_configured
-                      ? "Secret is configured. Leave blank to keep it."
-                      : "Create an OAuth application in Gitea and paste the credentials here."}
-                  </p>
-                </div>
-                <div className="settings-form__field">
-                  <span className="settings-form__label-like">Redirect URI</span>
-                  <code className="mono setup-wizard__redirect">{redirectURI}</code>
-                  <p className="settings-form__hint">Register this exact callback URL on the Gitea OAuth application.</p>
-                </div>
-              </fieldset>
-            )}
+            </fieldset>
 
             {error && (
               <p className="error" role="alert">
@@ -822,16 +761,6 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
             )}
 
             <div className="settings-form__actions">
-              {stepIndex > 0 && (
-                <button className="btn" type="button" onClick={back} disabled={isBusy}>
-                  Back
-                </button>
-              )}
-              {step === "connect" && (
-                <button className="btn" type="button" onClick={() => void runTest()} disabled={isBusy}>
-                  {busy === "test" ? "Testing…" : "Test Connection"}
-                </button>
-              )}
               <button className="btn primary" type="submit" disabled={isBusy}>
                 {busy === "save" ? "Saving…" : "Continue"}
               </button>
@@ -843,11 +772,16 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
           <div className="settings-form__section">
             <h2 className="settings-status__title">Validate Connection</h2>
             <p className="muted">
-              Re-run permission checks against the saved URL and token, then continue to finish setup.
+              {checkRunning || busy === "test"
+                ? "Running connectivity and permission checks…"
+                : checksPassed
+                  ? "Required checks passed. Continue to install the webhook and set up OAuth."
+                  : "Fix any failed checks, then retry."}
             </p>
             {checksPassed && (
               <p className="settings-form__saved" role="status">
                 ✓ Checks passed — Gitea {testResult?.version}
+                {testResult?.login ? ` as ${testResult.login}` : ""}
               </p>
             )}
             {error && (
@@ -856,23 +790,31 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
               </p>
             )}
             <div className="settings-form__actions">
-              <button className="btn" type="button" onClick={back} disabled={isBusy}>
+              <button className="btn settings-form__actions-back" type="button" onClick={back} disabled={isBusy}>
                 Back
               </button>
-              <button className="btn" type="button" onClick={() => void runTest()} disabled={isBusy}>
-                {busy === "test" ? "Testing…" : "Test Connection"}
-              </button>
-              <button
-                className="btn primary"
-                type="button"
-                onClick={() => {
-                  setError(null);
-                  setStep("finish");
-                }}
-                disabled={isBusy || !checksPassed}
-              >
-                Continue
-              </button>
+              {!checksPassed ? (
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={() => {
+                    validateProbeStarted.current = true;
+                    void runTest();
+                  }}
+                  disabled={isBusy}
+                >
+                  {busy === "test" ? "Checking…" : "Retry Checks"}
+                </button>
+              ) : (
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={openWebhookFlow}
+                  disabled={isBusy || !testResult?.webhook_preview}
+                >
+                  Continue
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -896,7 +838,12 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
               </p>
             )}
             <div className="settings-form__actions">
-              <button className="btn" type="button" onClick={back} disabled={finishing}>
+              <button
+                className="btn settings-form__actions-back"
+                type="button"
+                onClick={back}
+                disabled={finishing}
+              >
                 Back
               </button>
               <button className="btn primary" type="button" onClick={() => void finish()} disabled={finishing}>
@@ -915,27 +862,44 @@ export function SetupWizardPage({ onComplete, onLogout, login }: Props) {
         giteaURL={draft.gitea_url}
         error={checkError}
         canContinue={checksPassed && !checkRunning}
+        closeLabel={checksPassed ? undefined : "Close"}
         onClose={() => setCheckOpen(false)}
-        onContinue={() => {
-          setCheckOpen(false);
-          if (step === "connect" && checksPassed) {
-            setWebhookPreview(testResult?.webhook_preview ?? null);
-            setCanCreateWebhook(Boolean(testResult?.can_create_webhook));
-            setWebhookError(null);
-            setWebhookOpen(true);
-          }
-        }}
+        onContinue={openWebhookFlow}
       />
 
       <WebhookConfirmModal
         open={webhookOpen}
+        phase={webhookPhase}
         preview={webhookPreview}
         busy={busy === "webhook"}
         error={webhookError}
         canCreate={canCreateWebhook}
-        onCancel={() => setWebhookOpen(false)}
+        onBack={backFromWebhook}
         onManual={() => void finishWebhook(false)}
         onCreate={() => void finishWebhook(true)}
+        onContinue={continueAfterWebhook}
+      />
+
+      <OAuthConfirmModal
+        open={oauthOpen}
+        phase={oauthPhase}
+        preview={oauthPreview}
+        giteaURL={draft.gitea_url}
+        busy={busy === "oauth"}
+        error={oauthError}
+        clientId={oauthClientId}
+        clientSecret={oauthClientSecret}
+        onClientIdChange={setOauthClientId}
+        onClientSecretChange={setOauthClientSecret}
+        onBack={backFromOAuth}
+        onManual={() => {
+          setOauthError(null);
+          setOauthPhase("manual");
+        }}
+        onCreate={() => void finishOAuth(true)}
+        onSkip={skipOAuth}
+        onContinue={() => void finishOAuth(false)}
+        canCreate={canCreateOAuth}
       />
     </div>
   );

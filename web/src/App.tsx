@@ -88,7 +88,6 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
           path="/setup"
           element={
             <SetupWizardPage
-              login={user.login}
               onLogout={onLogout}
               onComplete={() => {
                 void queryClient.invalidateQueries({ queryKey: ["settings"] });

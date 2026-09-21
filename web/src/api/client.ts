@@ -290,6 +290,14 @@ export type WebhookPreview = {
   config: Record<string, string>;
 };
 
+export type OAuthAppPreview = {
+  name: string;
+  redirect_uri: string;
+  confidential_client: boolean;
+  gitea_settings_path: string;
+  gitea_admin_apps_path: string;
+};
+
 export type TestConnectionResponse = {
   ok: boolean;
   version: string;
@@ -298,7 +306,9 @@ export type TestConnectionResponse = {
   checks: ProbeCheck[];
   capabilities?: unknown;
   can_create_webhook?: boolean;
+  can_create_oauth?: boolean;
   webhook_preview?: WebhookPreview;
+  oauth_app_preview?: OAuthAppPreview;
 };
 
 export type CreateWebhookBody = TestConnectionBody & {
@@ -314,6 +324,23 @@ export type CreateWebhookResponse = {
   webhook: WebhookPreview;
   integration: IntegrationPublic;
   delivery_url: string;
+};
+
+export type CreateOAuthBody = TestConnectionBody & {
+  create: boolean;
+  oauth_client_id?: string;
+  oauth_client_secret?: string;
+};
+
+export type CreateOAuthResponse = {
+  ok: boolean;
+  created?: boolean;
+  updated?: boolean;
+  manual?: boolean;
+  redirect_uri: string;
+  oauth_app: OAuthAppPreview;
+  client_id: string;
+  integration: IntegrationPublic;
 };
 
 export type CompleteSetupResponse = {
@@ -407,6 +434,11 @@ export const api = {
   },
   createWebhook: (body: CreateWebhookBody) =>
     request<CreateWebhookResponse>("/api/v1/setup/create-webhook", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  createOAuth: (body: CreateOAuthBody) =>
+    request<CreateOAuthResponse>("/api/v1/setup/create-oauth", {
       method: "POST",
       body: JSON.stringify(body),
     }),
