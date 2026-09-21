@@ -1,0 +1,74 @@
+replicaCount: 1
+
+image:
+  repository: git.ncdlabs.com/ncdlabs/gitea-lens
+  tag: "0.1.9"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: gitea-registry
+
+service:
+  type: ClusterIP
+  port: 8090
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+env:
+  LENS_SERVER_LISTEN: "0.0.0.0:8090"
+  LENS_SERVER_EXTERNAL_URL: "https://lens.ncdlabs.com"
+  LENS_DATABASE_PATH: "/data/lens.db"
+  LENS_GITEA_URL: "https://git.ncdlabs.com"
+  LENS_GITEA_ALLOW_PRIVATE_NETWORK: "true"
+  LENS_AUTH_PROVIDER: "gitea"
+  LENS_AUTH_COOKIE_SECURE: "true"
+  LENS_UI_INSTANCE_NAME: "Gitea Lens"
+  LENS_LOG_FORMAT: "json"
+  LENS_SYNC_RECONCILE_INTERVAL: "5m"
+  LENS_SYNC_HISTORY_DAYS: "30"
+
+secret:
+  create: false
+  existingSecret: gitea-lens
+  # When create=true, populate via --set-file / values-secret (do not commit):
+  giteaToken: ""
+  bootstrapPassword: ""
+  oauthClientId: ""
+  oauthClientSecret: ""
+  webhookSecret: ""
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  hosts:
+    - host: lens.ncdlabs.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: gitea-lens-tls
+      hosts:
+        - lens.ncdlabs.com
+
+certificate:
+  enabled: true
+  issuerKind: ClusterIssuer
+  issuerName: letsencrypt-cloudflare-production
+  dnsNames:
+    - lens.ncdlabs.com

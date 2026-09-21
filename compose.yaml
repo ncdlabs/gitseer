@@ -1,0 +1,29 @@
+services:
+  lens:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      LENS_SERVER_LISTEN: 0.0.0.0:8090
+      LENS_DATABASE_PATH: /data/lens.db
+      LENS_GITEA_URL: ${LENS_GITEA_URL:-}
+      LENS_GITEA_TOKEN: ${LENS_GITEA_TOKEN:-}
+      # Leave empty to disable bootstrap login; set explicitly for lab/dev.
+      LENS_AUTH_BOOTSTRAP_PASSWORD: ${LENS_AUTH_BOOTSTRAP_PASSWORD:-}
+      LENS_SERVER_EXTERNAL_URL: ${LENS_SERVER_EXTERNAL_URL:-http://127.0.0.1:8090}
+      LENS_AUTH_OAUTH_CLIENT_ID: ${LENS_AUTH_OAUTH_CLIENT_ID:-}
+      LENS_AUTH_OAUTH_CLIENT_SECRET: ${LENS_AUTH_OAUTH_CLIENT_SECRET:-}
+      LENS_GITEA_ALLOW_PRIVATE_NETWORK: ${LENS_GITEA_ALLOW_PRIVATE_NETWORK:-false}
+      LENS_LOG_FORMAT: json
+    volumes:
+      - lens-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lens-data:

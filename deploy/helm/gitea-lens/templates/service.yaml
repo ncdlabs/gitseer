@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gitea-lens.fullname" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: gitea-lens
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 8090

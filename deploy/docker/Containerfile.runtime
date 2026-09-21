@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+# Runtime image for a prebuilt static binary (avoids QEMU go toolchain crashes).
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates wget \
+  && adduser -D -H -u 10001 lens
+USER lens
+WORKDIR /data
+COPY lens /usr/local/bin/lens
+EXPOSE 8090
+VOLUME ["/data"]
+ENTRYPOINT ["/usr/local/bin/lens"]
+CMD ["serve"]

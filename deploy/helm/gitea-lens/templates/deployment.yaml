@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gitea-lens.fullname" . }}
+  labels:
+    app.kubernetes.io/name: gitea-lens
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gitea-lens
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gitea-lens
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: lens
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8090
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if or .Values.secret.create .Values.secret.existingSecret }}
+            - name: LENS_GITEA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_GITEA_TOKEN
+            - name: LENS_AUTH_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_AUTH_BOOTSTRAP_PASSWORD
+            - name: LENS_AUTH_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_AUTH_OAUTH_CLIENT_ID
+            - name: LENS_AUTH_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_AUTH_OAUTH_CLIENT_SECRET
+            - name: LENS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_WEBHOOK_SECRET
+                  optional: true
+            - name: LENS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_ENCRYPTION_KEY
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "gitea-lens.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

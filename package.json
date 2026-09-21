@@ -1,0 +1,20 @@
+{
+  "name": "gitea-lens",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted CI/CD and pull-request operations console for Gitea",
+  "scripts": {
+    "start": "bash scripts/dev-start.sh",
+    "start:api": "bash -c 'cfg=\"${LENS_CONFIG:-}\"; if [ -z \"$cfg\" ]; then if [ -f config.yaml ]; then cfg=config.yaml; else cfg=config.example.yaml; fi; fi; exec go run ./cmd/lens serve --config \"$cfg\"'",
+    "start:web": "npm --prefix web run start -- --host 127.0.0.1 --port ${LENS_WEB_PORT:-5173} --strictPort",
+    "stop": "bash scripts/dev-stop.sh",
+    "restart": "npm run stop && npm run start",
+    "build:web": "npm --prefix web run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

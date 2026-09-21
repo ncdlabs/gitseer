@@ -1,0 +1,14 @@
+bin/
+build/
+.build-image/
+data/
+node_modules/
+web/node_modules/
+web/dist/
+*.db
+*.db-*
+.DS_Store
+config.yaml
+install.yaml
+.env
+coverage/

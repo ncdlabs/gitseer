@@ -1,0 +1,38 @@
+replicaCount: 1
+image:
+  repository: git.ncdlabs.com/ncdlabs/gitea-lens
+  tag: latest
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+service:
+  type: ClusterIP
+  port: 8090
+persistence:
+  enabled: true
+  size: 5Gi
+nodeSelector: {}
+tolerations: []
+resources: {}
+env:
+  LENS_SERVER_LISTEN: 0.0.0.0:8090
+  LENS_DATABASE_PATH: /data/lens.db
+secret:
+  create: false
+  existingSecret: ""
+  giteaToken: ""
+  bootstrapPassword: ""
+  oauthClientId: ""
+  oauthClientSecret: ""
+  webhookSecret: ""
+  encryptionKey: ""
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  hosts: []
+  tls: []
+certificate:
+  enabled: false
+  issuerKind: ClusterIssuer
+  issuerName: letsencrypt-cloudflare-production
+  dnsNames: []

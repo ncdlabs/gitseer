@@ -1,0 +1,48 @@
+server:
+  listen: 0.0.0.0:8090
+  # Public URL of Lens (required for OAuth redirect_uri). Include subpath if used.
+  # external_url: https://git.example.com/lens
+
+database:
+  driver: sqlite
+  path: data/lens.db
+  # driver: postgres
+  # dsn: postgres://lens:lens@localhost:5432/lens?sslmode=disable
+
+gitea:
+  url: ""
+  # token via LENS_GITEA_TOKEN or token_file
+  # token_file: /run/secrets/gitea_token
+  # webhook_secret via LENS_WEBHOOK_SECRET (required when url is set unless allow_unsigned_webhooks)
+  # webhook_secret: ""
+  # allow_unsigned_webhooks: false  # lab only; LENS_WEBHOOK_ALLOW_UNSIGNED=true
+  allow_private_network: false
+
+sync:
+  reconcile_interval: 5m
+  history_days: 30
+
+attention:
+  long_running_after: 2h
+
+auth:
+  provider: gitea
+  # OAuth app on Gitea (Application type: public client recommended for PKCE)
+  # oauth_client_id: ""
+  # oauth_client_secret: ""   # optional for public PKCE clients; required for confidential
+  # bootstrap_password via LENS_AUTH_BOOTSTRAP_PASSWORD (dev / first-run fallback; leave empty to disable)
+  # encryption_key via LENS_ENCRYPTION_KEY (32+ chars; encrypts OAuth tokens at rest)
+  session_ttl: 24h
+  acl_refresh_interval: 6h
+
+ui:
+  instance_name: Gitea Lens
+
+log:
+  level: info
+  format: json
+
+retention:
+  runs_days: 90
+  webhooks_days: 30
+  attention_days: 180

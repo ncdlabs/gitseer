@@ -1,0 +1,37 @@
+# Example installer config for scripts/install.sh
+#
+# Interactive:
+#   ./scripts/install.sh --config install.example.yaml
+#
+# Non-interactive (no prompts; fails if required values are missing):
+#   ./scripts/install.sh --config install.yaml --non-interactive
+#
+# Process environment (LENS_*) and an existing .env override file values.
+# Copy to install.yaml and fill in secrets — install.yaml is gitignored via
+# the same pattern as config.yaml if you name secrets carefully; prefer .env.
+
+method: compose          # compose | binary
+start: true              # start after install
+install_ui: false        # run `lens install-ui` against Gitea custom templates
+# gitea_custom_path: /var/lib/gitea/custom
+
+gitea_url: https://git.example.com
+gitea_token: ""          # required — or set LENS_GITEA_TOKEN
+server_external_url: http://127.0.0.1:8090
+listen: 0.0.0.0:8090
+
+oauth_client_id: ""      # recommended — Gitea OAuth app client ID
+oauth_client_secret: ""  # optional for public PKCE clients
+bootstrap_password: ""   # required — or set LENS_AUTH_BOOTSTRAP_PASSWORD
+
+allow_private_network: false
+instance_name: Gitea Lens
+
+database_driver: sqlite
+# database_path: data/lens.db          # binary default
+# database_path: /data/lens.db         # compose default
+# database_driver: postgres
+# database_dsn: postgres://lens:lens@localhost:5432/lens?sslmode=disable
+
+# You can also point --config at a lens config.yaml (server/gitea/auth shape);
+# secrets still come from this file, .env, or LENS_* environment variables.
