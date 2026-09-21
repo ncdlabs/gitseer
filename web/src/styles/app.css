@@ -2560,8 +2560,9 @@ td.empty {
   .app-shell, .app-shell--rail-collapsed { grid-template-columns: 1fr; }
   .sidebar { position: static; padding: 14px; gap: 12px; height: auto; max-height: none; overflow: visible; }
   .rail-toggle { display: none; }
-  .brand { padding: 0; margin: 0; width: auto; align-items: center; }
+  .brand { padding: 0; margin: 0; width: auto; align-items: center; gap: 6px; }
   .brand__img--mark { width: 48px; height: 48px; }
+  .brand__wordmark { width: auto; font-size: 1.25rem; padding: 0; text-align: left; }
   .nav { overflow: visible; }
   .nav__label { display: none; }
   .nav a { min-height: 34px; padding: 0 9px; box-shadow: none; }
@@ -2598,8 +2599,6 @@ td.empty {
   }
   .content { padding: 0 18px 30px; }
   .app-header { min-height: 58px; gap: 12px; }
-  .app-header__lead { gap: 12px; }
-  .brand__wordmark { font-size: 1.15rem; }
   .header-search__flyout { width: min(280px, calc(100vw - 9rem)); }
   .page-content { padding-top: 22px; }
   .metrics { gap: 9px; }
