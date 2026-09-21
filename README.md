@@ -2,93 +2,167 @@
 
 Self-hosted CI/CD and pull-request operations console for Gitea.
 
+Lens aggregates repositories, open pull requests, Gitea Actions runs, and attention items into one ops console so you can answer **what needs attention right now** without hopping repo to repo. Gitea stays the system of record; Lens syncs via API + webhooks and authenticates through Gitea OAuth (PKCE) or an optional bootstrap password.
+
 Built and maintained by **[ncdLabs](https://ncdlabs.com)**.
+
+**Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitea-lens/wiki](https://github.com/ncdlabs/gitea-lens/wiki) · **Spec:** [docs/prd-spec.md](docs/prd-spec.md)
 
 ---
 
-## Installation
+## Features
 
-The fastest path is the guided installer (Compose by default). You need a Gitea URL, a Gitea API token (for sync), and — for normal login — a Gitea OAuth app.
+- **Dashboard** — time-scoped summary and trends (1 / 7 / 30 / 90 days)
+- **Attention** — discrete rules for CI failures, review waits, long-running runs, merge conflicts, and more
+- **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
+- **Setup wizard** — Connect → Validate → Finish (webhook + OAuth app helpers)
+- **Settings** — runtime preferences and Gitea integration (DB-backed secrets are write-only)
+- **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
+- **Ops** — Prometheus `/metrics` (session-auth), retention purge, SQLite by default (Postgres experimental)
 
-### 1. Create a Gitea OAuth app
+---
 
-In Gitea: **Settings → Applications → Create OAuth2 Application**
+## Prerequisites
 
-- **Redirect URI:** `{your Lens URL}/api/v1/auth/callback`  
-  Examples: `http://127.0.0.1:8090/api/v1/auth/callback` or `https://lens.example.com/api/v1/auth/callback`
-- Prefer a **public** client (PKCE). A client secret is optional.
+| Component | Version |
+|-----------|---------|
+| Go | 1.26+ (see `go.mod`) |
+| Node.js | 22+ |
+| Gitea | ~1.25+ (Actions APIs preferred; features degrade when missing) |
+| Compose (installer default) | Podman Compose or Docker Compose |
 
-### 2. Run the installer (recommended)
+---
 
-Interactive (prompts for anything not already in the environment, `.env`, or a config file):
+## Quick start
+
+### Install with Agent
+
+Paste this prompt into your coding agent (Cursor, Codex, Claude Code, etc.). Fill in the bracketed values first, or leave them blank and let the agent ask.
+
+```text
+Install Gitea Lens from https://github.com/ncdlabs/gitea-lens on this machine.
+
+Goals:
+1. Clone the repo if needed, then run the guided installer (./scripts/install.sh or make install). Prefer Compose via Podman (`podman compose`); fall back to Docker Compose or `--method binary` if Compose is unavailable.
+2. Collect or confirm: Gitea base URL, Gitea API token (repo/PR/Actions read), Lens public URL (server.external_url), and a bootstrap admin password. OAuth client id/secret are optional — the in-app Setup wizard can create or paste them later.
+3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). Set LENS_WEBHOOK_SECRET whenever Gitea URL is set (required at startup). Use LENS_GITEA_ALLOW_PRIVATE_NETWORK=true only for private/lab Gitea URLs.
+4. Start Lens, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Connect → Validate → Finish), sign in, and click Sync now.
+5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (Gitea system webhook, OAuth redirect URI, optional `lens install-ui`).
+
+Constraints:
+- Do not commit secrets, .env, config.yaml, or install.yaml.
+- Prefer .yaml over .yml for new config files.
+- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or multi-forge setup.
+- Ask before destructive changes or removing existing services.
+
+My values (replace or leave blank to prompt me):
+- Gitea URL: [https://git.example.com]
+- Gitea token: [paste or point to a secret]
+- Lens public URL: [http://127.0.0.1:8090]
+- Bootstrap password: [generate a strong one if blank]
+- Install method: [compose | binary]
+- Private/lab Gitea network: [yes | no]
+```
+
+### Guided installer (recommended)
+
+You need a Gitea URL and API token. OAuth can be created in the setup wizard or beforehand.
 
 ```bash
 ./scripts/install.sh
 # or: make install
 ```
 
-Non-interactive from a YAML file (no prompts; fails if required values are missing):
+Non-interactive:
 
 ```bash
 cp install.example.yaml install.yaml   # fill in secrets
 ./scripts/install.sh --config install.yaml --non-interactive
 ```
 
-The installer writes gitignored `.env` + `config.yaml`, checks dependencies (Podman/Docker compose, or Go 1.22+ / Node 22+ for `--method binary`), then starts Lens.
+The installer writes gitignored `.env` + `config.yaml`, checks dependencies, then starts Lens (Compose by default; `--method binary` optional).
 
-### 3. Optional: add Lens to the Gitea UI
+Open the printed URL (default **http://127.0.0.1:8090**). If setup is incomplete, the **Setup** wizard walks Connect → Validate → Finish. After the first admin login, use **Sync now** so repositories exist before other users refresh access.
 
-Opens Lens in a **new tab** from Gitea’s nav / repo tabs (does not leave your current Gitea page):
+### Local development
 
 ```bash
-./bin/lens install-ui --custom-path /var/lib/gitea/custom --lens-url https://lens.example.com
+make deps
+npm run start          # API :8090 + Vite :5173; prints URLs + bootstrap creds
+# npm run stop | npm run restart
+make test
 ```
 
-Or pass `--install-ui --gitea-custom /var/lib/gitea/custom` to the installer.
+Default bootstrap user/password when unset: `bootstrap` / `lens-local` (prefer `config.yaml` over `config.example.yaml`; override with `LENS_CONFIG`).
 
-Remove later with `./bin/lens uninstall-ui --custom-path /var/lib/gitea/custom`.
+Production-shaped binary:
 
-### Manual Compose / source
+```bash
+make frontend && make build-go
+./bin/lens serve --config config.yaml
+```
+
+### Manual Compose
 
 ```bash
 export LENS_GITEA_URL='https://git.example.com'
 export LENS_GITEA_TOKEN='your-gitea-api-token'
+export LENS_WEBHOOK_SECRET='replace-me'          # required when URL is set
 export LENS_SERVER_EXTERNAL_URL='http://127.0.0.1:8090'
 export LENS_AUTH_OAUTH_CLIENT_ID='your-oauth-client-id'
-export LENS_AUTH_BOOTSTRAP_PASSWORD='change-me'   # first-run / lab fallback
-# export LENS_GITEA_ALLOW_PRIVATE_NETWORK=true    # only if Gitea is on a private/lab URL
+export LENS_AUTH_BOOTSTRAP_PASSWORD='change-me'  # optional first-run / lab
+# export LENS_GITEA_ALLOW_PRIVATE_NETWORK=true   # private/lab Gitea URLs
 
 podman compose -f compose.yaml up --build
-# or: make build && ./bin/lens serve --config config.example.yaml
 ```
 
-Open **http://127.0.0.1:8090** → **Continue with Gitea** (or use the bootstrap password).
+### Optional: Gitea UI links
 
-After the first admin login, click **Sync now** so repositories exist before other users refresh access.
+```bash
+./bin/lens install-ui --custom-path /var/lib/gitea/custom --lens-url https://lens.example.com
+# remove: ./bin/lens uninstall-ui --custom-path /var/lib/gitea/custom
+```
 
-More detail (Postgres, reverse-proxy / subpath, backups): [docs/install.md](docs/install.md).
+More detail: [docs/install.md](docs/install.md) · [docs/getting-started.md](docs/getting-started.md).
+
+---
+
+## Configuration
+
+Defaults live in `config.example.yaml`. Environment overrides use the `LENS_*` prefix — see [docs/configuration.md](docs/configuration.md).
+
+Important:
+
+- Set `server.external_url` to the public URL (including subpath). Lens strips only that configured prefix — not client `X-Forwarded-Prefix`.
+- When `gitea.url` is set, `LENS_WEBHOOK_SECRET` is required unless `LENS_WEBHOOK_ALLOW_UNSIGNED=true` (lab only).
+- OAuth redirect: `{external_url}/api/v1/auth/callback`. Prefer a public Gitea OAuth client (PKCE).
+- Optional `LENS_ENCRYPTION_KEY` (min 16 chars) encrypts OAuth tokens at rest.
+
+Runtime settings and Gitea integration can also be managed in the UI (`/settings`) after bootstrap login.
+
+---
+
+## Documentation
+
+| Resource | Contents |
+|----------|----------|
+| [docs/](docs/README.md) | Architecture, features, API, auth, deploy, operations |
+| [docs/install.md](docs/install.md) | Installer modes, proxy, webhooks, backup |
+| [docs/prd-spec.md](docs/prd-spec.md) | Product requirements |
+| [docs/implementation-plan.md](docs/implementation-plan.md) | Implementation direction |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow and guidelines |
+| [Wiki](https://github.com/ncdlabs/gitea-lens/wiki) | Same guides (publish after first wiki page exists) |
 
 ---
 
 ## How to contribute
 
-Contributions are welcome.
+1. Fork and branch.
+2. `make deps && make test && npm run start`
+3. Keep forge types in `internal/forge/gitea`; enforce authz server-side.
+4. Open a PR with a short summary and test notes.
 
-1. Fork the repo and create a branch.
-2. Install Go 1.22+ and Node 22+, then:
-
-   ```bash
-   make deps
-   make test
-   npm run start
-   ```
-
-   Or build the embedded binary: `make build` then `./bin/lens serve`.
-
-3. Keep changes proportional. Enforce authz server-side; keep raw Gitea types in `internal/forge/gitea`.
-4. Open a pull request with a short summary and test notes.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [docs/implementation-plan.md](docs/implementation-plan.md) for architecture direction.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/development.md).
 
 ---
 

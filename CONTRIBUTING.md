@@ -4,7 +4,7 @@ Thanks for contributing to Gitea Lens.
 
 ## Development
 
-1. Install Go 1.22+ and Node 22+.
+1. Install Go 1.26+ (see `go.mod`) and Node 22+.
 2. `make deps` (or `npm install` at the repo root, plus `cd web && npm install`).
 3. `make test`
 4. Local app: `npm run start` — prints App/API URLs and bootstrap credentials (`bootstrap` / password), opens the browser to `:5173`, Go API on `:8090`. Uses `config.yaml` when present, otherwise `config.example.yaml` (override with `LENS_CONFIG`). Default local password is `lens-local` when unset. Stop with `npm run stop`; restart with `npm run restart` (same banner + browser open).

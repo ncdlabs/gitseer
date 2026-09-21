@@ -44,8 +44,12 @@ export type WorkflowRun = {
   status: string;
   conclusion: string;
   branch: string;
+  event?: string;
   actor_login: string;
   repo_full?: string;
+  workflow_path?: string;
+  started_at?: string;
+  completed_at?: string;
   html_url: string;
 };
 

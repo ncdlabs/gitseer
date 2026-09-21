@@ -1,79 +1,204 @@
+import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, repoLabel, safeExternalHref, type WorkflowNode } from "../api/client";
-import { useMemo, useState } from "react";
+import { api, repoLabel, safeExternalHref, type WorkflowNode, type WorkflowRun } from "../api/client";
 import { ViewModeToggle } from "../components/ViewModeToggle";
 import { WorkflowDAG } from "../components/WorkflowDAG";
 import { useViewMode } from "../hooks/useViewMode";
 
+type ActionGroup = {
+  key: string;
+  name: string;
+  workflowPath: string;
+  repoFull: string;
+  latest: WorkflowRun;
+  runs: WorkflowRun[];
+};
+
+function runTime(run: WorkflowRun): number {
+  const raw = run.started_at || run.completed_at;
+  if (!raw) return run.id;
+  const t = Date.parse(raw);
+  return Number.isNaN(t) ? run.id : t;
+}
+
+function relativeAge(iso?: string) {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function actionKey(run: WorkflowRun): string {
+  const repo = run.repo_full || repoLabel(run) || "unknown";
+  const path = (run.workflow_path || "").trim() || run.name || `run-${run.id}`;
+  return `${repo}\0${path}`;
+}
+
+function groupByAction(runs: WorkflowRun[]): ActionGroup[] {
+  const buckets = new Map<string, WorkflowRun[]>();
+  for (const run of runs) {
+    const key = actionKey(run);
+    const list = buckets.get(key);
+    if (list) list.push(run);
+    else buckets.set(key, [run]);
+  }
+  const groups: ActionGroup[] = [];
+  for (const [key, list] of buckets) {
+    const sorted = [...list].sort((a, b) => runTime(b) - runTime(a));
+    const latest = sorted[0];
+    groups.push({
+      key,
+      name: latest.name || latest.workflow_path || `Action`,
+      workflowPath: latest.workflow_path || "",
+      repoFull: latest.repo_full || repoLabel(latest) || "—",
+      latest,
+      runs: sorted,
+    });
+  }
+  groups.sort((a, b) => runTime(b.latest) - runTime(a.latest));
+  return groups;
+}
+
+function statusBadge(run: WorkflowRun) {
+  const label = run.conclusion || run.status;
+  return <span className={`badge ${label}`}>{label}</span>;
+}
+
+function RunList({ runs }: { runs: WorkflowRun[] }) {
+  return (
+    <ul className="action-run-list">
+      {runs.map((run) => (
+        <li key={run.id}>
+          <Link className="action-run" to={`/pipelines/${run.id}`}>
+            <span className="action-run__status">{statusBadge(run)}</span>
+            <span className="action-run__branch mono">{run.branch || "—"}</span>
+            <span className="action-run__event muted">{run.event || "—"}</span>
+            <span className="action-run__actor muted">{run.actor_login || "—"}</span>
+            <span className="action-run__age muted">{relativeAge(run.started_at || run.completed_at) || "—"}</span>
+            <span className="action-run__cta muted">Open run →</span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function PipelinesPage() {
   const { mode, setMode } = useViewMode();
   const q = useQuery({ queryKey: ["runs"], queryFn: api.workflowRuns });
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  const groups = useMemo(() => groupByAction(q.data?.items ?? []), [q.data?.items]);
+
   if (q.isLoading) return <div className="loading">Loading pipelines…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
-  const items = q.data?.items ?? [];
+
+  const toggle = (key: string) => {
+    setOpenKey((cur) => (cur === key ? null : key));
+  };
+
   return (
     <>
       <div className="topbar">
         <div className="page-header">
           <h1>Pipelines</h1>
-          <p className="muted">Recent workflow runs across accessible repositories.</p>
+          <p className="muted">
+            Workflow actions grouped across accessible repositories. Expand an action to see individual runs.
+          </p>
         </div>
         <ViewModeToggle mode={mode} onMode={setMode} />
       </div>
-      {mode === "cards" ? (
-        items.length === 0 ? (
-          <div className="empty">No workflow runs indexed yet.</div>
-        ) : (
-          <div className="item-grid">
-            {items.map((run) => (
-              <Link key={run.id} className="item-card" to={`/pipelines/${run.id}`}>
-                <div className="item-card__meta">
-                  <span className={`badge ${run.conclusion || run.status}`}>
-                    {run.conclusion || run.status}
+      {groups.length === 0 ? (
+        <div className="empty">No workflow runs indexed yet.</div>
+      ) : mode === "cards" ? (
+        <div className="item-grid item-grid--actions">
+          {groups.map((group) => {
+            const open = openKey === group.key;
+            return (
+              <div
+                key={group.key}
+                className={`item-card item-card--action${open ? " is-open" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="action-card__toggle"
+                  aria-expanded={open}
+                  onClick={() => toggle(group.key)}
+                >
+                  <div className="item-card__meta">
+                    {statusBadge(group.latest)}
+                    <span className="item-card__age muted">
+                      {group.runs.length} run{group.runs.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="item-card__title">{group.name}</div>
+                  <div className="item-card__repo mono">{group.repoFull}</div>
+                  {group.workflowPath && group.workflowPath !== group.name && (
+                    <div className="mono muted">{group.workflowPath}</div>
+                  )}
+                  <span className="item-card__cta muted">
+                    {open ? "Hide runs" : "Show runs →"}
                   </span>
-                  <span className="mono muted">{run.branch}</span>
-                </div>
-                <div className="item-card__title">{run.name || `Run #${run.id}`}</div>
-                <div className="item-card__repo mono">{repoLabel(run)}</div>
-                <span className="item-card__cta muted">Open run →</span>
-              </Link>
-            ))}
-          </div>
-        )
+                </button>
+                {open && <RunList runs={group.runs} />}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="panel">
-          <table>
+          <table className="action-table">
             <thead>
               <tr>
-                <th>Run</th>
+                <th>Action</th>
                 <th>Repository</th>
-                <th>Status</th>
-                <th>Branch</th>
+                <th>Latest</th>
+                <th>Runs</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((run) => (
-                <tr key={run.id}>
-                  <td>
-                    <Link to={`/pipelines/${run.id}`}>{run.name || `Run #${run.id}`}</Link>
-                  </td>
-                  <td className="mono">{repoLabel(run)}</td>
-                  <td>
-                    <span className={`badge ${run.conclusion || run.status}`}>
-                      {run.conclusion || run.status}
-                    </span>
-                  </td>
-                  <td className="mono">{run.branch}</td>
-                </tr>
-              ))}
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="empty">
-                    No workflow runs indexed yet.
-                  </td>
-                </tr>
-              )}
+              {groups.map((group) => {
+                const open = openKey === group.key;
+                return (
+                  <Fragment key={group.key}>
+                    <tr className={open ? "is-open" : undefined}>
+                      <td>
+                        <button
+                          type="button"
+                          className="action-table__toggle"
+                          aria-expanded={open}
+                          onClick={() => toggle(group.key)}
+                        >
+                          <span className="action-table__chevron" aria-hidden>
+                            {open ? "▾" : "▸"}
+                          </span>
+                          <span className="action-table__name">{group.name}</span>
+                          {group.workflowPath && group.workflowPath !== group.name && (
+                            <span className="mono muted">{group.workflowPath}</span>
+                          )}
+                        </button>
+                      </td>
+                      <td className="mono">{group.repoFull}</td>
+                      <td>{statusBadge(group.latest)}</td>
+                      <td>{group.runs.length}</td>
+                    </tr>
+                    {open && (
+                      <tr className="action-table__detail">
+                        <td colSpan={4}>
+                          <RunList runs={group.runs} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -116,6 +241,10 @@ export function PipelineDetailPage() {
     <>
       <div className="topbar">
         <div className="page-header">
+          <p className="muted">
+            <Link to="/pipelines">Pipelines</Link>
+            {run.workflow_path ? ` · ${run.workflow_path}` : ""}
+          </p>
           <h1>{run.name}</h1>
           <p className="muted">
             {repoLabel(run)} · {run.branch} ·{" "}
@@ -129,7 +258,7 @@ export function PipelineDetailPage() {
         )}
       </div>
       <div className="panel panel--padded dag-panel">
-        <h2>Workflow graph</h2>
+        <h2>Workflow Graph</h2>
         <WorkflowDAG graph={(graph || []) as WorkflowNode[]} jobStatusByName={jobStatus} />
       </div>
       <div className="panel">
@@ -143,7 +272,7 @@ export function PipelineDetailPage() {
                 <td>{job.name}</td>
                 <td><span className={`badge ${job.conclusion || job.status}`}>{job.conclusion || job.status}</span></td>
                 <td>
-                  <button className="btn" type="button" onClick={() => setLogJob(job.id)}>View logs</button>
+                  <button className="btn" type="button" onClick={() => setLogJob(job.id)}>View Logs</button>
                 </td>
               </tr>
             ))}
