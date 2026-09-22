@@ -36,9 +36,16 @@ function relativeAge(iso?: string) {
   return `${days}d ago`;
 }
 
+function normalizeWorkflowPath(path?: string): string {
+  const p = (path || "").trim();
+  if (!p) return "";
+  const at = p.indexOf("@");
+  return (at >= 0 ? p.slice(0, at) : p).trim();
+}
+
 function actionKey(run: WorkflowRun): string {
   const repo = run.repo_full || repoLabel(run) || "unknown";
-  const path = (run.workflow_path || "").trim() || run.name || `run-${run.id}`;
+  const path = normalizeWorkflowPath(run.workflow_path) || (run.name || "").trim() || `run-${run.id}`;
   return `${repo}\0${path}`;
 }
 
@@ -54,10 +61,11 @@ function groupByAction(runs: WorkflowRun[]): ActionGroup[] {
   for (const [key, list] of buckets) {
     const sorted = [...list].sort((a, b) => runTime(b) - runTime(a));
     const latest = sorted[0];
+    const workflowPath = normalizeWorkflowPath(latest.workflow_path) || latest.workflow_path || "";
     groups.push({
       key,
-      name: latest.name || latest.workflow_path || `Action`,
-      workflowPath: latest.workflow_path || "",
+      name: latest.name || workflowPath || `Action`,
+      workflowPath,
       repoFull: latest.repo_full || repoLabel(latest) || "—",
       latest,
       runs: sorted,
@@ -275,7 +283,7 @@ export function PipelineDetailPage() {
         <div className="page-header">
           <p className="muted">
             <Link to="/pipelines">Pipelines</Link>
-            {run.workflow_path ? ` · ${run.workflow_path}` : ""}
+            {run.workflow_path ? ` · ${normalizeWorkflowPath(run.workflow_path) || run.workflow_path}` : ""}
           </p>
           <h1>{run.name}</h1>
           <p className="muted">

@@ -17,6 +17,7 @@ import (
 	"github.com/ncdlabs/gitea-lens/internal/forge"
 	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
 	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitea-lens/internal/workflows"
 )
 
 const defaultPageSize = 50
@@ -689,6 +690,25 @@ func (c *Client) GetJobLogs(ctx context.Context, repo models.RepoRef, jobExterna
 }
 
 func (c *Client) GetWorkflowYAML(ctx context.Context, repo models.RepoRef, path, ref string) ([]byte, error) {
+	candidates := workflows.CandidateWorkflowPaths(path)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("empty workflow path")
+	}
+	var lastErr error
+	for _, candidate := range candidates {
+		body, err := c.getRawFile(ctx, repo, candidate, ref)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("workflow yaml not found")
+	}
+	return nil, lastErr
+}
+
+func (c *Client) getRawFile(ctx context.Context, repo models.RepoRef, path, ref string) ([]byte, error) {
 	q := url.Values{}
 	if ref != "" {
 		q.Set("ref", ref)
@@ -806,6 +826,8 @@ func mapRun(r giteaRun) models.WorkflowRun {
 	if name == "" {
 		name = r.Title
 	}
+	workflowPath := workflows.NormalizeWorkflowPath(r.Path)
+	name = workflows.DisplayWorkflowName(name, r.Path)
 	st, conc := forge.NormalizeStatus(r.Status)
 	if r.Conclusion != "" {
 		conc = forge.NormalizeConclusion(r.Conclusion)
@@ -839,7 +861,7 @@ func mapRun(r giteaRun) models.WorkflowRun {
 		UpstreamConclusion: r.Conclusion,
 		ActorLogin:         actor,
 		HTMLURL:            html,
-		WorkflowPath:       r.Path,
+		WorkflowPath:       workflowPath,
 		StartedAt:          parseOptionalTime(r.CreatedAt),
 		CompletedAt:        parseOptionalTime(r.UpdatedAt),
 		RunAttempt:         attempt,

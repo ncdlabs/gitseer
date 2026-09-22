@@ -1050,16 +1050,20 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 		jobs = []models.Job{}
 	}
 	var graph any
-	if run.WorkflowPath != "" && run.CommitSHA != "" {
-		if nodesJSON, err := h.store.GetWorkflowGraph(r.Context(), run.RepoID, run.WorkflowPath, run.CommitSHA); err == nil {
+	workflowPath := workflows.NormalizeWorkflowPath(run.WorkflowPath)
+	if workflowPath == "" {
+		workflowPath = run.WorkflowPath
+	}
+	if workflowPath != "" && run.CommitSHA != "" {
+		if nodesJSON, err := h.store.GetWorkflowGraph(r.Context(), run.RepoID, workflowPath, run.CommitSHA); err == nil {
 			_ = json.Unmarshal([]byte(nodesJSON), &graph)
 		} else if client, err := h.forgeClient(); err == nil {
-			yamlBytes, err := client.GetWorkflowYAML(r.Context(), models.RepoRef{Owner: run.RepoOwner, Name: run.RepoName}, run.WorkflowPath, run.CommitSHA)
+			yamlBytes, err := client.GetWorkflowYAML(r.Context(), models.RepoRef{Owner: run.RepoOwner, Name: run.RepoName}, workflowPath, run.CommitSHA)
 			if err == nil {
 				nodes, err := workflows.ParseNeedsDAG(yamlBytes)
 				if err == nil {
 					b, _ := json.Marshal(nodes)
-					_ = h.store.UpsertWorkflowGraph(r.Context(), run.RepoID, run.WorkflowPath, run.CommitSHA, string(b))
+					_ = h.store.UpsertWorkflowGraph(r.Context(), run.RepoID, workflowPath, run.CommitSHA, string(b))
 					graph = nodes
 				}
 			}

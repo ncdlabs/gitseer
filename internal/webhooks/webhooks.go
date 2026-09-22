@@ -20,6 +20,7 @@ import (
 	"github.com/ncdlabs/gitea-lens/internal/models"
 	"github.com/ncdlabs/gitea-lens/internal/realtime"
 	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitea-lens/internal/workflows"
 )
 
 const maxBody = 2 << 20
@@ -304,7 +305,7 @@ func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 	}
 	saved, err := p.store.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
 		ExternalID:         payload.WorkflowRun.ID,
-		Name:               payload.WorkflowRun.Name,
+		Name:               workflows.DisplayWorkflowName(payload.WorkflowRun.Name, payload.WorkflowRun.Path),
 		Event:              payload.WorkflowRun.Event,
 		Branch:             payload.WorkflowRun.HeadBranch,
 		CommitSHA:          payload.WorkflowRun.HeadSHA,
@@ -313,7 +314,7 @@ func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 		UpstreamStatus:     payload.WorkflowRun.Status,
 		UpstreamConclusion: payload.WorkflowRun.Conclusion,
 		HTMLURL:            payload.WorkflowRun.HTMLURL,
-		WorkflowPath:       payload.WorkflowRun.Path,
+		WorkflowPath:       workflows.NormalizeWorkflowPath(payload.WorkflowRun.Path),
 		RunAttempt:         attempt,
 		StartedAt:          started,
 		CompletedAt:        completed,

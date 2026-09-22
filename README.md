@@ -8,6 +8,50 @@ Built and maintained by **[ncdLabs](https://ncdlabs.com)**.
 
 **Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitea-lens/wiki](https://github.com/ncdlabs/gitea-lens/wiki) · **Spec:** [docs/prd-spec.md](docs/prd-spec.md)
 
+![Gitea Lens dashboard](docs/screenshots/dashboard.png)
+
+---
+
+## Screenshots
+
+Repo names, authors, and local account labels in these shots are substituted (`org-a/repo-1`, `bot`, `admin`) so the UI is readable without exposing real inventory.
+
+**Login**
+
+![Login](docs/screenshots/login.png)
+
+**Attention** — prioritized CI failures, review waits, and related operational items.
+
+![Attention](docs/screenshots/attention.png)
+
+**Pull Requests** — open PRs across accessible repositories, with CI state.
+
+![Pull Requests](docs/screenshots/pull-requests.png)
+
+**Pipelines** — workflow actions grouped by repository; expand a group for individual runs.
+
+![Pipelines](docs/screenshots/pipelines.png)
+
+**Pipeline Detail** — workflow graph, jobs, and on-demand logs.
+
+![Pipeline Detail](docs/screenshots/pipeline-detail.png)
+
+### Dashboard Themes
+
+Lens ships five theme options. System follows the OS preference (shown here resolving to dark).
+
+| Light | Dark |
+|-------|------|
+| ![Dashboard Light](docs/screenshots/dashboard-light.png) | ![Dashboard Dark](docs/screenshots/dashboard-dark.png) |
+
+| Gruvbox | Terminal |
+|---------|----------|
+| ![Dashboard Gruvbox](docs/screenshots/dashboard-gruvbox.png) | ![Dashboard Terminal](docs/screenshots/dashboard-terminal.png) |
+
+**System** (OS preference)
+
+![Dashboard System](docs/screenshots/dashboard-system.png)
+
 ---
 
 ## Features

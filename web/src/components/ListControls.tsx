@@ -24,13 +24,13 @@ export function ListControls({
 }: Props) {
   return (
     <div className="list-controls">
-      {children}
       <ListFilter
         value={filter}
         onApply={onFilter}
         placeholder={filterPlaceholder}
         label={filterLabel}
       />
+      {children}
       <ViewModeToggle mode={mode} onMode={onMode} />
     </div>
   );

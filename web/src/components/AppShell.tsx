@@ -59,13 +59,7 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
           {isRailCollapsed ? (
             <Brand variant="mark" className="brand__img brand__img--mark" />
           ) : (
-            <>
-              <Brand variant="mark" className="brand__img brand__img--mark" alt="" />
-              <span className="brand__wordmark" aria-hidden="true">
-                <span className="brand__wordmark-gitea">Gitea</span>{" "}
-                <span className="brand__wordmark-lens">Lens</span>
-              </span>
-            </>
+            <Brand variant="logo" className="brand__img brand__img--logo" />
           )}
         </Link>
         <button className="rail-toggle" type="button" onClick={() => setRailCollapsed((value) => !value)} aria-label={isRailCollapsed ? "Expand navigation" : "Collapse navigation"} title={isRailCollapsed ? "Expand navigation" : "Collapse navigation"}>
@@ -124,6 +118,7 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
       <main className="content">
         <header className="app-header">
           <div className="app-header__actions">
+            <HeaderSearch />
             {user.is_bootstrap_admin && onSync && (
               <button
                 className={`app-header__sync${syncing ? " is-syncing" : ""}`}
@@ -140,7 +135,6 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
                 <Glyph name="sync" />
               </button>
             )}
-            <HeaderSearch />
           </div>
         </header>
         <div className="page-content">{children}</div>
