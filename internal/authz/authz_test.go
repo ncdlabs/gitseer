@@ -40,6 +40,16 @@ func TestAuthzIsolation(t *testing.T) {
 	if ok {
 		t.Fatal("alice must not access bob repo")
 	}
+	_ = st.SoftDeleteRepository(ctx, r1.ID)
+	ok, _ = az.CanAccessRepo(ctx, u1, r1.ID)
+	if ok {
+		t.Fatal("alice must not access soft-deleted repo")
+	}
+	boot, _ := st.EnsureBootstrapUser(ctx)
+	ok, _ = az.CanAccessRepo(ctx, boot, r1.ID)
+	if ok {
+		t.Fatal("bootstrap must not access soft-deleted repo")
+	}
 }
 
 func int64Ptr(v int64) *int64 { return &v }

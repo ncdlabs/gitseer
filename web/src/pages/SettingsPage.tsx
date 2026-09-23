@@ -202,7 +202,6 @@ export function SettingsPage() {
       setBaseline(res.settings);
       setSavedFlash(true);
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
-      await queryClient.invalidateQueries({ queryKey: ["status"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "save failed");
     } finally {
@@ -233,7 +232,6 @@ export function SettingsPage() {
       setIntegMeta(integ);
       setIntegSavedFlash(true);
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
-      await queryClient.invalidateQueries({ queryKey: ["status"] });
     } catch (err) {
       setIntegError(err instanceof Error ? err.message : "save failed");
     } finally {

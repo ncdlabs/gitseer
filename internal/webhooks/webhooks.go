@@ -55,6 +55,12 @@ func (p *Processor) SetAllowUnsigned(allow bool) {
 }
 
 func (p *Processor) HandleHTTP(w http.ResponseWriter, r *http.Request) {
+	p.HandleHTTPForInstance(w, r, 0)
+}
+
+// HandleHTTPForInstance accepts a webhook for a specific Lens instance ID.
+// When instanceID is 0, the primary (oldest) instance is used.
+func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
 		http.Error(w, "read error", http.StatusBadRequest)
@@ -83,7 +89,12 @@ func (p *Processor) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 		eventType = r.Header.Get("X-GitHub-Event")
 	}
 	delivery := r.Header.Get("X-Gitea-Delivery")
-	inst, err := p.store.GetPrimaryInstance(r.Context())
+	var inst *models.Instance
+	if instanceID > 0 {
+		inst, err = p.store.GetInstanceByID(r.Context(), instanceID)
+	} else {
+		inst, err = p.store.GetPrimaryInstance(r.Context())
+	}
 	if err != nil || inst == nil {
 		http.Error(w, "no instance", http.StatusServiceUnavailable)
 		return

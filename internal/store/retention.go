@@ -67,7 +67,9 @@ func (s *Store) PurgeRetention(ctx context.Context, runsDays, webhooksDays, atte
 DELETE FROM webhook_events
 WHERE received_at < ?
   AND status != 'pending'
-  AND NOT (status = 'processing' AND received_at >= ?)`, cutoff, reaperCutoff)
+  AND NOT (status = 'processing' AND (
+    processing_started_at IS NULL OR processing_started_at >= ?
+  ))`, cutoff, reaperCutoff)
 		if err != nil {
 			return out, err
 		}

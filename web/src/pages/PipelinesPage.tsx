@@ -6,6 +6,7 @@ import { ExpandCollapseControls } from "../components/ExpandCollapseControls";
 import { ListControls } from "../components/ListControls";
 import { WorkflowDAG } from "../components/WorkflowDAG";
 import { useViewMode } from "../hooks/useViewMode";
+import { relativeAge } from "../lib/relativeAge";
 
 type ActionGroup = {
   key: string;
@@ -21,19 +22,6 @@ function runTime(run: WorkflowRun): number {
   if (!raw) return run.id;
   const t = Date.parse(raw);
   return Number.isNaN(t) ? run.id : t;
-}
-
-function relativeAge(iso?: string) {
-  if (!iso) return "";
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
 }
 
 function normalizeWorkflowPath(path?: string): string {
@@ -184,7 +172,7 @@ export function PipelinesPage() {
                     <div className="mono muted">{group.workflowPath}</div>
                   )}
                   <span className="item-card__cta muted">
-                    {open ? "Hide runs" : "Show runs →"}
+                    {open ? "Hide Runs" : "Show Runs"}
                   </span>
                 </button>
                 {open && <RunList runs={group.runs} />}

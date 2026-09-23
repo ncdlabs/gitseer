@@ -170,15 +170,26 @@ func TestUpsertPreservesNilTimestampsAndRejectsStale(t *testing.T) {
 		t.Fatalf("created=%v", pr.CreatedAt)
 	}
 
-	// Nil timestamps must not wipe existing.
+	// Nil created_at must not wipe existing; title update carries matching updated_at.
 	pr, err = st.UpsertPullRequest(ctx, repo.ID, models.PullRequest{
-		ExternalID: 1, Number: 1, Title: "b", State: "open",
+		ExternalID: 1, Number: 1, Title: "b", State: "open", UpdatedAt: &updated,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pr.Title != "b" || pr.CreatedAt == nil || !pr.CreatedAt.Equal(created) {
 		t.Fatalf("title=%s created=%v", pr.Title, pr.CreatedAt)
+	}
+
+	// Incoming without updated_at must not overwrite a fresher row.
+	pr, err = st.UpsertPullRequest(ctx, repo.ID, models.PullRequest{
+		ExternalID: 1, Number: 1, Title: "no-ts", State: "open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Title != "b" {
+		t.Fatalf("nil updated_at overwrite title=%s", pr.Title)
 	}
 
 	// Stale updated_at must not overwrite.
@@ -229,6 +240,32 @@ func TestUpsertPreservesNilTimestampsAndRejectsStale(t *testing.T) {
 	}
 	if run.RunAttempt != 2 || run.Status != models.StatusCompleted {
 		t.Fatalf("attempt=%d status=%s", run.RunAttempt, run.Status)
+	}
+
+	completed := time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)
+	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 5, Name: "ci", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+		RunAttempt: 2, CompletedAt: &completed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Higher attempt re-run must clear completed_at when back to running.
+	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 5, Name: "ci", Status: models.StatusRunning, RunAttempt: 3, StartedAt: &started,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = st.GetWorkflowRunByExternalID(ctx, repo.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.RunAttempt != 3 || run.Status != models.StatusRunning {
+		t.Fatalf("rerun attempt=%d status=%s", run.RunAttempt, run.Status)
+	}
+	if run.CompletedAt != nil {
+		t.Fatalf("rerun kept completed_at=%v", run.CompletedAt)
 	}
 }
 
@@ -314,13 +351,23 @@ func TestWebhookReaper(t *testing.T) {
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claimed=%d err=%v", len(claimed), err)
 	}
-	// Force stale received_at.
+	// Fresh claim must not reap even if received_at is old (backlog case).
 	_, err = db.ExecContext(ctx, `UPDATE webhook_events SET received_at=? WHERE id=?`,
 		time.Now().UTC().Add(-10*time.Minute).Format(time.RFC3339Nano), claimed[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	n, err := st.ReapStaleProcessingWebhooks(ctx, 5*time.Minute)
+	if err != nil || n != 0 {
+		t.Fatalf("expected no reap on fresh claim, reaped=%d err=%v", n, err)
+	}
+	// Stale processing_started_at should reap.
+	_, err = db.ExecContext(ctx, `UPDATE webhook_events SET processing_started_at=? WHERE id=?`,
+		time.Now().UTC().Add(-10*time.Minute).Format(time.RFC3339Nano), claimed[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err = st.ReapStaleProcessingWebhooks(ctx, 5*time.Minute)
 	if err != nil || n != 1 {
 		t.Fatalf("reaped=%d err=%v", n, err)
 	}

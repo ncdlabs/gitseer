@@ -555,9 +555,12 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
         try {
           await api.syncRepos();
         } catch (err) {
-          setError(err instanceof Error ? `Setup complete, but sync failed: ${err.message}` : "Setup complete, but sync failed.");
+          setError(
+            err instanceof Error
+              ? `Setup complete, but sync failed: ${err.message}`
+              : "Setup complete, but sync failed.",
+          );
           await queryClient.invalidateQueries({ queryKey: ["settings"] });
-          onComplete();
           return;
         }
       }

@@ -352,37 +352,39 @@ func isApproved(reviewState string) bool {
 
 // Sweep re-evaluates open PRs and incomplete runs for attention drift.
 func (e *Engine) Sweep(ctx context.Context, instanceID int64) error {
-	prs, _, err := e.store.ListPullRequests(ctx, store.ListPRsOpts{
-		State: "open", Limit: 200, BootstrapAll: true,
-	})
-	if err != nil {
-		return err
-	}
-	for i := range prs {
-		if err := e.EvaluatePullRequest(ctx, instanceID, &prs[i]); err != nil {
-			e.log.Debug("attention sweep pr", "err", err)
+	const page = 200
+	for offset := 0; ; offset += page {
+		prs, total, err := e.store.ListPullRequests(ctx, store.ListPRsOpts{
+			State: "open", Limit: page, Offset: offset, BootstrapAll: true,
+		})
+		if err != nil {
+			return err
+		}
+		for i := range prs {
+			if err := e.EvaluatePullRequest(ctx, instanceID, &prs[i]); err != nil {
+				e.log.Debug("attention sweep pr", "err", err)
+			}
+		}
+		if offset+len(prs) >= total || len(prs) == 0 {
+			break
 		}
 	}
-	runs, _, err := e.store.ListWorkflowRuns(ctx, store.ListRunsOpts{
-		Status: models.StatusRunning, Limit: 200, BootstrapAll: true,
-	})
-	if err != nil {
-		return err
-	}
-	for i := range runs {
-		if err := e.EvaluateRun(ctx, instanceID, &runs[i]); err != nil {
-			e.log.Debug("attention sweep run", "err", err)
-		}
-	}
-	waiting, _, err := e.store.ListWorkflowRuns(ctx, store.ListRunsOpts{
-		Status: models.StatusWaiting, Limit: 100, BootstrapAll: true,
-	})
-	if err != nil {
-		return err
-	}
-	for i := range waiting {
-		if err := e.EvaluateRun(ctx, instanceID, &waiting[i]); err != nil {
-			e.log.Debug("attention sweep waiting", "err", err)
+	for _, status := range []string{models.StatusRunning, models.StatusWaiting, models.StatusQueued} {
+		for offset := 0; ; offset += page {
+			runs, total, err := e.store.ListWorkflowRuns(ctx, store.ListRunsOpts{
+				Status: status, Limit: page, Offset: offset, BootstrapAll: true,
+			})
+			if err != nil {
+				return err
+			}
+			for i := range runs {
+				if err := e.EvaluateRun(ctx, instanceID, &runs[i]); err != nil {
+					e.log.Debug("attention sweep run", "err", err)
+				}
+			}
+			if offset+len(runs) >= total || len(runs) == 0 {
+				break
+			}
 		}
 	}
 	return nil

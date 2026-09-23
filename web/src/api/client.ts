@@ -175,6 +175,8 @@ export function safeExternalHref(url?: string | null): string | undefined {
   if (!url) return undefined;
   const trimmed = url.trim();
   if (!trimmed) return undefined;
+  // Reject protocol-relative URLs (//evil.com/...) which URL() would resolve against the page origin.
+  if (trimmed.startsWith("//")) return undefined;
   try {
     const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
     const u = new URL(trimmed, base);
@@ -371,6 +373,12 @@ export type CompleteSetupResponse = {
   status: Record<string, unknown>;
 };
 
+export type SearchResult = {
+  repositories: Repository[];
+  pull_requests: PullRequest[];
+  workflow_runs: WorkflowRun[];
+};
+
 export const api = {
   uiConfig: async () => {
     const cfg = await request<UIConfig>("/api/v1/ui-config");
@@ -426,8 +434,9 @@ export const api = {
     request<{ items: AttentionItem[]; total: number }>(
       `/api/v1/attention?limit=100&q=${encodeURIComponent(q)}`,
     ),
+  search: (q: string) =>
+    request<SearchResult>(`/api/v1/search?q=${encodeURIComponent(q)}`),
   syncRepos: () => request<unknown>("/api/v1/setup/sync-repos", { method: "POST" }),
-  systemStatus: () => request<Record<string, unknown>>("/api/v1/system/status"),
   settings: () => request<SettingsResponse>("/api/v1/settings"),
   updateSettings: (body: UpdateSettingsBody) =>
     request<SettingsResponse>("/api/v1/settings", {

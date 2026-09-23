@@ -68,7 +68,6 @@ spec:
                 secretKeyRef:
                   name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
                   key: LENS_WEBHOOK_SECRET
-                  optional: true
             - name: LENS_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:

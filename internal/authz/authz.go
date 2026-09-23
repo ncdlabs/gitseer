@@ -34,6 +34,10 @@ func (s *Service) CanAccessRepo(ctx context.Context, user *models.User, repoID i
 	if user == nil {
 		return false, nil
 	}
+	repo, err := s.store.GetRepositoryByID(ctx, repoID)
+	if err != nil || repo == nil || repo.DeletedAt != nil {
+		return false, nil
+	}
 	if user.IsBootstrapAdmin {
 		return true, nil
 	}

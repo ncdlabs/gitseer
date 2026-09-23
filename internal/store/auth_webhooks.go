@@ -236,12 +236,6 @@ ON CONFLICT(user_id) DO UPDATE SET
 	return err
 }
 
-func (s *Store) GetUserAccessTokenCipher(ctx context.Context, userID int64) (string, error) {
-	var cipher string
-	err := s.queryRow(ctx, `SELECT access_token_ciphertext FROM user_tokens WHERE user_id=?`, userID).Scan(&cipher)
-	return cipher, err
-}
-
 // UserTokenRow is the encrypted OAuth token material for a Lens user.
 type UserTokenRow struct {
 	AccessCipher  string
@@ -300,9 +294,16 @@ func (s *Store) ClaimPendingWebhooks(ctx context.Context, limit int) ([]WebhookE
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(ctx, s.sql(`
+	selectSQL := `
 SELECT id, instance_id, delivery_id, event_type, payload_json, attempts
-FROM webhook_events WHERE status='pending' ORDER BY id ASC LIMIT ?`), limit)
+FROM webhook_events WHERE status='pending' ORDER BY id ASC LIMIT ?`
+	if s.driver == "postgres" {
+		selectSQL = `
+SELECT id, instance_id, delivery_id, event_type, payload_json, attempts
+FROM webhook_events WHERE status='pending' ORDER BY id ASC LIMIT ?
+FOR UPDATE SKIP LOCKED`
+	}
+	rows, err := tx.QueryContext(ctx, s.sql(selectSQL), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -321,10 +322,12 @@ FROM webhook_events WHERE status='pending' ORDER BY id ASC LIMIT ?`), limit)
 	}
 	rows.Close()
 
+	now := formatTime(time.Now().UTC())
 	var out []WebhookEvent
 	for _, e := range candidates {
 		res, err := tx.ExecContext(ctx, s.sql(`
-UPDATE webhook_events SET status='processing' WHERE id=? AND status='pending'`), e.ID)
+UPDATE webhook_events SET status='processing', processing_started_at=?
+WHERE id=? AND status='pending'`), now, e.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -364,14 +367,18 @@ UPDATE webhook_events SET status=?, error=?, processed_at=?, attempts=attempts+1
 const DefaultWebhookReaperAge = 5 * time.Minute
 
 // ReapStaleProcessingWebhooks resets stuck processing rows back to pending.
+// Age is measured from processing_started_at (claim time), not received_at, so
+// backlogged events are not reaped while still being applied.
 func (s *Store) ReapStaleProcessingWebhooks(ctx context.Context, olderThan time.Duration) (int64, error) {
 	if olderThan <= 0 {
 		olderThan = DefaultWebhookReaperAge
 	}
 	cutoff := formatTime(time.Now().UTC().Add(-olderThan))
 	res, err := s.exec(ctx, `
-UPDATE webhook_events SET status='pending'
-WHERE status='processing' AND received_at < ?`, cutoff)
+UPDATE webhook_events SET status='pending', processing_started_at=NULL
+WHERE status='processing'
+  AND processing_started_at IS NOT NULL
+  AND processing_started_at < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}

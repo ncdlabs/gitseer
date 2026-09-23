@@ -41,6 +41,10 @@ var (
 		Name: "lens_webhook_processing_errors_total",
 		Help: "Webhook apply failures",
 	}, []string{"event"})
+	SSEEventsDroppedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "lens_sse_events_dropped_total",
+		Help: "Realtime SSE events dropped because a subscriber buffer was full",
+	})
 	SyncDurationSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "lens_sync_duration_seconds",
 		Help:    "Duration of full forge syncs",
@@ -71,6 +75,7 @@ func Register() {
 			WorkflowRunsActive,
 			WebhooksReceivedTotal,
 			WebhookProcessingErrorsTotal,
+			SSEEventsDroppedTotal,
 			SyncDurationSeconds,
 			SyncErrorsTotal,
 			GiteaAPIRequestsTotal,

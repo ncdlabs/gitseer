@@ -148,7 +148,16 @@ func (h *Handler) Routes(r chi.Router) {
 	})
 
 	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea", h.wh.HandleHTTP)
-	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea/{instanceID}", h.wh.HandleHTTP)
+	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea/{instanceID}", h.webhookByInstance)
+}
+
+func (h *Handler) webhookByInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "instanceID"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid instance", http.StatusBadRequest)
+		return
+	}
+	h.wh.HandleHTTPForInstance(w, r, id)
 }
 
 func (h *Handler) requireCSRF(next http.Handler) http.Handler {
@@ -283,14 +292,6 @@ func (h *Handler) effectiveIntegration() settings.Integration {
 		OAuthClientID:         h.cfg.Auth.OAuthClientID,
 		OAuthClientSecret:     h.cfg.Auth.OAuthClientSecret,
 	}
-}
-
-func (h *Handler) forgeClient() (forge.Forge, error) {
-	integ := h.effectiveIntegration()
-	if integ.URL == "" || integ.Token == "" {
-		return nil, fmt.Errorf("gitea not configured")
-	}
-	return gitea.New(integ.URL, integ.Token, integ.AllowPrivateNetwork)
 }
 
 // forgeClientForUser returns a forge client authenticated as the caller for user-scoped reads (e.g. job logs).
@@ -870,7 +871,7 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) syncRepos(w http.ResponseWriter, r *http.Request) {
 	user := userFromCtx(r.Context())
-	if !user.IsBootstrapAdmin {
+	if user == nil || !user.IsBootstrapAdmin {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -1113,7 +1114,7 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 	if workflowPath != "" && run.CommitSHA != "" {
 		if nodesJSON, err := h.store.GetWorkflowGraph(r.Context(), run.RepoID, workflowPath, run.CommitSHA); err == nil {
 			_ = json.Unmarshal([]byte(nodesJSON), &graph)
-		} else if client, err := h.forgeClient(); err == nil {
+		} else if client, err := h.forgeClientForUser(r.Context(), user); err == nil {
 			yamlBytes, err := client.GetWorkflowYAML(r.Context(), models.RepoRef{Owner: run.RepoOwner, Name: run.RepoName}, workflowPath, run.CommitSHA)
 			if err == nil {
 				nodes, err := workflows.ParseNeedsDAG(yamlBytes)

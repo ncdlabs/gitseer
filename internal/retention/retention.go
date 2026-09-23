@@ -25,10 +25,6 @@ type Runner struct {
 	log   *slog.Logger
 }
 
-func New(st *store.Store, cfg config.RetentionConfig, log *slog.Logger) *Runner {
-	return NewWithSource(st, staticRetention{cfg: cfg}, log)
-}
-
 func NewWithSource(st *store.Store, src RetentionSource, log *slog.Logger) *Runner {
 	if log == nil {
 		log = slog.Default()

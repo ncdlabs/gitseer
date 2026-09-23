@@ -106,7 +106,7 @@ func (s *Service) SyncFromConfig(ctx context.Context) (*Result, error) {
 	return s.FullSync(ctx, f, name, url, days)
 }
 
-const maxJobFetchesPerRepo = 20
+const maxJobFetchesPerRepo = 50
 
 func (s *Service) FullSync(ctx context.Context, f forge.Forge, instanceName, baseURL string, historyDays int) (*Result, error) {
 	started := time.Now()
@@ -254,9 +254,12 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, instanceName, bas
 					return nil, err
 				}
 				runCount++
-				if jobsFetched < maxJobFetchesPerRepo {
+				inFlight := saved.Status == models.StatusQueued || saved.Status == models.StatusWaiting || saved.Status == models.StatusRunning
+				if inFlight || jobsFetched < maxJobFetchesPerRepo {
 					jobs, err := f.ListJobs(ctx, ref, saved.ExternalID)
-					jobsFetched++
+					if !inFlight {
+						jobsFetched++
+					}
 					if err != nil {
 						s.log.Debug("list jobs failed", "repo", repo.FullName, "run", saved.ExternalID, "err", err)
 					} else {

@@ -71,6 +71,8 @@ ON CONFLICT(repo_id, number) DO UPDATE SET
   updated_at=COALESCE(excluded.updated_at, pull_requests.updated_at),
   closed_at=COALESCE(excluded.closed_at, pull_requests.closed_at),
   merged_at=COALESCE(excluded.merged_at, pull_requests.merged_at)
+WHERE pull_requests.updated_at IS NULL
+   OR (excluded.updated_at IS NOT NULL AND excluded.updated_at >= pull_requests.updated_at)
 `, repoID, pr.ExternalID, pr.Number, pr.Title, pr.BodyExcerpt, pr.AuthorLogin, nullInt64(pr.AuthorExternalID),
 		pr.SourceBranch, pr.TargetBranch, pr.HeadSHA, pr.BaseSHA, pr.State, boolToInt(pr.Draft),
 		nullBool(pr.Mergeable), pr.MergeableState, pr.ReviewState, pr.CIState, pr.HTMLURL,
@@ -82,8 +84,12 @@ ON CONFLICT(repo_id, number) DO UPDATE SET
 }
 
 // shouldApplyPR rejects out-of-order webhook/sync updates with an older updated_at.
+// Incoming rows without updated_at do not overwrite rows that already have one.
 func shouldApplyPR(existing, incoming models.PullRequest) bool {
-	if incoming.UpdatedAt == nil || existing.UpdatedAt == nil {
+	if incoming.UpdatedAt == nil {
+		return existing.UpdatedAt == nil
+	}
+	if existing.UpdatedAt == nil {
 		return true
 	}
 	return !incoming.UpdatedAt.Before(*existing.UpdatedAt)
@@ -271,8 +277,26 @@ ON CONFLICT(repo_id, external_id) DO UPDATE SET
   upstream_conclusion=excluded.upstream_conclusion, actor_login=excluded.actor_login, html_url=excluded.html_url,
   workflow_path=excluded.workflow_path,
   started_at=COALESCE(excluded.started_at, workflow_runs.started_at),
-  completed_at=COALESCE(excluded.completed_at, workflow_runs.completed_at),
+  completed_at=CASE
+    WHEN excluded.run_attempt > workflow_runs.run_attempt THEN excluded.completed_at
+    WHEN excluded.status IN ('queued', 'waiting', 'running') THEN excluded.completed_at
+    ELSE COALESCE(excluded.completed_at, workflow_runs.completed_at)
+  END,
   run_attempt=excluded.run_attempt
+WHERE excluded.run_attempt > workflow_runs.run_attempt
+   OR (
+     excluded.run_attempt = workflow_runs.run_attempt
+     AND CASE excluded.status
+       WHEN 'queued' THEN 1 WHEN 'waiting' THEN 2 WHEN 'running' THEN 3 WHEN 'completed' THEN 4 ELSE 0
+     END >= CASE workflow_runs.status
+       WHEN 'queued' THEN 1 WHEN 'waiting' THEN 2 WHEN 'running' THEN 3 WHEN 'completed' THEN 4 ELSE 0
+     END
+     AND NOT (
+       workflow_runs.completed_at IS NOT NULL
+       AND excluded.completed_at IS NULL
+       AND excluded.status != 'completed'
+     )
+   )
 `, repoID, run.ExternalID, run.Name, run.Event, run.Branch, run.CommitSHA, run.Status, run.Conclusion,
 		run.UpstreamStatus, run.UpstreamConclusion, run.ActorLogin, run.HTMLURL, run.WorkflowPath,
 		formatTimePtr(run.StartedAt), formatTimePtr(run.CompletedAt), run.RunAttempt)
@@ -451,8 +475,24 @@ ON CONFLICT(repo_id, external_id) DO UPDATE SET
   upstream_status=excluded.upstream_status, upstream_conclusion=excluded.upstream_conclusion,
   runner_id=excluded.runner_id, runner_name=excluded.runner_name, html_url=excluded.html_url,
   started_at=COALESCE(excluded.started_at, jobs.started_at),
-  completed_at=COALESCE(excluded.completed_at, jobs.completed_at),
-  steps_json=COALESCE(excluded.steps_json, jobs.steps_json)
+  completed_at=CASE
+    WHEN excluded.status IN ('queued', 'waiting', 'running') THEN excluded.completed_at
+    ELSE COALESCE(excluded.completed_at, jobs.completed_at)
+  END,
+  steps_json=CASE
+    WHEN excluded.steps_json IS NOT NULL AND excluded.steps_json != '' THEN excluded.steps_json
+    ELSE jobs.steps_json
+  END
+WHERE CASE excluded.status
+    WHEN 'queued' THEN 1 WHEN 'waiting' THEN 2 WHEN 'running' THEN 3 WHEN 'completed' THEN 4 ELSE 0
+  END >= CASE jobs.status
+    WHEN 'queued' THEN 1 WHEN 'waiting' THEN 2 WHEN 'running' THEN 3 WHEN 'completed' THEN 4 ELSE 0
+  END
+  AND NOT (
+    jobs.completed_at IS NOT NULL
+    AND excluded.completed_at IS NULL
+    AND excluded.status != 'completed'
+  )
 `, runID, repoID, job.ExternalID, job.Name, job.Status, job.Conclusion, job.UpstreamStatus, job.UpstreamConclusion,
 		nullInt64(job.RunnerID), job.RunnerName, job.HTMLURL, formatTimePtr(job.StartedAt), formatTimePtr(job.CompletedAt), nullString(job.StepsJSON))
 	if err != nil {
@@ -837,7 +877,10 @@ func (s *Store) CountWorkflowRuns(ctx context.Context) (int64, error) {
 
 func (s *Store) UserCanAccessRepo(ctx context.Context, userID, repoID int64) (bool, error) {
 	var n int
-	err := s.queryRow(ctx, `SELECT COUNT(*) FROM user_repository_access WHERE user_id=? AND repo_id=?`, userID, repoID).Scan(&n)
+	err := s.queryRow(ctx, `
+SELECT COUNT(*) FROM user_repository_access ura
+JOIN repositories r ON r.id = ura.repo_id
+WHERE ura.user_id=? AND ura.repo_id=? AND r.deleted_at IS NULL`, userID, repoID).Scan(&n)
 	return n > 0, err
 }
 

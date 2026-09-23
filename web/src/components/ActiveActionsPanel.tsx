@@ -119,6 +119,7 @@ export function ActiveActionsPanel({ headerActions, onNavigate, preferOpener, cl
   const q = useQuery({
     queryKey: ["workflow-runs", "active"],
     queryFn: api.activeWorkflowRuns,
+    refetchInterval: 15_000,
   });
 
   const total = q.data?.total ?? 0;
@@ -151,6 +152,7 @@ export function useActiveActionsCount(): number {
   const q = useQuery({
     queryKey: ["workflow-runs", "active"],
     queryFn: api.activeWorkflowRuns,
+    refetchInterval: 15_000,
   });
   return q.data?.total ?? 0;
 }

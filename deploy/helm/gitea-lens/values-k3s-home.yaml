@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: git.ncdlabs.com/ncdlabs/gitea-lens
-  tag: "0.1.15"
+  tag: "0.1.16"
   pullPolicy: IfNotPresent
 
 imagePullSecrets:
@@ -33,7 +33,6 @@ env:
   LENS_DATABASE_PATH: "/data/lens.db"
   LENS_GITEA_URL: "https://git.ncdlabs.com"
   LENS_GITEA_ALLOW_PRIVATE_NETWORK: "true"
-  LENS_AUTH_PROVIDER: "gitea"
   LENS_AUTH_COOKIE_SECURE: "true"
   LENS_UI_INSTANCE_NAME: "Gitea Lens"
   LENS_LOG_FORMAT: "json"

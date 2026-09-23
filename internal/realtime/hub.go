@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
 )
 
 type Event struct {
@@ -38,7 +40,7 @@ func (h *Hub) Run(ctx context.Context) {
 }
 
 func (h *Hub) Subscribe() chan Event {
-	ch := make(chan Event, 16)
+	ch := make(chan Event, 64)
 	h.mu.Lock()
 	h.clients[ch] = struct{}{}
 	h.mu.Unlock()
@@ -61,13 +63,9 @@ func (h *Hub) Publish(ev Event) {
 		select {
 		case ch <- ev:
 		default:
+			lensmetrics.SSEEventsDroppedTotal.Inc()
 		}
 	}
-}
-
-// ServeHTTP streams all events (no ACL). Prefer ServeFiltered from authenticated handlers.
-func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.ServeFiltered(w, r, func(Event) bool { return true })
 }
 
 // ServeFiltered streams SSE events allowed by allow (nil = allow all).

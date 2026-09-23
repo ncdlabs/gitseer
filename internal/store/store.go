@@ -164,14 +164,6 @@ func scanInstance(row scanner) (*models.Instance, error) {
 	return &inst, nil
 }
 
-func (s *Store) UpdateInstanceSecrets(ctx context.Context, id int64, webhookSecret, oauthClientID, oauthSecret string) error {
-	now := formatTime(time.Now().UTC())
-	_, err := s.exec(ctx, `
-UPDATE instances SET webhook_secret_ciphertext=?, oauth_client_id=?, oauth_client_secret_ciphertext=?, updated_at=?
-WHERE id=?`, webhookSecret, oauthClientID, oauthSecret, now, id)
-	return err
-}
-
 func (s *Store) UpsertOrganization(ctx context.Context, instanceID int64, org models.Organization) (*models.Organization, error) {
 	now := formatTime(time.Now().UTC())
 	_, err := s.exec(ctx, `
@@ -333,7 +325,10 @@ LIMIT ? OFFSET ?`, args...)
 func (s *Store) SoftDeleteRepository(ctx context.Context, id int64) error {
 	now := formatTime(time.Now().UTC())
 	_, err := s.exec(ctx, `UPDATE repositories SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL`, now, now, id)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.DeleteAccessForRepo(ctx, id)
 }
 
 // SoftDeleteMissing soft-deletes repos not in seenExternalIDs whose last_synced_at
@@ -357,6 +352,18 @@ UPDATE repositories SET deleted_at=?, updated_at=?
 WHERE instance_id=? AND deleted_at IS NULL
   AND (last_synced_at IS NULL OR last_synced_at < ?)
   AND external_id NOT IN (%s)`, strings.Join(ph, ",")), args...)
+	if err != nil {
+		return err
+	}
+	// Clear ACL for repos soft-deleted in this pass (parity with webhook delete path).
+	_, err = s.exec(ctx, fmt.Sprintf(`
+DELETE FROM user_repository_access
+WHERE repo_id IN (
+  SELECT id FROM repositories
+  WHERE instance_id=? AND deleted_at IS NOT NULL
+    AND (last_synced_at IS NULL OR last_synced_at < ?)
+    AND external_id NOT IN (%s)
+)`, strings.Join(ph, ",")), append([]any{instanceID, start}, args[4:]...)...)
 	return err
 }
 

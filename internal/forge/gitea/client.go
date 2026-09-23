@@ -617,6 +617,9 @@ func (c *Client) GetCombinedCommitStatus(ctx context.Context, repo models.RepoRe
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	resp.Body.Close()
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return "", nil
 	}
@@ -653,6 +656,9 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, repo models.RepoRef, opts
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	resp.Body.Close()
+	if err != nil {
+		return forge.Page[models.WorkflowRun]{}, err
+	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return forge.Page[models.WorkflowRun]{Page: page}, nil
 	}
@@ -692,6 +698,9 @@ func (c *Client) ListJobs(ctx context.Context, repo models.RepoRef, runExternalI
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return nil, nil
 	}

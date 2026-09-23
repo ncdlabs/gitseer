@@ -25,20 +25,50 @@ const qc = new QueryClient({
   },
 });
 
+function invalidateKeys(queryClient: QueryClient, keys: string[]) {
+  for (const key of keys) {
+    void queryClient.invalidateQueries({ queryKey: [key] });
+  }
+}
+
 function useRealtimeInvalidation() {
   const queryClient = useQueryClient();
   useEffect(() => {
     const base = window.__LENS_BASE__ || "";
     const es = new EventSource(`${base}/api/v1/events`);
-    const invalidate = () => {
-      void queryClient.invalidateQueries();
+    const onMessage = (event: MessageEvent) => {
+      let type = "";
+      try {
+        const parsed = JSON.parse(String(event.data ?? "")) as { type?: string };
+        type = typeof parsed?.type === "string" ? parsed.type : "";
+      } catch {
+        /* unparseable → default invalidation */
+      }
+      if (type === "workflow_run" || type === "workflow_job") {
+        invalidateKeys(queryClient, ["workflow-runs", "runs", "run", "summary", "stats", "attention"]);
+        return;
+      }
+      if (type === "pull_request") {
+        invalidateKeys(queryClient, ["prs", "summary", "stats", "attention"]);
+        return;
+      }
+      invalidateKeys(queryClient, [
+        "workflow-runs",
+        "runs",
+        "run",
+        "summary",
+        "stats",
+        "attention",
+        "prs",
+        "repositories",
+      ]);
     };
-    es.addEventListener("message", invalidate);
+    es.addEventListener("message", onMessage);
     es.onerror = () => {
       /* browser reconnects; avoid tight loops */
     };
     return () => {
-      es.removeEventListener("message", invalidate);
+      es.removeEventListener("message", onMessage);
       es.close();
     };
   }, [queryClient]);
