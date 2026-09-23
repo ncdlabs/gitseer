@@ -58,8 +58,25 @@ func CheckGiteaURL(ctx context.Context, raw string, allowPrivate bool) URLCheckR
 
 	var lastErr error
 	var chosen string
+	var blockedURL string
+	var blockedIP net.IP
 	for _, cand := range cands {
-		if err := probeVersion(ctx, cand); err != nil {
+		u, err := url.Parse(cand)
+		if err != nil || u.Hostname() == "" {
+			lastErr = fmt.Errorf("invalid url")
+			continue
+		}
+		privIP, err := lookupPrivateIP(u.Hostname())
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if privIP != nil && !allowPrivate {
+			blockedURL = cand
+			blockedIP = privIP
+			continue
+		}
+		if err := probeVersion(ctx, cand, allowPrivate); err != nil {
 			lastErr = err
 			continue
 		}
@@ -67,6 +84,16 @@ func CheckGiteaURL(ctx context.Context, raw string, allowPrivate bool) URLCheckR
 		break
 	}
 	if chosen == "" {
+		if blockedIP != nil {
+			return URLCheckResult{
+				OK:        false,
+				URL:       blockedURL,
+				Private:   true,
+				PrivateIP: blockedIP.String(),
+				Code:      URLCheckPrivateNetwork,
+				Error:     PrivateNetworkCheckboxMessage(blockedIP),
+			}
+		}
 		msg := "Could not reach Gitea at this address over HTTPS or HTTP."
 		if len(cands) == 1 {
 			msg = "Could not reach Gitea at this URL."
@@ -87,16 +114,6 @@ func CheckGiteaURL(ctx context.Context, raw string, allowPrivate bool) URLCheckR
 		return URLCheckResult{Code: URLCheckUnreachable, Error: fmt.Sprintf("Could not resolve %s.", u.Hostname()), URL: chosen}
 	}
 	if privIP != nil {
-		if !allowPrivate {
-			return URLCheckResult{
-				OK:        false,
-				URL:       chosen,
-				Private:   true,
-				PrivateIP: privIP.String(),
-				Code:      URLCheckPrivateNetwork,
-				Error:     PrivateNetworkCheckboxMessage(privIP),
-			}
-		}
 		return URLCheckResult{OK: true, URL: chosen, Private: true, PrivateIP: privIP.String()}
 	}
 	return URLCheckResult{OK: true, URL: chosen, Private: false}
@@ -119,7 +136,7 @@ func urlCandidates(raw string) []string {
 	return []string{"https://" + raw, "http://" + raw}
 }
 
-func probeVersion(ctx context.Context, base string) error {
+func probeVersion(ctx context.Context, base string, allowPrivate bool) error {
 	u, err := url.Parse(base)
 	if err != nil {
 		return err
@@ -136,8 +153,7 @@ func probeVersion(ctx context.Context, base string) error {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	// Allow private dials here so scheme detection works for lab hosts; policy is enforced after.
-	client := NewHTTPClient(true, 8*time.Second)
+	client := NewHTTPClient(allowPrivate, 8*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

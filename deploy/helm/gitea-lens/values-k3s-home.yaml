@@ -39,6 +39,8 @@ env:
   LENS_LOG_FORMAT: "json"
   LENS_SYNC_RECONCILE_INTERVAL: "5m"
   LENS_SYNC_HISTORY_DAYS: "30"
+  # Peer CIDRs allowed to set X-Forwarded-For / X-Real-IP (k3s default pod + service nets).
+  LENS_SERVER_TRUSTED_PROXIES: "10.42.0.0/16,10.43.0.0/16"
 
 secret:
   create: false

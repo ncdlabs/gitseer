@@ -2,6 +2,8 @@ server:
   listen: 0.0.0.0:8090
   # Public URL of Lens (required for OAuth redirect_uri). Include subpath if used.
   # external_url: https://git.example.com/lens
+  # CIDRs of reverse proxies allowed to set X-Forwarded-For / X-Real-IP (rate limits).
+  # trusted_proxies: ["10.42.0.0/16"]
 
 database:
   driver: sqlite
@@ -31,7 +33,7 @@ auth:
   # oauth_client_id: ""
   # oauth_client_secret: ""   # optional for public PKCE clients; required for confidential
   # bootstrap_password via LENS_AUTH_BOOTSTRAP_PASSWORD (dev / first-run fallback; leave empty to disable)
-  # encryption_key via LENS_ENCRYPTION_KEY (32+ chars; encrypts OAuth tokens at rest)
+  # encryption_key via LENS_ENCRYPTION_KEY (min 16 chars; required to store integration secrets + OAuth tokens in DB)
   session_ttl: 24h
   acl_refresh_interval: 6h
 
@@ -48,6 +50,6 @@ retention:
   attention_days: 180
 
 # Local development only (npm run start sets LENS_ALLOW_SKIP_SETUP=true).
-# Never enable in production/k3s.
+# Never enable in production/k3s — rejected when external_url is non-local.
 # dev:
 #   allow_skip_setup: true

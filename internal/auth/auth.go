@@ -66,7 +66,11 @@ func New(st *store.Store, cfg Config) *Service {
 	}
 	var encKey []byte
 	if cfg.EncryptionKey != "" {
-		if k, err := lenscrypto.KeyFromString(cfg.EncryptionKey); err == nil {
+		k, err := lenscrypto.KeyFromString(cfg.EncryptionKey)
+		if err != nil {
+			// Invalid keys are rejected by config.Validate; leave encryption disabled only if empty.
+			encKey = nil
+		} else {
 			encKey = k
 		}
 	}
@@ -226,10 +230,16 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state, ip, ua string)
 	}
 	user, err := s.store.UpsertGiteaUser(ctx, instanceID, *gu)
 	if err != nil {
+		if errors.Is(err, store.ErrReservedLogin) || errors.Is(err, store.ErrBootstrapClash) {
+			return nil, "", "", "", fmt.Errorf("oauth login %q is reserved for the Lens bootstrap admin", gu.Login)
+		}
+		if errors.Is(err, store.ErrLoginConflict) {
+			return nil, "", "", "", fmt.Errorf("oauth login %q is already linked to another account", gu.Login)
+		}
 		return nil, "", "", "", err
 	}
 	if err := s.persistUserToken(ctx, user.ID, tok); err != nil {
-		// Non-fatal: ACL still refreshed in-memory by caller.
+		// Non-fatal for session creation, but surface for operators.
 		_ = err
 	}
 	sessionToken, err := s.createSession(ctx, user.ID, ip, ua)
@@ -380,23 +390,98 @@ func (s *Service) createSession(ctx context.Context, userID int64, ip, ua string
 	return token, nil
 }
 
-// UserAccessToken decrypts the stored OAuth access token for userID.
+// UserAccessToken decrypts the stored OAuth access token for userID,
+// refreshing via refresh_token when expiry is near and a refresh token is stored.
 // Returns empty string when encryption is unset or no token is stored.
 func (s *Service) UserAccessToken(ctx context.Context, userID int64) (string, error) {
 	if len(s.encKey) != 32 {
 		return "", nil
 	}
-	cipher, err := s.store.GetUserAccessTokenCipher(ctx, userID)
+	row, err := s.store.GetUserToken(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", err
 	}
-	if cipher == "" {
+	if row.AccessCipher == "" {
 		return "", nil
 	}
-	return lenscrypto.Decrypt(s.encKey, cipher)
+	access, err := lenscrypto.Decrypt(s.encKey, row.AccessCipher)
+	if err != nil {
+		return "", err
+	}
+	if !tokenNeedsRefresh(row.ExpiresAt) || row.RefreshCipher == "" {
+		return access, nil
+	}
+	refresh, err := lenscrypto.Decrypt(s.encKey, row.RefreshCipher)
+	if err != nil || refresh == "" {
+		return access, nil
+	}
+	tok, err := s.refreshAccessToken(ctx, refresh)
+	if err != nil {
+		// Keep serving the existing access token; caller may still succeed until hard expiry.
+		return access, nil
+	}
+	if err := s.persistUserToken(ctx, userID, tok); err != nil {
+		return tok.AccessToken, nil
+	}
+	return tok.AccessToken, nil
+}
+
+func tokenNeedsRefresh(expires *time.Time) bool {
+	if expires == nil {
+		return false
+	}
+	return time.Now().UTC().Add(2 * time.Minute).After(expires.UTC())
+}
+
+func (s *Service) refreshAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {
+	s.mu.RLock()
+	baseURL := s.cfg.GiteaBaseURL
+	clientID := s.cfg.OAuthClientID
+	clientSecret := s.cfg.OAuthClientSecret
+	client := s.client
+	s.mu.RUnlock()
+	endpoint := strings.TrimRight(baseURL, "/") + "/login/oauth/access_token"
+	body := map[string]string{
+		"client_id":     clientID,
+		"grant_type":    "refresh_token",
+		"refresh_token": refreshToken,
+	}
+	if clientSecret != "" {
+		body["client_secret"] = clientSecret
+	}
+	payload, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("token refresh failed: %s: %s", resp.Status, truncate(string(raw), 200))
+	}
+	var tok tokenResponse
+	if err := json.Unmarshal(raw, &tok); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+	if tok.AccessToken == "" {
+		return nil, fmt.Errorf("token refresh missing access_token")
+	}
+	if tok.RefreshToken == "" {
+		tok.RefreshToken = refreshToken
+	}
+	return &tok, nil
 }
 
 func (s *Service) UserFromRequest(ctx context.Context, r *http.Request) (*models.User, *models.Session, error) {

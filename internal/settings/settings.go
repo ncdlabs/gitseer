@@ -122,7 +122,11 @@ func New(cfg config.Config, st *store.Store) *Manager {
 	}
 	var encKey []byte
 	if cfg.Auth.EncryptionKey != "" {
-		if k, err := lenscrypto.KeyFromString(cfg.Auth.EncryptionKey); err == nil {
+		k, err := lenscrypto.KeyFromString(cfg.Auth.EncryptionKey)
+		if err != nil {
+			// Invalid keys must not silently disable encryption (fail closed at Load/Validate).
+			encKey = nil
+		} else {
 			encKey = k
 		}
 	}
@@ -497,7 +501,7 @@ func (m *Manager) seal(plaintext string) (string, error) {
 		return "", nil
 	}
 	if len(m.encKey) != 32 {
-		return plaintext, nil
+		return "", fmt.Errorf("LENS_ENCRYPTION_KEY is required to store secrets in the database")
 	}
 	return lenscrypto.Encrypt(m.encKey, plaintext)
 }
@@ -507,12 +511,12 @@ func (m *Manager) open(stored string) (string, error) {
 		return "", nil
 	}
 	if len(m.encKey) != 32 {
+		// No key: treat as legacy plaintext row (pre-encryption installs).
 		return stored, nil
 	}
 	pt, err := lenscrypto.Decrypt(m.encKey, stored)
 	if err != nil {
-		// Allow plaintext rows written before an encryption key was configured.
-		return stored, nil
+		return "", fmt.Errorf("decrypt failed (re-enter the secret if it was stored before encryption was enabled): %w", err)
 	}
 	return pt, nil
 }

@@ -194,3 +194,28 @@ func TestIntegrationPublicNeverExposesSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateIntegrationRequiresEncryptionKey(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:           "https://git.example",
+		GiteaToken:         "tok",
+		GiteaWebhookSecret: "hook",
+	})
+	if err == nil || !strings.Contains(err.Error(), "ENCRYPTION_KEY") {
+		t.Fatalf("expected encryption key required, got %v", err)
+	}
+}

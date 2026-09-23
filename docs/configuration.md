@@ -15,6 +15,7 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitea-lens/blob/m
 |---------|---------|
 | `server.listen` | Bind address (default `0.0.0.0:8090`) |
 | `server.external_url` | Public URL including subpath; OAuth + webhooks |
+| `server.trusted_proxies` | CIDRs of reverse proxies that may set `X-Forwarded-For` / `X-Real-IP` (rate limits). Empty = use peer `RemoteAddr` only. |
 | `database.driver` | `sqlite` (default) or `postgres` |
 | `database.path` / `dsn` | SQLite path or Postgres DSN |
 | `gitea.url` | Gitea base URL |
@@ -37,6 +38,7 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitea-lens/blob/m
 | `LENS_CONFIG` | Config file path |
 | `LENS_SERVER_LISTEN` | `server.listen` |
 | `LENS_SERVER_EXTERNAL_URL` | `server.external_url` |
+| `LENS_SERVER_TRUSTED_PROXIES` | `server.trusted_proxies` (comma-separated CIDRs) |
 | `LENS_DATABASE_DRIVER` | `database.driver` |
 | `LENS_DATABASE_PATH` | `database.path` |
 | `LENS_DATABASE_DSN` | `database.dsn` |
@@ -51,7 +53,7 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitea-lens/blob/m
 | `LENS_AUTH_BOOTSTRAP_PASSWORD` / `_FILE` | Bootstrap login |
 | `LENS_AUTH_OAUTH_CLIENT_ID` | OAuth client id |
 | `LENS_AUTH_OAUTH_CLIENT_SECRET` / `_FILE` | OAuth secret |
-| `LENS_ENCRYPTION_KEY` / `_FILE` | OAuth token encryption at rest (min 16 chars → SHA-256 AES key) |
+| `LENS_ENCRYPTION_KEY` / `_FILE` | Encrypt secrets + OAuth tokens at rest (min 16 chars → SHA-256 AES key). Required to save integration secrets to the DB. |
 | `LENS_AUTH_SESSION_TTL` | Session lifetime |
 | `LENS_AUTH_ACL_REFRESH_INTERVAL` | ACL refresh (default 6h) |
 | `LENS_AUTH_COOKIE_SECURE` | Session cookie Secure flag |

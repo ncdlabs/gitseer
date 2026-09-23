@@ -5,9 +5,20 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ncdlabs/gitea-lens/internal/models"
+)
+
+// Reserved / collision errors for OAuth user upserts.
+var (
+	ErrReservedLogin   = errors.New("oauth login is reserved")
+	ErrLoginConflict   = errors.New("login already linked to another account")
+	ErrBootstrapClash  = errors.New("cannot link oauth user to bootstrap admin")
+	ErrMissingGiteaUID = errors.New("gitea_user_id is required")
 )
 
 func (s *Store) EnsureBootstrapUser(ctx context.Context) (*models.User, error) {
@@ -64,20 +75,84 @@ FROM users WHERE id = ?`, id)
 }
 
 func (s *Store) UpsertGiteaUser(ctx context.Context, instanceID *int64, u models.User) (*models.User, error) {
+	if u.GiteaUserID == nil || *u.GiteaUserID == 0 {
+		return nil, ErrMissingGiteaUID
+	}
+	login := strings.TrimSpace(u.Login)
+	if login == "" {
+		return nil, fmt.Errorf("login is required")
+	}
+	if strings.EqualFold(login, "bootstrap") {
+		return nil, ErrReservedLogin
+	}
+
+	// Never allow OAuth to attach to the local bootstrap admin row (login collision).
+	if existing, err := s.getUserByLogin(ctx, login); err == nil && existing.IsBootstrapAdmin {
+		return nil, ErrBootstrapClash
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
 	now := formatTime(time.Now().UTC())
+	if byUID, err := s.getUserByGiteaUID(ctx, instanceID, *u.GiteaUserID); err == nil {
+		if byUID.Login != login {
+			if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != byUID.ID {
+				return nil, ErrLoginConflict
+			} else if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+				return nil, oerr
+			}
+		}
+		_, err := s.exec(ctx, `
+UPDATE users SET instance_id=?, login=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, nullInt64(instanceID), login, u.Email, u.DisplayName, u.AvatarURL, now, byUID.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, byUID.ID)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if existing, err := s.getUserByLogin(ctx, login); err == nil {
+		// Login taken by a non-bootstrap row with a different Gitea id.
+		if existing.GiteaUserID != nil && *existing.GiteaUserID != *u.GiteaUserID {
+			return nil, ErrLoginConflict
+		}
+		if existing.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
 	_, err := s.exec(ctx, `
 INSERT INTO users (instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-ON CONFLICT(login) DO UPDATE SET
-  instance_id=excluded.instance_id, gitea_user_id=excluded.gitea_user_id, email=excluded.email,
-  display_name=excluded.display_name, avatar_url=excluded.avatar_url, updated_at=excluded.updated_at
-`, nullInt64(instanceID), nullInt64(u.GiteaUserID), u.Login, u.Email, u.DisplayName, u.AvatarURL, now, now)
+`, nullInt64(instanceID), *u.GiteaUserID, login, u.Email, u.DisplayName, u.AvatarURL, now, now)
 	if err != nil {
 		return nil, err
 	}
+	return s.getUserByGiteaUID(ctx, instanceID, *u.GiteaUserID)
+}
+
+func (s *Store) getUserByLogin(ctx context.Context, login string) (*models.User, error) {
 	row := s.queryRow(ctx, `
 SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
-FROM users WHERE login = ?`, u.Login)
+FROM users WHERE login = ?`, login)
+	return scanUser(row)
+}
+
+func (s *Store) getUserByGiteaUID(ctx context.Context, instanceID *int64, giteaUID int64) (*models.User, error) {
+	var row *sql.Row
+	if instanceID == nil {
+		row = s.queryRow(ctx, `
+SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
+FROM users WHERE instance_id IS NULL AND gitea_user_id = ?`, giteaUID)
+	} else {
+		row = s.queryRow(ctx, `
+SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
+FROM users WHERE instance_id = ? AND gitea_user_id = ?`, *instanceID, giteaUID)
+	}
 	return scanUser(row)
 }
 
@@ -165,6 +240,32 @@ func (s *Store) GetUserAccessTokenCipher(ctx context.Context, userID int64) (str
 	var cipher string
 	err := s.queryRow(ctx, `SELECT access_token_ciphertext FROM user_tokens WHERE user_id=?`, userID).Scan(&cipher)
 	return cipher, err
+}
+
+// UserTokenRow is the encrypted OAuth token material for a Lens user.
+type UserTokenRow struct {
+	AccessCipher  string
+	RefreshCipher string
+	ExpiresAt     *time.Time
+}
+
+func (s *Store) GetUserToken(ctx context.Context, userID int64) (*UserTokenRow, error) {
+	var access, refresh string
+	var expires sql.NullString
+	err := s.queryRow(ctx, `
+SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at
+FROM user_tokens WHERE user_id=?`, userID).Scan(&access, &refresh, &expires)
+	if err != nil {
+		return nil, err
+	}
+	row := &UserTokenRow{AccessCipher: access, RefreshCipher: refresh}
+	if expires.Valid && expires.String != "" {
+		t, perr := parseTime(expires.String)
+		if perr == nil {
+			row.ExpiresAt = &t
+		}
+	}
+	return row, nil
 }
 
 func (s *Store) InsertWebhookEvent(ctx context.Context, instanceID int64, deliveryID, eventType, payload string) (int64, bool, error) {

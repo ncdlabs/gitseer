@@ -436,6 +436,11 @@ LIMIT ? OFFSET ?`, args...)
 }
 
 func (s *Store) UpsertJob(ctx context.Context, repoID, runID int64, job models.Job) (*models.Job, error) {
+	if existing, err := s.GetJobByExternalID(ctx, repoID, job.ExternalID); err == nil {
+		if !shouldApplyJob(*existing, job) {
+			return existing, nil
+		}
+	}
 	_, err := s.exec(ctx, `
 INSERT INTO jobs (
   run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
@@ -454,6 +459,17 @@ ON CONFLICT(repo_id, external_id) DO UPDATE SET
 		return nil, err
 	}
 	return s.GetJobByExternalID(ctx, repoID, job.ExternalID)
+}
+
+// shouldApplyJob rejects out-of-order webhook/sync updates that would regress status or clear completion.
+func shouldApplyJob(existing, incoming models.Job) bool {
+	if runStatusRank(incoming.Status) < runStatusRank(existing.Status) {
+		return false
+	}
+	if existing.CompletedAt != nil && incoming.CompletedAt == nil && incoming.Status != models.StatusCompleted {
+		return false
+	}
+	return true
 }
 
 // CloseOpenPRsNotInSet marks DB-open PRs closed when their numbers are absent from the open set.

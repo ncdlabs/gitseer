@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -850,5 +851,67 @@ func TestListWorkflowRunsStatusesAndJobsByRunIDs(t *testing.T) {
 		t.Fatalf("running jobs=%+v", byRun[running.ID])
 	}
 	_ = jobB
+}
+
+func TestUpsertGiteaUserRejectsBootstrapLogin(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	if _, err := st.EnsureBootstrapUser(ctx); err != nil {
+		t.Fatal(err)
+	}
+	uid := int64(99)
+	_, err = st.UpsertGiteaUser(ctx, nil, models.User{GiteaUserID: &uid, Login: "bootstrap"})
+	if !errors.Is(err, store.ErrReservedLogin) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestUpsertJobRejectsStatusRegression(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	inst, err := st.UpsertInstanceByURL(ctx, "g", "https://git.example", "1.0", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 1, Owner: "o", Name: "r", FullName: "o/r", DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 1, Name: "ci", Status: models.StatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := time.Now().UTC()
+	job, err := st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 1, Name: "build", Status: models.StatusCompleted, CompletedAt: &done,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	regressed, err := st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 1, Name: "build", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regressed.Status != models.StatusCompleted || regressed.ID != job.ID {
+		t.Fatalf("expected completed retained, got %+v", regressed)
+	}
 }
 

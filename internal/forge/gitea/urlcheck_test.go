@@ -50,6 +50,16 @@ func TestCheckGiteaURLUnreachable(t *testing.T) {
 	}
 }
 
+func TestCheckGiteaURLPrivateRequiresOptIn(t *testing.T) {
+	res := CheckGiteaURL(context.Background(), "http://127.0.0.1:1", false)
+	if res.OK || res.Code != URLCheckPrivateNetwork {
+		t.Fatalf("res=%+v", res)
+	}
+	if res.PrivateIP == "" {
+		t.Fatal("expected private_ip")
+	}
+}
+
 func TestPrivateNetworkCheckboxMessage(t *testing.T) {
 	msg := PrivateNetworkCheckboxMessage(nil)
 	if !strings.Contains(msg, PrivateNetworkOptionLabel) || !strings.Contains(msg, "private address") {

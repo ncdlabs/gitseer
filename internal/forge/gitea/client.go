@@ -54,6 +54,8 @@ func New(baseURL, token string, allowPrivateNetwork bool) (*Client, error) {
 }
 
 // NewHTTPClient returns an HTTP client with redirect and dial-time private-network guards.
+// Environment HTTP(S)_PROXY is ignored so SSRF checks apply to the Gitea target, not a proxy hop.
+// Hostnames are resolved once and dialed by pinned IP to reduce DNS-rebinding TOCTOU.
 func NewHTTPClient(allowPrivate bool, timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -68,25 +70,62 @@ func NewHTTPClient(allowPrivate bool, timeout time.Duration) *http.Client {
 			return validateURL(req.URL, allowPrivate)
 		},
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
+			Proxy: nil,
 			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 				host, port, err := net.SplitHostPort(address)
 				if err != nil {
 					host = address
 					port = ""
 				}
-				if !allowPrivate {
-					if err := validateHost(host, host, false); err != nil {
-						return nil, err
+				ips, err := resolveDialIPs(host, allowPrivate)
+				if err != nil {
+					return nil, err
+				}
+				var firstErr error
+				for _, ip := range ips {
+					addr := ip.String()
+					if port != "" {
+						addr = net.JoinHostPort(ip.String(), port)
+					}
+					conn, derr := dialer.DialContext(ctx, network, addr)
+					if derr == nil {
+						return conn, nil
+					}
+					if firstErr == nil {
+						firstErr = derr
 					}
 				}
-				if port != "" {
-					address = net.JoinHostPort(host, port)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("no addresses to dial for %s", host)
 				}
-				return dialer.DialContext(ctx, network, address)
+				return nil, firstErr
 			},
 		},
 	}
+}
+
+func resolveDialIPs(host string, allowPrivate bool) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		if !allowPrivate && isBlockedIP(ip) {
+			return nil, privateAddressError(host, ip)
+		}
+		return []net.IP{ip}, nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil, fmt.Errorf("dns lookup for %s: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("dns lookup for %s returned no addresses", host)
+	}
+	out := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if !allowPrivate && isBlockedIP(ip) {
+			return nil, privateAddressError(host, ip)
+		}
+		out = append(out, ip)
+	}
+	return out, nil
 }
 
 func validateURL(u *url.URL, allowPrivate bool) error {

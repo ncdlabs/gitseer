@@ -90,7 +90,8 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	// Do not use chi RealIP: client-controlled X-Forwarded-* must not rewrite RemoteAddr
+	// unless the peer is in server.trusted_proxies (see ratelimit.ClientIP).
 	r.Use(chimw.Recoverer)
 	r.Use(proxyprefix.Middleware(cfg.PathPrefix()))
 	r.Use(requestLogger(log))

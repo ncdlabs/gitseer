@@ -83,8 +83,9 @@ func (h *Handler) MetricsHandler() http.Handler {
 }
 
 func (h *Handler) Routes(r chi.Router) {
-	authLimit := ratelimit.New(time.Minute, 20)
-	webhookLimit := ratelimit.New(time.Minute, 120)
+	trusted, _ := h.cfg.TrustedProxyNets()
+	authLimit := ratelimit.New(time.Minute, 20, trusted...)
+	webhookLimit := ratelimit.New(time.Minute, 120, trusted...)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.With(h.requireAuth).Get("/system/status", h.systemStatus)

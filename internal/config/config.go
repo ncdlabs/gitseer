@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -33,8 +34,9 @@ type DevConfig struct {
 }
 
 type ServerConfig struct {
-	Listen      string `yaml:"listen"`
-	ExternalURL string `yaml:"external_url"`
+	Listen         string   `yaml:"listen"`
+	ExternalURL    string   `yaml:"external_url"`
+	TrustedProxies []string `yaml:"trusted_proxies"` // CIDRs that may set X-Forwarded-For / X-Real-IP
 }
 
 type DatabaseConfig struct {
@@ -222,7 +224,65 @@ func (c Config) Validate() error {
 	if c.Gitea.URL != "" && c.Gitea.WebhookSecret == "" && !c.Gitea.AllowUnsignedWebhooks {
 		return fmt.Errorf("gitea.webhook_secret is required when gitea.url is set (or set gitea.allow_unsigned_webhooks / LENS_WEBHOOK_ALLOW_UNSIGNED=true for lab use)")
 	}
+	if c.Auth.EncryptionKey != "" && len(c.Auth.EncryptionKey) < 16 {
+		return fmt.Errorf("auth.encryption_key must be at least 16 characters")
+	}
+	if _, err := c.TrustedProxyNets(); err != nil {
+		return err
+	}
+	if c.Dev.AllowSkipSetup && !isLocalExternalURL(c.Server.ExternalURL) {
+		return fmt.Errorf("dev.allow_skip_setup is only allowed when server.external_url is empty or a loopback/local host")
+	}
 	return nil
+}
+
+// TrustedProxyNets parses server.trusted_proxies into CIDR nets.
+func (c Config) TrustedProxyNets() ([]*net.IPNet, error) {
+	var out []*net.IPNet
+	for _, raw := range c.Server.TrustedProxies {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if !strings.Contains(raw, "/") {
+			if ip := net.ParseIP(raw); ip != nil {
+				bits := 32
+				if ip.To4() == nil {
+					bits = 128
+				}
+				raw = fmt.Sprintf("%s/%d", ip.String(), bits)
+			}
+		}
+		_, n, err := net.ParseCIDR(raw)
+		if err != nil {
+			return nil, fmt.Errorf("server.trusted_proxies: invalid CIDR %q: %w", raw, err)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+func isLocalExternalURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // CookieSecureResolved returns whether the session cookie should be Secure.
@@ -320,6 +380,18 @@ func applyEnv(cfg *Config) error {
 	}
 	if err := setStr(&cfg.Server.ExternalURL, "LENS_SERVER_EXTERNAL_URL"); err != nil {
 		return err
+	}
+	if v, ok, err := lookupEnv("LENS_SERVER_TRUSTED_PROXIES"); err != nil {
+		return err
+	} else if ok {
+		var parts []string
+		for _, p := range strings.Split(v, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		cfg.Server.TrustedProxies = parts
 	}
 	if err := setStr(&cfg.Database.Driver, "LENS_DATABASE_DRIVER"); err != nil {
 		return err
