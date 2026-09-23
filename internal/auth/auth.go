@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -239,8 +240,8 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state, ip, ua string)
 		return nil, "", "", "", err
 	}
 	if err := s.persistUserToken(ctx, user.ID, tok); err != nil {
-		// Non-fatal for session creation, but surface for operators.
-		_ = err
+		// Non-fatal for session creation (login still succeeds), but ACL refresh needs the token.
+		slog.Warn("oauth token persist failed", "err", err, "user_id", user.ID, "login", user.Login)
 	}
 	sessionToken, err := s.createSession(ctx, user.ID, ip, ua)
 	if err != nil {
@@ -424,6 +425,7 @@ func (s *Service) UserAccessToken(ctx context.Context, userID int64) (string, er
 		return access, nil
 	}
 	if err := s.persistUserToken(ctx, userID, tok); err != nil {
+		slog.Warn("oauth refreshed token persist failed", "err", err, "user_id", userID)
 		return tok.AccessToken, nil
 	}
 	return tok.AccessToken, nil

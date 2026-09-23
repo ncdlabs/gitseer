@@ -152,6 +152,9 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 			Addr:              cfg.Server.Listen,
 			Handler:           r,
 			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			// WriteTimeout intentionally unset: SSE (/api/v1/events) and on-demand job log
+			// streaming would be cut off by a global write deadline.
 		},
 	}
 	return srv, nil

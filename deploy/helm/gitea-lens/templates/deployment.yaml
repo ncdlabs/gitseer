@@ -74,6 +74,11 @@ spec:
                 secretKeyRef:
                   name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
                   key: LENS_ENCRYPTION_KEY
+            - name: LENS_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitea-lens.fullname" . }}{{ end }}
+                  key: LENS_METRICS_TOKEN
                   optional: true
             {{- end }}
           volumeMounts:

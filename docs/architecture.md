@@ -60,7 +60,7 @@ Raw Gitea wire types stay in `internal/forge/gitea`. Domain models live in `inte
 ## Realtime and metrics
 
 - **SSE** at `/api/v1/events` (not WebSockets; no Redis)
-- **Prometheus** at `/metrics` — same session auth as the API; labels are status/event only (never repo names)
+- **Prometheus** at `/metrics` — session cookie or optional Bearer `LENS_METRICS_TOKEN`; labels are status/event only (never repo names)
 
 ## Proxy / subpath
 

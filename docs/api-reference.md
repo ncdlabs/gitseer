@@ -62,7 +62,7 @@ HMAC-verified; rate limited.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/metrics` | Prometheus; **requires session** |
+| GET | `/metrics` | Prometheus; **requires session or Bearer metrics token** |
 
 Series include repository/PR/run gauges, webhook counters, sync histograms, and Gitea API counters. Labels are status/event oriented — never repository names.
 

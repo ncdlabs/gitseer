@@ -578,3 +578,64 @@ func TestListActiveWorkflowRuns(t *testing.T) {
 		t.Fatal("expected active run with jobs")
 	}
 }
+
+func TestMetricsRequiresAuthOrBearer(t *testing.T) {
+	h, _, authsvc := setupAPI(t)
+	h.cfg.Server.MetricsToken = "metrics-scrape-token"
+
+	// Unauthenticated without bearer → 401
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	h.MetricsHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no auth status=%d", rec.Code)
+	}
+
+	// Bearer token → 200
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer metrics-scrape-token")
+	rec = httptest.NewRecorder()
+	h.MetricsHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bearer status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Wrong bearer → falls through to session auth → 401
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec = httptest.NewRecorder()
+	h.MetricsHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad bearer status=%d", rec.Code)
+	}
+
+	// Session cookie still works
+	r := chi.NewRouter()
+	h.Routes(r)
+	loginBody, _ := json.Marshal(map[string]string{"password": "test-pass"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/bootstrap/login", bytes.NewReader(loginBody))
+	probe := httptest.NewRecorder()
+	csrf, err := authsvc.IssueCSRFToken(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range probe.Result().Cookies() {
+		loginReq.AddCookie(c)
+	}
+	loginReq.Header.Set(auth.CSRFHeaderName, csrf)
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status=%d", loginRec.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	for _, c := range loginRec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	rec = httptest.NewRecorder()
+	h.MetricsHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session status=%d", rec.Code)
+	}
+}
+

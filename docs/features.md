@@ -45,7 +45,7 @@ Discrete rule engine with severities `critical` / `warning` / `waiting`. See [At
 
 - Workflow runs grouped by action (`repo` + `workflow_path`, fallback name)
 - Expand an action to list individual runs; open a run for jobs/graph/logs
-- Job logs fetched on demand (`GET /api/v1/jobs/{id}/logs`)
+- Job logs fetched on demand (`GET /api/v1/jobs/{id}/logs`) with the caller's Gitea OAuth token (bootstrap admin uses the service token)
 - Shell **Active Actions** flyout (left rail, near Sync / account): live `queued` / `waiting` / `running` runs with job-level and step-level progress bars; fed by `workflow_run` / `workflow_job` webhooks via SSE; **Pop Out** opens a dedicated browser window at `/actions-popout` (OS-draggable; run links prefer the opener)
 
 ## Settings

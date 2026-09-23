@@ -62,7 +62,7 @@ Lens ships five theme options. System follows the OS preference (shown here reso
 - **Setup wizard** — Connect → Validate → Finish (webhook + OAuth app helpers)
 - **Settings** — runtime preferences and Gitea integration (DB-backed secrets are write-only)
 - **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
-- **Ops** — Prometheus `/metrics` (session-auth), retention purge, SQLite by default (Postgres experimental)
+- **Ops** — Prometheus `/metrics` (session or Bearer token), retention purge, SQLite by default (Postgres experimental)
 
 ---
 

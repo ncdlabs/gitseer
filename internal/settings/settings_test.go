@@ -219,3 +219,37 @@ func TestUpdateIntegrationRequiresEncryptionKey(t *testing.T) {
 		t.Fatalf("expected encryption key required, got %v", err)
 	}
 }
+
+func TestOpenFailsClosedOnCiphertextWithoutKey(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	cfg.Auth.EncryptionKey = "sixteen-chars-min"
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:           "https://git.example",
+		GiteaToken:         "tok",
+		GiteaWebhookSecret: "hook",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload without encryption key — ciphertext must not be treated as plaintext.
+	cfg2 := config.Default()
+	mgr2 := settings.New(cfg2, st)
+	if err := mgr2.Load(ctx); err == nil {
+		t.Fatal("expected load to fail without encryption key when secrets are sealed")
+	} else if !strings.Contains(err.Error(), "ENCRYPTION_KEY") && !strings.Contains(err.Error(), "decrypt") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

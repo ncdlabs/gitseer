@@ -511,6 +511,9 @@ func (m *Manager) open(stored string) (string, error) {
 		return "", nil
 	}
 	if len(m.encKey) != 32 {
+		if lenscrypto.LooksLikeCiphertext(stored) {
+			return "", fmt.Errorf("LENS_ENCRYPTION_KEY is required to decrypt stored secrets")
+		}
 		// No key: treat as legacy plaintext row (pre-encryption installs).
 		return stored, nil
 	}

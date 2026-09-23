@@ -25,6 +25,7 @@ secret:
   oauthClientSecret: ""
   webhookSecret: ""
   encryptionKey: ""
+  metricsToken: ""
 ingress:
   enabled: false
   className: traefik

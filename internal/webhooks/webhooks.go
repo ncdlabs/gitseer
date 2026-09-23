@@ -142,7 +142,9 @@ func (p *Processor) Run(ctx context.Context) {
 					p.log.Warn("webhook apply failed", "id", ev.ID, "type", ev.EventType, "err", err)
 					lensmetrics.WebhookProcessingErrorsTotal.WithLabelValues(ev.EventType).Inc()
 				}
-				_ = p.store.MarkWebhookProcessed(ctx, ev.ID, errMsg)
+				if err := p.store.MarkWebhookProcessed(ctx, ev.ID, errMsg); err != nil {
+					p.log.Error("mark webhook processed failed", "id", ev.ID, "err", err)
+				}
 			}
 		}
 	}

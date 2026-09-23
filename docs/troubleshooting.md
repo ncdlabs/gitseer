@@ -56,4 +56,4 @@ Insert paths use `RETURNING id` for some flows; broader Postgres production read
 
 ## Metrics 401
 
-`/metrics` requires a logged-in session cookie — not an open scrape target.
+`GET /metrics` requires a logged-in session cookie or `Authorization: Bearer` when `LENS_METRICS_TOKEN` is configured — not an open scrape target.

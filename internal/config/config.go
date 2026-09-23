@@ -34,9 +34,11 @@ type DevConfig struct {
 }
 
 type ServerConfig struct {
-	Listen         string   `yaml:"listen"`
-	ExternalURL    string   `yaml:"external_url"`
-	TrustedProxies []string `yaml:"trusted_proxies"` // CIDRs that may set X-Forwarded-For / X-Real-IP
+	Listen           string   `yaml:"listen"`
+	ExternalURL      string   `yaml:"external_url"`
+	TrustedProxies   []string `yaml:"trusted_proxies"` // CIDRs that may set X-Forwarded-For / X-Real-IP
+	MetricsToken     string   `yaml:"metrics_token"`   // optional Bearer token for /metrics scrapes
+	MetricsTokenFile string   `yaml:"metrics_token_file"`
 }
 
 type DatabaseConfig struct {
@@ -192,6 +194,13 @@ func (c *Config) resolveSecrets() error {
 			return fmt.Errorf("auth.encryption_key_file: %w", err)
 		}
 		c.Auth.EncryptionKey = key
+	}
+	if c.Server.MetricsTokenFile != "" {
+		tok, err := readSecretFile(c.Server.MetricsTokenFile)
+		if err != nil {
+			return fmt.Errorf("server.metrics_token_file: %w", err)
+		}
+		c.Server.MetricsToken = tok
 	}
 	return nil
 }
@@ -392,6 +401,12 @@ func applyEnv(cfg *Config) error {
 			}
 		}
 		cfg.Server.TrustedProxies = parts
+	}
+	if err := setStr(&cfg.Server.MetricsToken, "LENS_METRICS_TOKEN"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Server.MetricsTokenFile, "LENS_METRICS_TOKEN_FILE"); err != nil {
+		return err
 	}
 	if err := setStr(&cfg.Database.Driver, "LENS_DATABASE_DRIVER"); err != nil {
 		return err

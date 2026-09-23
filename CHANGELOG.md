@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Optional Prometheus Bearer scrape via `server.metrics_token` / `LENS_METRICS_TOKEN` (session cookie still works).
+- Sync package tests for empty-catalog soft-delete skip, missing-repo soft-delete, and sync lease gating.
+- Crypto unit tests and fail-closed decrypt when sealed secrets exist without `LENS_ENCRYPTION_KEY`.
+
+### Changed
+
+- Job logs fetch with the caller's Gitea OAuth token; bootstrap admins keep using the service token.
+- Helm requires `LENS_ENCRYPTION_KEY` in the cluster Secret (no longer optional).
+- OAuth token persist failures are logged (session still created).
+- HTTP server sets `IdleTimeout` (120s); `WriteTimeout` left unset for SSE and log streaming.
+- Webhook processor logs `MarkWebhookProcessed` failures.
+
+### Added (prior)
+
 - Discrete attention matrix (PRD §10 severities `critical` / `warning` / `waiting`) with periodic sweep; `attention.long_running_after`.
 - CSRF double-submit (`lens_csrf` + `X-CSRF-Token`) on browser state-changing `/api/v1` POSTs; token via `/api/v1/ui-config` and `/auth/me`.
 - Periodic ACL refresh (`auth.acl_refresh_interval`, default 6h); repository webhook ACL invalidation.

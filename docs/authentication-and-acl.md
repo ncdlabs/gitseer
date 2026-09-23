@@ -58,4 +58,4 @@ In-process per-IP (no Redis):
 
 ## Metrics auth
 
-`GET /metrics` requires the same session cookie as the API.
+`GET /metrics` requires the same session cookie as the API, or `Authorization: Bearer <token>` when `server.metrics_token` / `LENS_METRICS_TOKEN` is set.

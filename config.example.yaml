@@ -4,6 +4,8 @@ server:
   # external_url: https://git.example.com/lens
   # CIDRs of reverse proxies allowed to set X-Forwarded-For / X-Real-IP (rate limits).
   # trusted_proxies: ["10.42.0.0/16"]
+  # Optional Prometheus scrape token (Authorization: Bearer …). Session cookie also works.
+  # metrics_token via LENS_METRICS_TOKEN or metrics_token_file
 
 database:
   driver: sqlite

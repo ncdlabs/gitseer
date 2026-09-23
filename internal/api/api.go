@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,9 @@ import (
 	"github.com/ncdlabs/gitea-lens/internal/workflows"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// errUserTokenRequired is returned when an OAuth user has no decryptable Gitea token for user-scoped forge calls.
+var errUserTokenRequired = errors.New("user gitea token unavailable; sign in with OAuth again (requires LENS_ENCRYPTION_KEY)")
 
 type ctxKey int
 
@@ -79,7 +83,29 @@ func (h *Handler) MetricsHandler() http.Handler {
 		lensmetrics.RefreshGauges(r.Context(), h.store)
 		promhttp.Handler().ServeHTTP(w, r)
 	})
-	return h.requireAuth(inner)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.metricsBearerOK(r) {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		h.requireAuth(inner).ServeHTTP(w, r)
+	})
+}
+
+// metricsBearerOK accepts Authorization: Bearer <token> when server.metrics_token is configured.
+func (h *Handler) metricsBearerOK(r *http.Request) bool {
+	want := strings.TrimSpace(h.cfg.Server.MetricsToken)
+	if want == "" {
+		return false
+	}
+	got := ""
+	if hdr := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(hdr), "bearer ") {
+		got = strings.TrimSpace(hdr[7:])
+	}
+	if got == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func (h *Handler) Routes(r chi.Router) {
@@ -265,6 +291,35 @@ func (h *Handler) forgeClient() (forge.Forge, error) {
 		return nil, fmt.Errorf("gitea not configured")
 	}
 	return gitea.New(integ.URL, integ.Token, integ.AllowPrivateNetwork)
+}
+
+// forgeClientForUser returns a forge client authenticated as the caller for user-scoped reads (e.g. job logs).
+// Bootstrap admins use the service token; OAuth users must have a decryptable stored access token.
+func (h *Handler) forgeClientForUser(ctx context.Context, user *models.User) (forge.Forge, error) {
+	integ := h.effectiveIntegration()
+	if integ.URL == "" {
+		return nil, fmt.Errorf("gitea not configured")
+	}
+	token := ""
+	switch {
+	case user != nil && user.IsBootstrapAdmin:
+		token = integ.Token
+	case user != nil:
+		ut, err := h.auth.UserAccessToken(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		if ut == "" {
+			return nil, errUserTokenRequired
+		}
+		token = ut
+	default:
+		token = integ.Token
+	}
+	if token == "" {
+		return nil, fmt.Errorf("gitea not configured")
+	}
+	return gitea.New(integ.URL, token, integ.AllowPrivateNetwork)
 }
 
 func (h *Handler) refreshUserACL(ctx context.Context, userID int64, userAccessToken string) error {
@@ -1107,8 +1162,12 @@ func (h *Handler) getJobLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	client, err := h.forgeClient()
+	client, err := h.forgeClientForUser(r.Context(), user)
 	if err != nil {
+		if errors.Is(err, errUserTokenRequired) {
+			writeError(w, http.StatusForbidden, errUserTokenRequired.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, "gitea not configured")
 		return
 	}

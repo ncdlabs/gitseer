@@ -60,6 +60,18 @@ func Decrypt(key []byte, encoded string) (string, error) {
 	return string(pt), nil
 }
 
+// LooksLikeCiphertext reports whether stored is plausibly an Encrypt() output
+// (base64 of nonce‖ciphertext‖tag). Used to fail closed when the encryption key is missing.
+func LooksLikeCiphertext(stored string) bool {
+	raw, err := base64.StdEncoding.DecodeString(stored)
+	if err != nil {
+		return false
+	}
+	// AES-GCM default nonce is 12 bytes; auth tag is 16 bytes → minimum sealed blob length.
+	const minSealed = 12 + 16
+	return len(raw) >= minSealed
+}
+
 // KeyFromString derives a 32-byte AES key via SHA-256.
 // Rejects empty input; does not zero-pad short secrets.
 func KeyFromString(s string) ([]byte, error) {

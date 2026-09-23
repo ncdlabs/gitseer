@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: git.ncdlabs.com/ncdlabs/gitea-lens
-  tag: "0.1.14"
+  tag: "0.1.15"
   pullPolicy: IfNotPresent
 
 imagePullSecrets:
@@ -51,6 +51,8 @@ secret:
   oauthClientId: ""
   oauthClientSecret: ""
   webhookSecret: ""
+  # Required in cluster Secret gitea-lens (LENS_ENCRYPTION_KEY) for OAuth token / Settings secret persistence.
+  # metricsToken: optional LENS_METRICS_TOKEN for Prometheus Bearer scrapes of /metrics
 
 ingress:
   enabled: true

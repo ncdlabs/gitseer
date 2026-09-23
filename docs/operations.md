@@ -7,7 +7,12 @@
 
 ## Metrics
 
-Scrape `GET /metrics` with a session cookie (same auth as the API). Includes gauges for repos/PRs/runs, webhook counters, sync duration/errors, and Gitea API request/error counters. Labels avoid repository names.
+Scrape `GET /metrics` with either:
+
+- a session cookie (same auth as the API), or
+- `Authorization: Bearer <token>` when `server.metrics_token` / `LENS_METRICS_TOKEN` is set (preferred for Prometheus)
+
+Includes gauges for repos/PRs/runs, webhook counters, sync duration/errors, and Gitea API request/error counters. Labels avoid repository names.
 
 ## Retention
 
@@ -30,7 +35,7 @@ Also back up `config.yaml` / secrets store (Kubernetes Secret, `.env`) — never
 
 Application logs: JSON or text per `log.format` / `LENS_LOG_FORMAT`.
 
-Job logs: fetched from Gitea on demand through Lens (`/api/v1/jobs/{id}/logs`), not stored long-term as the primary log archive.
+Job logs: fetched from Gitea on demand through Lens (`/api/v1/jobs/{id}/logs`), not stored long-term as the primary log archive. OAuth users fetch logs with their stored Gitea token; bootstrap admins use the service token.
 
 ## Upgrades
 
