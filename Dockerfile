@@ -16,15 +16,15 @@ COPY . .
 COPY --from=frontend /src/web/dist ./internal/server/ui/dist
 # Avoid `go mod tidy` in-image (QEMU amd64 builds often SIGSEGV the toolchain).
 ENV GOTOOLCHAIN=local
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/lens ./cmd/lens
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/gitseer ./cmd/gitseer
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget \
-  && adduser -D -H -u 10001 lens
-USER lens
+  && adduser -D -H -u 10001 gitseer
+USER gitseer
 WORKDIR /data
-COPY --from=backend /out/lens /usr/local/bin/lens
+COPY --from=backend /out/gitseer /usr/local/bin/gitseer
 EXPOSE 8090
 VOLUME ["/data"]
-ENTRYPOINT ["/usr/local/bin/lens"]
+ENTRYPOINT ["/usr/local/bin/gitseer"]
 CMD ["serve"]

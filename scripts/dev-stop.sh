@@ -2,8 +2,8 @@
 # Stop local `npm run start` listeners (Go API + Vite).
 set -euo pipefail
 
-API_PORT="${LENS_API_PORT:-8090}"
-WEB_PORT="${LENS_WEB_PORT:-5173}"
+API_PORT="${GITSEER_API_PORT:-8090}"
+WEB_PORT="${GITSEER_WEB_PORT:-5173}"
 
 kill_port() {
   local port="$1"

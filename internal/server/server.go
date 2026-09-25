@@ -11,20 +11,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/ncdlabs/gitea-lens/internal/api"
-	"github.com/ncdlabs/gitea-lens/internal/attention"
-	"github.com/ncdlabs/gitea-lens/internal/auth"
-	"github.com/ncdlabs/gitea-lens/internal/authz"
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/database"
-	"github.com/ncdlabs/gitea-lens/internal/realtime"
-	"github.com/ncdlabs/gitea-lens/internal/retention"
-	"github.com/ncdlabs/gitea-lens/internal/server/proxyprefix"
-	"github.com/ncdlabs/gitea-lens/internal/server/ui"
-	"github.com/ncdlabs/gitea-lens/internal/settings"
-	"github.com/ncdlabs/gitea-lens/internal/store"
-	"github.com/ncdlabs/gitea-lens/internal/sync"
-	"github.com/ncdlabs/gitea-lens/internal/webhooks"
+	"github.com/ncdlabs/gitseer/internal/api"
+	"github.com/ncdlabs/gitseer/internal/attention"
+	"github.com/ncdlabs/gitseer/internal/auth"
+	"github.com/ncdlabs/gitseer/internal/authz"
+	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/database"
+	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	"github.com/ncdlabs/gitseer/internal/realtime"
+	"github.com/ncdlabs/gitseer/internal/retention"
+	"github.com/ncdlabs/gitseer/internal/server/proxyprefix"
+	"github.com/ncdlabs/gitseer/internal/server/ui"
+	"github.com/ncdlabs/gitseer/internal/settings"
+	"github.com/ncdlabs/gitseer/internal/store"
+	"github.com/ncdlabs/gitseer/internal/sync"
+	"github.com/ncdlabs/gitseer/internal/webhooks"
 )
 
 // Server is the Lens HTTP process.
@@ -72,7 +73,9 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 	syncer := sync.NewService(st, att, hub, cfg, log)
 	syncer.SetPrefsSource(syncPrefsAdapter{mgr: settingsMgr})
 	syncer.SetGiteaSource(settingsMgr)
+	syncer.SetSecretOpener(settingsMgr)
 	wh := webhooks.NewProcessor(st, att, hub, log)
+	wh.SetSecretOpener(settingsMgr)
 	applyIntegration := func(integ settings.Integration) {
 		authsvc.UpdateGiteaAuth(integ.URL, integ.OAuthClientID, integ.OAuthClientSecret, integ.AllowPrivateNetwork)
 		wh.SetSecret(integ.WebhookSecret)
@@ -126,7 +129,7 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 			"allow_skip_setup":  cfg.Dev.AllowSkipSetup,
 			"csrf_token":        csrf,
 		}
-		// Local npm start only (LENS_ALLOW_SKIP_SETUP): prefill login with the bootstrap password.
+		// Local npm start only (GITSEER_ALLOW_SKIP_SETUP): prefill login with the bootstrap password.
 		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" {
 			payload["dev_bootstrap_password"] = cfg.Auth.BootstrapPassword
 		}
@@ -168,12 +171,16 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.retain.Run(ctx)
 	go s.runACLRefresh(ctx)
 	if s.att != nil {
-		go s.att.RunPeriodicSweep(ctx, 10*time.Minute, func(c context.Context) (int64, error) {
-			inst, err := s.store.GetPrimaryInstance(c)
-			if err != nil || inst == nil {
-				return 0, err
+		go s.att.RunPeriodicSweep(ctx, 10*time.Minute, func(c context.Context) ([]int64, error) {
+			instances, err := s.store.ListInstances(c)
+			if err != nil {
+				return nil, err
 			}
-			return inst.ID, nil
+			ids := make([]int64, 0, len(instances))
+			for _, inst := range instances {
+				ids = append(ids, inst.ID)
+			}
+			return ids, nil
 		})
 	}
 

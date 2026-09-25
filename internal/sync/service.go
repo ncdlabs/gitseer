@@ -6,20 +6,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/attention"
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/forge"
-	"github.com/ncdlabs/gitea-lens/internal/forge/gitea"
-	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/realtime"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/attention"
+	"github.com/ncdlabs/gitseer/internal/config"
+	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
+	"github.com/ncdlabs/gitseer/internal/forge"
+	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/realtime"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 type Result struct {
 	InstanceID           int64  `json:"instance_id"`
+	ForgeType            string `json:"forge_type,omitempty"`
 	Version              string `json:"version"`
 	RepositoriesUpserted int    `json:"repositories_upserted"`
 	PullRequestsUpserted int    `json:"pull_requests_upserted"`
@@ -38,27 +42,40 @@ type PrefsSource interface {
 	SyncPrefs() Prefs
 }
 
-// GiteaSource supplies effective Gitea URL/token/private-network settings.
+// GiteaSource supplies effective Gitea URL/token/private-network settings (legacy fallback).
 type GiteaSource interface {
 	GiteaConnection() (url, token string, allowPrivate bool)
 }
 
+// SecretOpener decrypts instance ciphertext (sync token / webhook secret).
+type SecretOpener interface {
+	OpenSecret(stored string) (string, error)
+}
+
 // Service is the full sync orchestrator.
 type Service struct {
-	store *store.Store
-	att   *attention.Engine
-	hub   *realtime.Hub
-	cfg   config.Config
-	prefs PrefsSource
-	gitea GiteaSource
-	log   *slog.Logger
+	store   *store.Store
+	att     *attention.Engine
+	hub     *realtime.Hub
+	cfg     config.Config
+	prefs   PrefsSource
+	gitea   GiteaSource
+	secrets SecretOpener
+	encKey  []byte
+	log     *slog.Logger
 }
 
 func NewService(st *store.Store, att *attention.Engine, hub *realtime.Hub, cfg config.Config, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{store: st, att: att, hub: hub, cfg: cfg, log: log}
+	var encKey []byte
+	if strings.TrimSpace(cfg.Auth.EncryptionKey) != "" {
+		if k, err := gitseercrypto.KeyFromString(cfg.Auth.EncryptionKey); err == nil {
+			encKey = k
+		}
+	}
+	return &Service{store: st, att: att, hub: hub, cfg: cfg, encKey: encKey, log: log}
 }
 
 // SetPrefsSource attaches runtime overrides for instance name / history days.
@@ -71,6 +88,11 @@ func (s *Service) SetGiteaSource(g GiteaSource) {
 	s.gitea = g
 }
 
+// SetSecretOpener attaches decrypt for per-instance sync tokens.
+func (s *Service) SetSecretOpener(o SecretOpener) {
+	s.secrets = o
+}
+
 func (s *Service) giteaConn() (url, token string, allowPrivate bool) {
 	if s.gitea != nil {
 		return s.gitea.GiteaConnection()
@@ -78,44 +100,188 @@ func (s *Service) giteaConn() (url, token string, allowPrivate bool) {
 	return s.cfg.Gitea.URL, s.cfg.Gitea.Token, s.cfg.Gitea.AllowPrivateNetwork
 }
 
-func (s *Service) forgeFromConfig() (forge.Forge, error) {
-	url, token, allowPrivate := s.giteaConn()
-	if url == "" || token == "" {
-		return nil, fmt.Errorf("gitea.url and token required")
+func (s *Service) openSecret(stored string) (string, error) {
+	stored = strings.TrimSpace(stored)
+	if stored == "" {
+		return "", nil
 	}
-	return gitea.New(url, token, allowPrivate)
+	if s.secrets != nil {
+		return s.secrets.OpenSecret(stored)
+	}
+	if len(s.encKey) != 32 {
+		if gitseercrypto.LooksLikeCiphertext(stored) {
+			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
+		}
+		return stored, nil
+	}
+	pt, err := gitseercrypto.Decrypt(s.encKey, stored)
+	if err != nil {
+		return "", err
+	}
+	return pt, nil
 }
 
-func (s *Service) SyncFromConfig(ctx context.Context) (*Result, error) {
-	f, err := s.forgeFromConfig()
-	if err != nil {
-		return nil, err
-	}
-	url, _, _ := s.giteaConn()
-	name := s.cfg.UI.InstanceName
+func (s *Service) historyDays() int {
 	days := s.cfg.Sync.HistoryDays
+	if s.prefs != nil {
+		p := s.prefs.SyncPrefs()
+		if p.SyncHistoryDays > 0 {
+			days = p.SyncHistoryDays
+		}
+	}
+	return days
+}
+
+func (s *Service) defaultInstanceName(forgeType string) string {
+	name := s.cfg.UI.InstanceName
 	if s.prefs != nil {
 		p := s.prefs.SyncPrefs()
 		if p.InstanceName != "" {
 			name = p.InstanceName
 		}
-		if p.SyncHistoryDays > 0 {
-			days = p.SyncHistoryDays
-		}
 	}
-	return s.FullSync(ctx, f, name, url, days)
+	if name != "" {
+		return name
+	}
+	switch forgeType {
+	case models.ForgeTypeGitHub:
+		return "GitHub"
+	default:
+		return "Gitea"
+	}
+}
+
+// SyncFromConfig syncs every enabled forge instance that has a decryptable sync token.
+// Falls back to legacy GiteaSource/config when no instance rows hold tokens yet.
+func (s *Service) SyncFromConfig(ctx context.Context) (*Result, error) {
+	results, err := s.SyncAllInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no forge instances with sync tokens configured")
+	}
+	agg := &Result{
+		InstanceID: results[0].InstanceID,
+		ForgeType:  results[0].ForgeType,
+		Version:    results[0].Version,
+	}
+	for _, r := range results {
+		agg.RepositoriesUpserted += r.RepositoriesUpserted
+		agg.PullRequestsUpserted += r.PullRequestsUpserted
+		agg.RunsUpserted += r.RunsUpserted
+		agg.JobsUpserted += r.JobsUpserted
+	}
+	if len(results) > 1 {
+		agg.InstanceID = 0
+		agg.ForgeType = ""
+		agg.Version = ""
+	}
+	return agg, nil
+}
+
+// SyncAllInstances runs a full sync for each instance with a sync token.
+func (s *Service) SyncAllInstances(ctx context.Context) ([]Result, error) {
+	targets, err := s.syncTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no forge instances with sync tokens configured")
+	}
+	out := make([]Result, 0, len(targets))
+	var firstErr error
+	for _, t := range targets {
+		res, err := s.syncTarget(ctx, t)
+		if err != nil {
+			s.log.Error("instance sync failed", "instance_id", t.inst.ID, "forge", t.inst.ForgeType, "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s (%s): %w", t.inst.Name, t.inst.ForgeType, err)
+			}
+			continue
+		}
+		out = append(out, *res)
+	}
+	if len(out) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return out, nil
+}
+
+type syncTarget struct {
+	inst  models.Instance
+	token string
+}
+
+func (s *Service) syncTargets(ctx context.Context) ([]syncTarget, error) {
+	instances, err := s.store.ListInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []syncTarget
+	for _, inst := range instances {
+		if strings.TrimSpace(inst.SyncTokenCiphertext) == "" {
+			continue
+		}
+		token, err := s.openSecret(inst.SyncTokenCiphertext)
+		if err != nil {
+			s.log.Warn("skip instance: decrypt sync token failed", "instance_id", inst.ID, "err", err)
+			continue
+		}
+		if token == "" || strings.TrimSpace(inst.BaseURL) == "" {
+			continue
+		}
+		out = append(out, syncTarget{inst: inst, token: token})
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	// Legacy fallback: app_settings / config Gitea connection before instance secrets exist.
+	url, token, allowPrivate := s.giteaConn()
+	if url == "" || token == "" {
+		return nil, nil
+	}
+	return []syncTarget{{
+		inst: models.Instance{
+			Name:                s.defaultInstanceName(models.ForgeTypeGitea),
+			ForgeType:           models.ForgeTypeGitea,
+			BaseURL:             url,
+			AllowPrivateNetwork: allowPrivate,
+		},
+		token: token,
+	}}, nil
+}
+
+func (s *Service) syncTarget(ctx context.Context, t syncTarget) (*Result, error) {
+	f, err := forge.NewFromInstance(t.inst, t.token)
+	if err != nil {
+		return nil, err
+	}
+	ft := t.inst.ForgeType
+	if ft == "" {
+		ft = models.ForgeTypeGitea
+	}
+	name := t.inst.Name
+	if name == "" {
+		name = s.defaultInstanceName(ft)
+	}
+	return s.FullSync(ctx, f, ft, name, t.inst.BaseURL, s.historyDays())
 }
 
 const maxJobFetchesPerRepo = 50
 
-func (s *Service) FullSync(ctx context.Context, f forge.Forge, instanceName, baseURL string, historyDays int) (*Result, error) {
+func (s *Service) FullSync(ctx context.Context, f forge.Forge, forgeType, instanceName, baseURL string, historyDays int) (*Result, error) {
 	started := time.Now()
-	res, err := s.fullSync(ctx, f, instanceName, baseURL, historyDays)
-	lensmetrics.ObserveSync(started, err)
+	res, err := s.fullSync(ctx, f, forgeType, instanceName, baseURL, historyDays)
+	gitseermetrics.ObserveSync(started, err)
 	return res, err
 }
 
-func (s *Service) fullSync(ctx context.Context, f forge.Forge, instanceName, baseURL string, historyDays int) (*Result, error) {
+func (s *Service) fullSync(ctx context.Context, f forge.Forge, forgeType, instanceName, baseURL string, historyDays int) (*Result, error) {
+	ft := forgeType
+	if ft == "" {
+		ft = models.ForgeTypeGitea
+	}
 	info, err := f.GetInstance(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
@@ -126,9 +292,9 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, instanceName, bas
 	}
 	capsJSON, _ := json.Marshal(caps)
 	if instanceName == "" {
-		instanceName = "Gitea"
+		instanceName = s.defaultInstanceName(ft)
 	}
-	inst, err := s.store.UpsertInstanceByURL(ctx, instanceName, baseURL, info.Version, string(capsJSON))
+	inst, err := s.store.UpsertInstanceMeta(ctx, ft, instanceName, baseURL, info.Version, string(capsJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +331,7 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, instanceName, bas
 	if len(seen) > 0 {
 		_ = s.store.SoftDeleteMissing(ctx, inst.ID, seen, syncStart)
 	} else {
-		s.log.Warn("repo sync returned zero repositories; skipping soft-delete")
+		s.log.Warn("repo sync returned zero repositories; skipping soft-delete", "forge", ft, "instance_id", inst.ID)
 	}
 
 	repos, err := s.store.ListAllAliveRepos(ctx, inst.ID)
@@ -288,9 +454,10 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, instanceName, bas
 	}
 
 	_ = s.store.SetSyncState(ctx, inst.ID, "instance", "complete", "")
-	s.log.Info("full sync complete", "repos", repoCount, "prs", prCount, "runs", runCount, "jobs", jobCount)
+	s.log.Info("full sync complete", "forge", ft, "instance_id", inst.ID, "repos", repoCount, "prs", prCount, "runs", runCount, "jobs", jobCount)
 	return &Result{
 		InstanceID:           inst.ID,
+		ForgeType:            ft,
 		Version:              info.Version,
 		RepositoriesUpserted: repoCount,
 		PullRequestsUpserted: prCount,
@@ -340,17 +507,41 @@ func (s *Service) RunReconcile(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ok, err := s.store.TryAcquireSyncLease(ctx, "lens", interval)
-			if err != nil || !ok {
-				continue
-			}
-			url, token, _ := s.giteaConn()
-			if url == "" || token == "" {
-				continue
-			}
-			if _, err := s.SyncFromConfig(ctx); err != nil {
-				s.log.Error("reconcile failed", "err", err)
-			}
+			s.reconcileOnce(ctx, interval)
 		}
 	}
+}
+
+func (s *Service) reconcileOnce(ctx context.Context, leaseTTL time.Duration) {
+	targets, err := s.syncTargets(ctx)
+	if err != nil || len(targets) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		t := t
+		// Ensure instance row exists so lease id is stable (legacy fallback has id 0).
+		instID := t.inst.ID
+		if instID <= 0 {
+			meta, err := s.store.UpsertInstanceMeta(ctx, t.inst.ForgeType, t.inst.Name, t.inst.BaseURL, t.inst.Version, t.inst.CapabilitiesJSON)
+			if err != nil || meta == nil {
+				continue
+			}
+			instID = meta.ID
+			t.inst.ID = instID
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			holder := fmt.Sprintf("gitseer-instance-%d", instID)
+			ok, err := s.store.TryAcquireSyncLease(ctx, instID, holder, leaseTTL)
+			if err != nil || !ok {
+				return
+			}
+			if _, err := s.syncTarget(ctx, t); err != nil {
+				s.log.Error("reconcile failed", "instance_id", instID, "forge", t.inst.ForgeType, "err", err)
+			}
+		}()
+	}
+	wg.Wait()
 }

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
+	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
 )
 
 type Event struct {
@@ -63,7 +63,7 @@ func (h *Hub) Publish(ev Event) {
 		select {
 		case ch <- ev:
 		default:
-			lensmetrics.SSEEventsDroppedTotal.Inc()
+			gitseermetrics.SSEEventsDroppedTotal.Inc()
 		}
 	}
 }

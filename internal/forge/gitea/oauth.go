@@ -8,7 +8,7 @@ import (
 )
 
 // DefaultOAuthAppName is the application name Lens creates on Gitea.
-const DefaultOAuthAppName = "Gitea Lens"
+const DefaultOAuthAppName = "GitSeer"
 
 // OAuthAppPreview is the create-app summary shown in the setup wizard.
 type OAuthAppPreview struct {

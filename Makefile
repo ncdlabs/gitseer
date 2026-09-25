@@ -1,7 +1,7 @@
 .PHONY: deps frontend frontend-dev build test run stop restart tidy lint install
 
 GO ?= go
-BIN ?= bin/lens
+BIN ?= bin/gitseer
 
 deps:
 	$(GO) mod tidy
@@ -17,10 +17,10 @@ frontend-dev:
 	cd web && npm run start
 
 build: frontend
-	$(GO) build -o $(BIN) ./cmd/lens
+	$(GO) build -o $(BIN) ./cmd/gitseer
 
 build-go:
-	$(GO) build -o $(BIN) ./cmd/lens
+	$(GO) build -o $(BIN) ./cmd/gitseer
 
 test:
 	$(GO) test ./...

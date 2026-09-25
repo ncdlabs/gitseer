@@ -1,6 +1,6 @@
-# Gitea Lens documentation
+# GitSeer documentation
 
-Operator and developer reference for Gitea Lens. The root [README](../README.md) is the quick start; this tree holds depth.
+Operator and developer reference for GitSeer (dual-forge Gitea + GitHub; technical IDs are `gitseer`). The root [README](../README.md) is the quick start; this tree holds depth.
 
 | Guide | Contents |
 |-------|----------|
@@ -28,4 +28,4 @@ Operator and developer reference for Gitea Lens. The root [README](../README.md)
 
 ## Wiki
 
-The same guides are prepared for the GitHub wiki (`../gitea-lens.wiki` sibling clone). Publish after creating the first wiki page in the GitHub UI (the `.wiki.git` remote does not exist until then): [ncdlabs/gitea-lens/wiki](https://github.com/ncdlabs/gitea-lens/wiki).
+The same guides are prepared for the GitHub wiki (`../gitseer.wiki` sibling clone). Publish after creating the first wiki page in the GitHub UI (the `.wiki.git` remote does not exist until then): [ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki).

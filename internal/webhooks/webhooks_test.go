@@ -1,19 +1,23 @@
 package webhooks
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/database"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/realtime"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/database"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/realtime"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 func TestValidHMAC(t *testing.T) {
@@ -25,6 +29,22 @@ func TestValidHMAC(t *testing.T) {
 		t.Fatal("expected valid")
 	}
 	if VerifySignatureForTest("sekret", body, "deadbeef") {
+		t.Fatal("expected invalid")
+	}
+}
+
+func TestValidGitHubSignature(t *testing.T) {
+	body := []byte(`{"action":"opened"}`)
+	mac := hmac.New(sha256.New, []byte("gh-sekret"))
+	mac.Write(body)
+	header := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	if !VerifyGitHubSignatureForTest("gh-sekret", body, header) {
+		t.Fatal("expected valid github signature")
+	}
+	if VerifyGitHubSignatureForTest("gh-sekret", body, hex.EncodeToString(mac.Sum(nil))) {
+		t.Fatal("bare hex must fail without sha256= prefix")
+	}
+	if VerifyGitHubSignatureForTest("gh-sekret", body, "sha256=deadbeef") {
 		t.Fatal("expected invalid")
 	}
 }
@@ -109,5 +129,41 @@ func TestApplyJobStepsJSONAndSSE(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for workflow_job SSE event")
+	}
+}
+
+func TestGitHubWebhookAcceptsSignedDelivery(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "gh-wh.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name:                    "GitHub",
+		ForgeType:               models.ForgeTypeGitHub,
+		BaseURL:                 "https://api.github.com",
+		WebhookSecretCiphertext: "gh-hook-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProcessor(st, nil, nil, nil)
+	body := []byte(`{"action":"opened","pull_request":{"id":1,"number":1,"title":"t","state":"open"},"repository":{"id":9,"name":"r","full_name":"o/r","owner":{"login":"o"}}}`)
+	mac := hmac.New(sha256.New, []byte("gh-hook-secret"))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/webhooks/github/%d", inst.ID), bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sig)
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-GitHub-Delivery", "deliv-1")
+	rr := httptest.NewRecorder()
+	p.HandleGitHubHTTPForInstance(rr, req, inst.ID)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

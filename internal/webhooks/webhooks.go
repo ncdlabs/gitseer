@@ -1,4 +1,4 @@
-// Package webhooks accepts, persists, and applies Gitea webhook deliveries.
+// Package webhooks accepts, persists, and applies forge webhook deliveries.
 package webhooks
 
 import (
@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,24 +15,32 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/attention"
-	"github.com/ncdlabs/gitea-lens/internal/forge"
-	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/realtime"
-	"github.com/ncdlabs/gitea-lens/internal/store"
-	"github.com/ncdlabs/gitea-lens/internal/workflows"
+	"github.com/ncdlabs/gitseer/internal/attention"
+	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
+	"github.com/ncdlabs/gitseer/internal/forge"
+	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/realtime"
+	"github.com/ncdlabs/gitseer/internal/store"
+	"github.com/ncdlabs/gitseer/internal/workflows"
 )
 
 const maxBody = 2 << 20
+
+// SecretOpener decrypts per-instance webhook secret ciphertext.
+type SecretOpener interface {
+	OpenSecret(stored string) (string, error)
+}
 
 type Processor struct {
 	store         *store.Store
 	att           *attention.Engine
 	hub           *realtime.Hub
 	log           *slog.Logger
+	secrets       SecretOpener
+	encKey        []byte
 	mu            sync.RWMutex
-	secret        string // optional HMAC secret from config/settings
+	secret        string // optional legacy HMAC secret from config/settings (Gitea primary path)
 	allowUnsigned bool
 }
 
@@ -54,13 +63,53 @@ func (p *Processor) SetAllowUnsigned(allow bool) {
 	p.allowUnsigned = allow
 }
 
+// SetSecretOpener attaches decrypt for per-instance webhook secrets.
+func (p *Processor) SetSecretOpener(o SecretOpener) {
+	p.secrets = o
+}
+
+// SetEncryptionKey enables direct decrypt when SecretOpener is unset.
+func (p *Processor) SetEncryptionKey(key []byte) {
+	p.encKey = key
+}
+
+func (p *Processor) openSecret(stored string) (string, error) {
+	stored = strings.TrimSpace(stored)
+	if stored == "" {
+		return "", nil
+	}
+	if p.secrets != nil {
+		return p.secrets.OpenSecret(stored)
+	}
+	if len(p.encKey) != 32 {
+		if gitseercrypto.LooksLikeCiphertext(stored) {
+			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
+		}
+		return stored, nil
+	}
+	return gitseercrypto.Decrypt(p.encKey, stored)
+}
+
 func (p *Processor) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.HandleHTTPForInstance(w, r, 0)
 }
 
-// HandleHTTPForInstance accepts a webhook for a specific Lens instance ID.
+// HandleHTTPForInstance accepts a Gitea webhook for a specific Lens instance ID.
 // When instanceID is 0, the primary (oldest) instance is used.
 func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
+	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeGitea)
+}
+
+// HandleGitHubHTTPForInstance accepts a GitHub webhook for a specific Lens instance ID.
+func (p *Processor) HandleGitHubHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
+	if instanceID <= 0 {
+		http.Error(w, "instance required", http.StatusBadRequest)
+		return
+	}
+	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeGitHub)
+}
+
+func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, instanceID int64, forgeType string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
 		http.Error(w, "read error", http.StatusBadRequest)
@@ -70,25 +119,7 @@ func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request
 		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	p.mu.RLock()
-	secret := p.secret
-	allowUnsigned := p.allowUnsigned
-	p.mu.RUnlock()
-	if secret != "" {
-		sig := r.Header.Get("X-Gitea-Signature")
-		if !validHMAC(secret, body, sig) {
-			http.Error(w, "invalid signature", http.StatusUnauthorized)
-			return
-		}
-	} else if !allowUnsigned {
-		http.Error(w, "webhook secret required", http.StatusUnauthorized)
-		return
-	}
-	eventType := r.Header.Get("X-Gitea-Event")
-	if eventType == "" {
-		eventType = r.Header.Get("X-GitHub-Event")
-	}
-	delivery := r.Header.Get("X-Gitea-Delivery")
+
 	var inst *models.Instance
 	if instanceID > 0 {
 		inst, err = p.store.GetInstanceByID(r.Context(), instanceID)
@@ -99,6 +130,35 @@ func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request
 		http.Error(w, "no instance", http.StatusServiceUnavailable)
 		return
 	}
+	if forgeType != "" && inst.ForgeType != "" && inst.ForgeType != forgeType {
+		http.Error(w, "forge type mismatch", http.StatusBadRequest)
+		return
+	}
+
+	secret, allowUnsigned, err := p.webhookAuthForInstance(inst)
+	if err != nil {
+		p.log.Error("webhook secret decrypt", "instance_id", inst.ID, "err", err)
+		http.Error(w, "webhook secret unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if secret != "" {
+		ok := false
+		switch forgeType {
+		case models.ForgeTypeGitHub:
+			ok = validGitHubSignature(secret, body, r.Header.Get("X-Hub-Signature-256"))
+		default:
+			ok = validHMAC(secret, body, r.Header.Get("X-Gitea-Signature"))
+		}
+		if !ok {
+			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			return
+		}
+	} else if !allowUnsigned {
+		http.Error(w, "webhook secret required", http.StatusUnauthorized)
+		return
+	}
+
+	eventType, delivery := webhookHeaders(r, forgeType)
 	_, inserted, err := p.store.InsertWebhookEvent(r.Context(), inst.ID, delivery, eventType, string(body))
 	if err != nil {
 		p.log.Error("persist webhook", "err", err)
@@ -106,7 +166,7 @@ func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if inserted {
-		lensmetrics.WebhooksReceivedTotal.WithLabelValues(eventType).Inc()
+		gitseermetrics.WebhooksReceivedTotal.WithLabelValues(eventType).Inc()
 	}
 	if !inserted {
 		w.WriteHeader(http.StatusOK)
@@ -117,11 +177,56 @@ func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write([]byte(`{"status":"accepted"}`))
 }
 
+func (p *Processor) webhookAuthForInstance(inst *models.Instance) (secret string, allowUnsigned bool, err error) {
+	if inst != nil && strings.TrimSpace(inst.WebhookSecretCiphertext) != "" {
+		secret, err = p.openSecret(inst.WebhookSecretCiphertext)
+		if err != nil {
+			return "", false, err
+		}
+		return secret, inst.AllowUnsignedWebhooks, nil
+	}
+	// Legacy global settings (primary Gitea path / pre-migration).
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	allow := p.allowUnsigned
+	if inst != nil {
+		allow = allow || inst.AllowUnsignedWebhooks
+	}
+	return p.secret, allow, nil
+}
+
+func webhookHeaders(r *http.Request, forgeType string) (eventType, delivery string) {
+	switch forgeType {
+	case models.ForgeTypeGitHub:
+		return r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
+	default:
+		eventType = r.Header.Get("X-Gitea-Event")
+		if eventType == "" {
+			eventType = r.Header.Get("X-GitHub-Event")
+		}
+		delivery = r.Header.Get("X-Gitea-Delivery")
+		if delivery == "" {
+			delivery = r.Header.Get("X-GitHub-Delivery")
+		}
+		return eventType, delivery
+	}
+}
+
 func validHMAC(secret string, body []byte, sig string) bool {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(strings.ToLower(sig)), []byte(strings.ToLower(expected)))
+}
+
+// validGitHubSignature checks X-Hub-Signature-256: sha256=<hex>.
+func validGitHubSignature(secret string, body []byte, header string) bool {
+	header = strings.TrimSpace(header)
+	const prefix = "sha256="
+	if !strings.HasPrefix(strings.ToLower(header), prefix) {
+		return false
+	}
+	return validHMAC(secret, body, header[len(prefix):])
 }
 
 func (p *Processor) Run(ctx context.Context) {
@@ -151,7 +256,7 @@ func (p *Processor) Run(ctx context.Context) {
 				if err := p.apply(ctx, ev); err != nil {
 					errMsg = err.Error()
 					p.log.Warn("webhook apply failed", "id", ev.ID, "type", ev.EventType, "err", err)
-					lensmetrics.WebhookProcessingErrorsTotal.WithLabelValues(ev.EventType).Inc()
+					gitseermetrics.WebhookProcessingErrorsTotal.WithLabelValues(ev.EventType).Inc()
 				}
 				if err := p.store.MarkWebhookProcessed(ctx, ev.ID, errMsg); err != nil {
 					p.log.Error("mark webhook processed failed", "id", ev.ID, "err", err)
@@ -514,5 +619,10 @@ func parseWebhookTime(s string) *time.Time {
 // VerifySignatureForTest exports HMAC check for tests.
 func VerifySignatureForTest(secret string, body []byte, sig string) bool {
 	return validHMAC(secret, body, sig)
+}
+
+// VerifyGitHubSignatureForTest exports GitHub X-Hub-Signature-256 check for tests.
+func VerifyGitHubSignatureForTest(secret string, body []byte, header string) bool {
+	return validGitHubSignature(secret, body, header)
 }
 

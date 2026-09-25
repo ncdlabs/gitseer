@@ -1,4 +1,4 @@
-module github.com/ncdlabs/gitea-lens
+module github.com/ncdlabs/gitseer
 
 go 1.26.0
 

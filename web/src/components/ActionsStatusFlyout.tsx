@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { ActiveActionsPanel, openActionsPopout, useActiveActionsCount } from "./ActiveActionsPanel";
 import { Glyph } from "./Glyph";
 
-const OPEN_KEY = "lens-actions-flyout-open";
+const OPEN_KEY = "gitseer-actions-flyout-open";
 
 function readOpen(): boolean {
   try {

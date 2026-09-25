@@ -317,6 +317,16 @@ tbody tr:hover td {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
 }
+.badge--forge {
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+.badge--forge-gitea {
+  color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+}
+.badge--forge-github {
+  color: color-mix(in srgb, var(--fg) 80%, var(--muted));
+}
 
 /* —— Buttons —— */
 .btn {
@@ -410,6 +420,38 @@ tbody tr:hover td {
   align-items: center;
   gap: 0.45rem;
   flex-shrink: 0;
+}
+.forge-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+}
+.forge-filter__chip {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 0.28rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.forge-filter__chip:hover {
+  color: var(--fg);
+}
+.forge-filter__chip.is-active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  color: var(--fg);
+}
+.forge-filter__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .list-filter {
   display: flex;
@@ -1114,6 +1156,63 @@ tbody tr:hover td {
 }
 @media (max-width: 40rem) {
   .setup-wizard__connect-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.forge-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.forge-picker__card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  text-align: left;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.forge-picker__card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.forge-picker__card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.forge-picker__card.is-disabled,
+.forge-picker__card:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+.forge-picker__title {
+  font-weight: 600;
+  font-size: var(--font-size-md);
+}
+.forge-picker__badge {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+.forge-picker__desc {
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+@media (max-width: 40rem) {
+  .forge-picker {
     grid-template-columns: 1fr;
   }
 }
@@ -2944,3 +3043,36 @@ td.empty {
   box-shadow: inset 2px 0 var(--accent);
 }
 
+
+/* GitSeer identity: vector emblem and self-hosted Inter wordmark. */
+@font-face {
+  font-family: "GitSeer Inter";
+  src: url("../assets/fonts/InterVariable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+.brand-img.gitseer-brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18em;
+  color: var(--brand-base);
+  font-size: 28px;
+  line-height: 1;
+  vertical-align: middle;
+}
+.gitseer-brand__emblem { display: block; width: 1.68em; height: 1.008em; flex: none; }
+.gitseer-brand__wordmark {
+  font-family: "GitSeer Inter", sans-serif;
+  font-weight: 700;
+  font-optical-sizing: none;
+  font-variation-settings: "opsz" 32;
+  letter-spacing: -0.045em;
+  white-space: nowrap;
+  user-select: text;
+}
+.gitseer-brand__wordmark > span { color: var(--brand-accent); }
+.brand-img.gitseer-brand--mark .gitseer-brand__emblem { width: 100%; height: 100%; }
+.brand-img.gitseer-brand.login__logo { font-size: clamp(28px, 7vw, 42px); }
+.brand-img.gitseer-brand.setup-wizard__logo { font-size: clamp(23px, 5vw, 30px); }

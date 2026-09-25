@@ -15,27 +15,29 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ncdlabs/gitea-lens/internal/attention"
-	"github.com/ncdlabs/gitea-lens/internal/auth"
-	"github.com/ncdlabs/gitea-lens/internal/authz"
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/forge"
-	"github.com/ncdlabs/gitea-lens/internal/forge/gitea"
-	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/ratelimit"
-	"github.com/ncdlabs/gitea-lens/internal/realtime"
-	"github.com/ncdlabs/gitea-lens/internal/settings"
-	"github.com/ncdlabs/gitea-lens/internal/store"
-	"github.com/ncdlabs/gitea-lens/internal/sync"
-	"github.com/ncdlabs/gitea-lens/internal/theme"
-	"github.com/ncdlabs/gitea-lens/internal/webhooks"
-	"github.com/ncdlabs/gitea-lens/internal/workflows"
+	"github.com/ncdlabs/gitseer/internal/attention"
+	"github.com/ncdlabs/gitseer/internal/auth"
+	"github.com/ncdlabs/gitseer/internal/authz"
+	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/forge"
+	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	"github.com/ncdlabs/gitseer/internal/forge/gitea"
+	"github.com/ncdlabs/gitseer/internal/forge/github"
+	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/ratelimit"
+	"github.com/ncdlabs/gitseer/internal/realtime"
+	"github.com/ncdlabs/gitseer/internal/settings"
+	"github.com/ncdlabs/gitseer/internal/store"
+	"github.com/ncdlabs/gitseer/internal/sync"
+	"github.com/ncdlabs/gitseer/internal/theme"
+	"github.com/ncdlabs/gitseer/internal/webhooks"
+	"github.com/ncdlabs/gitseer/internal/workflows"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // errUserTokenRequired is returned when an OAuth user has no decryptable Gitea token for user-scoped forge calls.
-var errUserTokenRequired = errors.New("user gitea token unavailable; sign in with OAuth again (requires LENS_ENCRYPTION_KEY)")
+var errUserTokenRequired = errors.New("user gitea token unavailable; sign in with OAuth again (requires GITSEER_ENCRYPTION_KEY)")
 
 type ctxKey int
 
@@ -78,9 +80,9 @@ func New(
 }
 
 func (h *Handler) MetricsHandler() http.Handler {
-	lensmetrics.Register()
+	gitseermetrics.Register()
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lensmetrics.RefreshGauges(r.Context(), h.store)
+		gitseermetrics.RefreshGauges(r.Context(), h.store)
 		promhttp.Handler().ServeHTTP(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +151,7 @@ func (h *Handler) Routes(r chi.Router) {
 
 	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea", h.wh.HandleHTTP)
 	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea/{instanceID}", h.webhookByInstance)
+	r.With(webhookLimit.Middleware).Post("/api/webhooks/github/{instanceID}", h.webhookGitHubByInstance)
 }
 
 func (h *Handler) webhookByInstance(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +161,15 @@ func (h *Handler) webhookByInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.wh.HandleHTTPForInstance(w, r, id)
+}
+
+func (h *Handler) webhookGitHubByInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "instanceID"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid instance", http.StatusBadRequest)
+		return
+	}
+	h.wh.HandleGitHubHTTPForInstance(w, r, id)
 }
 
 func (h *Handler) requireCSRF(next http.Handler) http.Handler {
@@ -202,7 +214,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 
 func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
 	if !h.auth.BootstrapEnabled() {
-		writeError(w, http.StatusServiceUnavailable, "bootstrap auth is not configured; set LENS_AUTH_BOOTSTRAP_PASSWORD")
+		writeError(w, http.StatusServiceUnavailable, "bootstrap auth is not configured; set GITSEER_AUTH_BOOTSTRAP_PASSWORD")
 		return
 	}
 	var body struct {
@@ -222,7 +234,7 @@ func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if inst, _ := h.store.GetPrimaryInstance(r.Context()); inst != nil {
-		_ = h.store.GrantBootstrapAllAccess(r.Context(), user.ID, inst.ID)
+		_ = h.store.GrantBootstrapAllAccessAllInstances(r.Context(), user.ID)
 	}
 	h.auth.SetSessionCookie(w, token)
 	csrf, _ := h.auth.IssueCSRFToken(w)
@@ -240,7 +252,7 @@ func (h *Handler) oauthLogin(w http.ResponseWriter, r *http.Request) {
 	url, err := h.auth.BeginOAuth(r.Context(), redirectTo)
 	if err != nil {
 		if errors.Is(err, auth.ErrOAuthNotConfigured) {
-			writeError(w, http.StatusServiceUnavailable, "oauth is not configured; set LENS_AUTH_OAUTH_CLIENT_ID, LENS_SERVER_EXTERNAL_URL, and LENS_GITEA_URL")
+			writeError(w, http.StatusServiceUnavailable, "oauth is not configured; set GITSEER_AUTH_OAUTH_CLIENT_ID, GITSEER_SERVER_EXTERNAL_URL, and GITSEER_GITEA_URL")
 			return
 		}
 		h.log.Error("oauth begin", "err", err)
@@ -294,6 +306,19 @@ func (h *Handler) effectiveIntegration() settings.Integration {
 	}
 }
 
+func (h *Handler) effectiveGitHub() settings.GitHubIntegration {
+	if h.settings != nil {
+		return h.settings.GitHub()
+	}
+	return settings.GitHubIntegration{
+		URL:                   h.cfg.GitHub.URL,
+		Token:                 h.cfg.GitHub.Token,
+		WebhookSecret:         h.cfg.GitHub.WebhookSecret,
+		AllowPrivateNetwork:   h.cfg.GitHub.AllowPrivateNetwork,
+		AllowUnsignedWebhooks: h.cfg.GitHub.AllowUnsignedWebhooks,
+	}
+}
+
 // forgeClientForUser returns a forge client authenticated as the caller for user-scoped reads (e.g. job logs).
 // Bootstrap admins use the service token; OAuth users must have a decryptable stored access token.
 func (h *Handler) forgeClientForUser(ctx context.Context, user *models.User) (forge.Forge, error) {
@@ -324,36 +349,105 @@ func (h *Handler) forgeClientForUser(ctx context.Context, user *models.User) (fo
 }
 
 func (h *Handler) refreshUserACL(ctx context.Context, userID int64, userAccessToken string) error {
-	integ := h.effectiveIntegration()
-	if integ.URL == "" || userAccessToken == "" {
-		return fmt.Errorf("missing gitea url or user token")
+	if userAccessToken == "" {
+		return fmt.Errorf("missing user token")
 	}
-	client, err := gitea.New(integ.URL, integ.Token, integ.AllowPrivateNetwork)
+	instances, err := h.store.ListInstances(ctx)
 	if err != nil {
 		return err
 	}
-	inst, err := h.store.GetPrimaryInstance(ctx)
-	if err != nil || inst == nil {
-		return fmt.Errorf("no synced instance yet; run sync first")
-	}
-	var externalIDs []int64
-	for page := 1; ; page++ {
-		p, err := client.ListAccessibleReposForUser(ctx, userAccessToken, forge.ListReposOpts{Page: page, PageSize: 50})
+	var giteaInstanceIDs []int64
+	var repoIDs []int64
+	for _, inst := range instances {
+		ft := inst.ForgeType
+		if ft == "" {
+			ft = models.ForgeTypeGitea
+		}
+		// GitHub ACL is PAT-scoped until GitHub OAuth exists: do not refresh from Gitea
+		// OAuth tokens, and preserve any existing GitHub grants (instance-scoped replace).
+		if ft != models.ForgeTypeGitea {
+			continue
+		}
+		token, err := h.instanceSyncToken(ctx, inst)
+		if err != nil || token == "" {
+			// Fall back to effective integration token for the primary Gitea URL.
+			integ := h.effectiveIntegration()
+			if integ.URL == "" || integ.Token == "" {
+				continue
+			}
+			if strings.TrimSpace(inst.BaseURL) != "" && !strings.EqualFold(strings.TrimRight(inst.BaseURL, "/"), strings.TrimRight(integ.URL, "/")) {
+				continue
+			}
+			token = integ.Token
+		}
+		client, err := forge.NewFromInstance(inst, token)
 		if err != nil {
 			return err
 		}
-		for _, repo := range p.Items {
-			externalIDs = append(externalIDs, repo.ExternalID)
-		}
-		if !p.HasMore {
-			break
+		giteaInstanceIDs = append(giteaInstanceIDs, inst.ID)
+		for page := 1; ; page++ {
+			p, err := client.ListAccessibleReposForUser(ctx, userAccessToken, forge.ListReposOpts{Page: page, PageSize: 50})
+			if err != nil {
+				return err
+			}
+			var externalIDs []int64
+			for _, repo := range p.Items {
+				externalIDs = append(externalIDs, repo.ExternalID)
+			}
+			ids, err := h.store.MapExternalIDsToRepoIDs(ctx, inst.ID, externalIDs)
+			if err != nil {
+				return err
+			}
+			repoIDs = append(repoIDs, ids...)
+			if !p.HasMore {
+				break
+			}
 		}
 	}
-	ids, err := h.store.MapExternalIDsToRepoIDs(ctx, inst.ID, externalIDs)
-	if err != nil {
-		return err
+	if len(giteaInstanceIDs) == 0 {
+		// Legacy: no instance rows yet — use primary + integration.
+		integ := h.effectiveIntegration()
+		if integ.URL == "" || userAccessToken == "" {
+			return fmt.Errorf("missing gitea url or user token")
+		}
+		client, err := gitea.New(integ.URL, integ.Token, integ.AllowPrivateNetwork)
+		if err != nil {
+			return err
+		}
+		inst, err := h.store.GetPrimaryInstance(ctx)
+		if err != nil || inst == nil {
+			return fmt.Errorf("no synced instance yet; run sync first")
+		}
+		var externalIDs []int64
+		for page := 1; ; page++ {
+			p, err := client.ListAccessibleReposForUser(ctx, userAccessToken, forge.ListReposOpts{Page: page, PageSize: 50})
+			if err != nil {
+				return err
+			}
+			for _, repo := range p.Items {
+				externalIDs = append(externalIDs, repo.ExternalID)
+			}
+			if !p.HasMore {
+				break
+			}
+		}
+		ids, err := h.store.MapExternalIDsToRepoIDs(ctx, inst.ID, externalIDs)
+		if err != nil {
+			return err
+		}
+		return h.store.ReplaceUserRepoAccessForInstances(ctx, userID, []int64{inst.ID}, ids)
 	}
-	return h.store.ReplaceUserRepoAccess(ctx, userID, ids)
+	return h.store.ReplaceUserRepoAccessForInstances(ctx, userID, giteaInstanceIDs, repoIDs)
+}
+
+func (h *Handler) instanceSyncToken(_ context.Context, inst models.Instance) (string, error) {
+	if strings.TrimSpace(inst.SyncTokenCiphertext) == "" {
+		return "", fmt.Errorf("no sync token")
+	}
+	if h.settings == nil {
+		return "", fmt.Errorf("settings unavailable")
+	}
+	return h.settings.OpenSecret(inst.SyncTokenCiphertext)
 }
 
 // RefreshAllUserACLs reloads ACL rows for users with decryptable OAuth tokens.
@@ -449,30 +543,94 @@ func (h *Handler) systemStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) buildSystemStatus(ctx context.Context) map[string]any {
-	inst, _ := h.store.GetPrimaryInstance(ctx)
 	uiName := h.cfg.UI.InstanceName
 	integ := h.effectiveIntegration()
+	gh := h.effectiveGitHub()
 	setupCompleted := false
 	if h.settings != nil {
 		uiName = h.settings.Get().InstanceName
 		setupCompleted = h.settings.SetupCompleted()
 	}
+
+	instances, _ := h.store.ListInstances(ctx)
+	var giteaInst, githubInst *models.Instance
+	for i := range instances {
+		inst := &instances[i]
+		switch inst.ForgeType {
+		case models.ForgeTypeGitHub:
+			if githubInst == nil || (gh.URL != "" && inst.BaseURL == gh.URL) {
+				githubInst = inst
+			}
+		default:
+			if giteaInst == nil || (integ.URL != "" && inst.BaseURL == integ.URL) {
+				giteaInst = inst
+			}
+		}
+	}
+	// Legacy primary = first instance (often Gitea).
+	var primary *models.Instance
+	if len(instances) > 0 {
+		primary = &instances[0]
+	}
+
+	giteaConfigured := integ.URL != "" && integ.Token != ""
+	githubConfigured := gh.URL != "" && gh.Token != ""
+
+	forges := []map[string]any{
+		{
+			"forge_type":            models.ForgeTypeGitea,
+			"url":                   integ.URL,
+			"configured":            giteaConfigured,
+			"connected":             giteaInst != nil,
+			"webhook_hmac":          integ.WebhookSecret != "",
+			"oauth_configured":      integ.OAuthClientID != "" && integ.OAuthClientSecret != "",
+			"allow_private_network": integ.AllowPrivateNetwork,
+			"allow_unsigned":        integ.AllowUnsignedWebhooks,
+		},
+		{
+			"forge_type":            models.ForgeTypeGitHub,
+			"url":                   gh.URL,
+			"configured":            githubConfigured,
+			"connected":             githubInst != nil,
+			"webhook_hmac":          gh.WebhookSecret != "",
+			"oauth_configured":      false,
+			"allow_private_network": gh.AllowPrivateNetwork,
+			"allow_unsigned":        gh.AllowUnsignedWebhooks,
+		},
+	}
+	if giteaInst != nil {
+		forges[0]["version"] = giteaInst.Version
+		forges[0]["capabilities"] = json.RawMessage(giteaInst.CapabilitiesJSON)
+		forges[0]["instance_id"] = giteaInst.ID
+	}
+	if githubInst != nil {
+		forges[1]["version"] = githubInst.Version
+		forges[1]["capabilities"] = json.RawMessage(githubInst.CapabilitiesJSON)
+		forges[1]["instance_id"] = githubInst.ID
+	}
+
 	status := map[string]any{
 		"version":             h.version,
 		"ui_name":             uiName,
-		"gitea_configured":    integ.URL != "" && integ.Token != "",
+		"gitea_configured":    giteaConfigured,
+		"github_configured":   githubConfigured,
 		"bootstrap_auth":      h.auth.BootstrapEnabled(),
 		"oauth_enabled":       h.auth.OAuthEnabled(),
 		"path_prefix":         h.cfg.PathPrefix(),
-		"instance_connected":  inst != nil,
+		"instance_connected":  primary != nil,
 		"webhook_hmac":        integ.WebhookSecret != "",
+		"github_webhook_hmac": gh.WebhookSecret != "",
 		"setup_completed":     setupCompleted,
 		"oauth_redirect_uri":  h.auth.RedirectURI(),
 		"server_external_url": h.webhookDeliveryURLBase(),
+		"forges":              forges,
 	}
-	if inst != nil {
-		status["gitea_version"] = inst.Version
-		status["capabilities"] = json.RawMessage(inst.CapabilitiesJSON)
+	if giteaInst != nil {
+		status["gitea_version"] = giteaInst.Version
+		status["capabilities"] = json.RawMessage(giteaInst.CapabilitiesJSON)
+	}
+	if githubInst != nil {
+		status["github_version"] = githubInst.Version
 	}
 	return status
 }
@@ -553,16 +711,39 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type setupTestConnectionBody struct {
+	ForgeType string `json:"forge_type"` // gitea | github; default gitea
+
 	GiteaURL                 string `json:"gitea_url"`
 	GiteaToken               string `json:"gitea_token"`
 	GiteaAllowPrivateNetwork *bool  `json:"gitea_allow_private_network"`
+
+	GitHubURL                 string `json:"github_url"`
+	GitHubToken               string `json:"github_token"`
+	GitHubAllowPrivateNetwork *bool  `json:"github_allow_private_network"`
 }
 
 type setupWebhookBody struct {
+	ForgeType string `json:"forge_type"` // gitea | github; default gitea
+
 	GiteaURL                 string `json:"gitea_url"`
 	GiteaToken               string `json:"gitea_token"`
 	GiteaAllowPrivateNetwork *bool  `json:"gitea_allow_private_network"`
 	Create                   bool   `json:"create"` // true = create/update on Gitea; false = save secret only
+
+	GitHubURL                 string `json:"github_url"`
+	GitHubToken               string `json:"github_token"`
+	GitHubAllowPrivateNetwork *bool  `json:"github_allow_private_network"`
+}
+
+func normalizeSetupForgeType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case models.ForgeTypeGitHub:
+		return models.ForgeTypeGitHub
+	case "", models.ForgeTypeGitea:
+		return models.ForgeTypeGitea
+	default:
+		return ""
+	}
 }
 
 func (h *Handler) webhookDeliveryURLBase() string {
@@ -580,6 +761,17 @@ func (h *Handler) webhookDeliveryURL() string {
 		return ""
 	}
 	return base + "/api/webhooks/gitea"
+}
+
+func (h *Handler) githubWebhookDeliveryURL(instanceID int64) string {
+	base := h.webhookDeliveryURLBase()
+	if base == "" {
+		return ""
+	}
+	if instanceID > 0 {
+		return fmt.Sprintf("%s/api/webhooks/github/%d", base, instanceID)
+	}
+	return base + "/api/webhooks/github"
 }
 
 func (h *Handler) setupClientFromBody(body setupTestConnectionBody) (*gitea.Client, error) {
@@ -602,9 +794,32 @@ func (h *Handler) setupClientFromBody(body setupTestConnectionBody) (*gitea.Clie
 	return gitea.New(url, token, allowPrivate)
 }
 
+func (h *Handler) setupGitHubClientFromBody(body setupTestConnectionBody) (*github.Client, error) {
+	cur := h.effectiveGitHub()
+	url := strings.TrimSpace(body.GitHubURL)
+	if url == "" {
+		url = cur.URL
+	}
+	token := strings.TrimSpace(body.GitHubToken)
+	if token == "" {
+		token = cur.Token
+	}
+	allowPrivate := cur.AllowPrivateNetwork
+	if body.GitHubAllowPrivateNetwork != nil {
+		allowPrivate = *body.GitHubAllowPrivateNetwork
+	}
+	if url == "" || token == "" {
+		return nil, fmt.Errorf("github_url and github_token are required")
+	}
+	return github.New(url, token, allowPrivate)
+}
+
 type setupCheckGiteaURLBody struct {
-	GiteaURL                 string `json:"gitea_url"`
-	GiteaAllowPrivateNetwork *bool  `json:"gitea_allow_private_network"`
+	ForgeType                 string `json:"forge_type"` // gitea | github; default gitea
+	GiteaURL                  string `json:"gitea_url"`
+	GiteaAllowPrivateNetwork  *bool  `json:"gitea_allow_private_network"`
+	GitHubURL                 string `json:"github_url"`
+	GitHubAllowPrivateNetwork *bool  `json:"github_allow_private_network"`
 }
 
 func (h *Handler) setupCheckGiteaURL(w http.ResponseWriter, r *http.Request) {
@@ -616,6 +831,34 @@ func (h *Handler) setupCheckGiteaURL(w http.ResponseWriter, r *http.Request) {
 	var body setupCheckGiteaURLBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil && err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	ft := normalizeSetupForgeType(body.ForgeType)
+	if ft == "" {
+		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		return
+	}
+	if ft == models.ForgeTypeGitHub {
+		allowPrivate := false
+		if body.GitHubAllowPrivateNetwork != nil {
+			allowPrivate = *body.GitHubAllowPrivateNetwork
+		} else {
+			allowPrivate = h.effectiveGitHub().AllowPrivateNetwork
+		}
+		ok, normalized, err := github.CheckGitHubURL(body.GitHubURL, allowPrivate)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":         false,
+				"detail":     err.Error(),
+				"forge_type": models.ForgeTypeGitHub,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":         true,
+			"forge_type": models.ForgeTypeGitHub,
+			"github_url": normalized,
+		})
 		return
 	}
 	allowPrivate := false
@@ -643,6 +886,28 @@ func (h *Handler) setupTestConnection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	ft := normalizeSetupForgeType(body.ForgeType)
+	if ft == "" {
+		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		return
+	}
+	if ft == models.ForgeTypeGitHub {
+		client, err := h.setupGitHubClientFromBody(body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Preview URL without instance id; create-webhook returns the id-scoped URL.
+		delivery := h.githubWebhookDeliveryURL(0)
+		probe, err := client.ProbeConnection(r.Context(), delivery)
+		if err != nil {
+			h.log.Error("setup test-connection github", "err", err)
+			writeError(w, http.StatusBadGateway, "connection probe failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, probe)
+		return
+	}
 	client, err := h.setupClientFromBody(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -660,6 +925,7 @@ func (h *Handler) setupTestConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 type setupOAuthBody struct {
+	ForgeType                string `json:"forge_type"` // gitea only; github rejected
 	GiteaURL                 string `json:"gitea_url"`
 	GiteaToken               string `json:"gitea_token"`
 	GiteaAllowPrivateNetwork *bool  `json:"gitea_allow_private_network"`
@@ -681,6 +947,15 @@ func (h *Handler) setupCreateOAuth(w http.ResponseWriter, r *http.Request) {
 	var body setupOAuthBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil && err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	ft := normalizeSetupForgeType(body.ForgeType)
+	if ft == "" {
+		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		return
+	}
+	if ft == models.ForgeTypeGitHub {
+		writeError(w, http.StatusBadRequest, "GitHub OAuth app auto-create is not supported; use a service PAT and complete setup without OAuth")
 		return
 	}
 
@@ -774,6 +1049,16 @@ func (h *Handler) setupCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	ft := normalizeSetupForgeType(body.ForgeType)
+	if ft == "" {
+		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		return
+	}
+	if ft == models.ForgeTypeGitHub {
+		h.setupCreateGitHubWebhook(w, r, body)
+		return
+	}
+
 	client, err := h.setupClientFromBody(setupTestConnectionBody{
 		GiteaURL:                 body.GiteaURL,
 		GiteaToken:               body.GiteaToken,
@@ -832,6 +1117,7 @@ func (h *Handler) setupCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	preview := gitea.NewWebhookPreview(delivery, secret)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
+		"forge_type":   models.ForgeTypeGitea,
 		"created":      created,
 		"updated":      body.Create && !created,
 		"manual":       !body.Create,
@@ -839,6 +1125,76 @@ func (h *Handler) setupCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		"webhook":      preview,
 		"integration":  pub,
 		"delivery_url": delivery,
+	})
+}
+
+func (h *Handler) setupCreateGitHubWebhook(w http.ResponseWriter, r *http.Request, body setupWebhookBody) {
+	cur := h.effectiveGitHub()
+	allowPrivate := cur.AllowPrivateNetwork
+	if body.GitHubAllowPrivateNetwork != nil {
+		allowPrivate = *body.GitHubAllowPrivateNetwork
+	}
+	ghURL := strings.TrimSpace(body.GitHubURL)
+	if ghURL == "" {
+		ghURL = cur.URL
+	}
+	token := strings.TrimSpace(body.GitHubToken)
+	if token == "" {
+		token = cur.Token
+	}
+	if ghURL == "" || token == "" {
+		writeError(w, http.StatusBadRequest, "github_url and github_token are required")
+		return
+	}
+	if h.webhookDeliveryURLBase() == "" {
+		writeError(w, http.StatusBadRequest, "Lens public URL (server.external_url) is required to build the webhook URL")
+		return
+	}
+	secret, err := gitea.GenerateWebhookSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate webhook secret")
+		return
+	}
+
+	// Preserve Gitea side; apply GitHub credentials + generated webhook secret.
+	giteaCur := h.effectiveIntegration()
+	patch := settings.IntegrationPatch{
+		GiteaURL:                    giteaCur.URL,
+		GiteaAllowPrivateNetwork:    giteaCur.AllowPrivateNetwork,
+		GiteaAllowUnsignedWebhooks:  giteaCur.AllowUnsignedWebhooks,
+		OAuthClientID:               giteaCur.OAuthClientID,
+		ApplyGitHub:                 true,
+		GitHubURL:                   ghURL,
+		GitHubToken:                 token,
+		GitHubWebhookSecret:         secret,
+		GitHubAllowPrivateNetwork:   allowPrivate,
+		GitHubAllowUnsignedWebhooks: false,
+	}
+	pub, err := h.settings.UpdateIntegration(r.Context(), patch)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var instanceID int64
+	if norm, nerr := github.NormalizeBaseURL(ghURL); nerr == nil {
+		if inst, ierr := h.store.GetInstanceByForgeAndURL(r.Context(), models.ForgeTypeGitHub, norm); ierr == nil && inst != nil {
+			instanceID = inst.ID
+		}
+	}
+	delivery := h.githubWebhookDeliveryURL(instanceID)
+	preview := github.NewWebhookPreview(delivery, secret)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"forge_type":   models.ForgeTypeGitHub,
+		"created":      false,
+		"updated":      false,
+		"manual":       true,
+		"webhook":      preview,
+		"integration":  pub,
+		"delivery_url": delivery,
+		"instance_id":  instanceID,
+		"hint":         "Add this webhook manually in GitHub (org or repo settings). Auto-create is not supported.",
 	})
 }
 
@@ -857,6 +1213,10 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.settings == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings unavailable")
+		return
+	}
+	if !h.settings.AnyForgeConfigured() {
+		writeError(w, http.StatusBadRequest, "configure at least one forge (Gitea or GitHub) before completing setup")
 		return
 	}
 	if err := h.settings.SetSetupCompleted(r.Context(), true); err != nil {
@@ -881,7 +1241,7 @@ func (h *Handler) syncRepos(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "sync failed")
 		return
 	}
-	_ = h.store.GrantBootstrapAllAccess(r.Context(), user.ID, result.InstanceID)
+	_ = h.store.GrantBootstrapAllAccessAllInstances(r.Context(), user.ID)
 	writeJSON(w, http.StatusOK, result)
 }
 

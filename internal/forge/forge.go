@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 type ListReposOpts struct {

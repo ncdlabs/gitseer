@@ -1,4 +1,4 @@
-// Package metrics registers the PRD §41 Prometheus series for Lens.
+// Package metrics registers the PRD §41 Prometheus series for GitSeer.
 package metrics
 
 import (
@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/store"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -14,57 +14,57 @@ var (
 	registerOnce sync.Once
 
 	RepositoriesTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "lens_repositories_total",
-		Help: "Number of non-deleted repositories indexed by Lens",
+		Name: "gitseer_repositories_total",
+		Help: "Number of non-deleted repositories indexed by GitSeer",
 	})
 	OpenPullRequestsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "lens_open_pull_requests_total",
-		Help: "Number of open pull requests indexed by Lens",
+		Name: "gitseer_open_pull_requests_total",
+		Help: "Number of open pull requests indexed by GitSeer",
 	})
 	WorkflowRunsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "lens_workflow_runs_total",
-		Help: "Number of workflow runs retained by Lens",
+		Name: "gitseer_workflow_runs_total",
+		Help: "Number of workflow runs retained by GitSeer",
 	})
 	WorkflowFailuresTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "lens_workflow_failures_total",
+		Name: "gitseer_workflow_failures_total",
 		Help: "Number of workflow runs with failure conclusion",
 	})
 	WorkflowRunsActive = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "lens_workflow_runs_active",
+		Name: "gitseer_workflow_runs_active",
 		Help: "Number of workflow runs currently running",
 	})
 	WebhooksReceivedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "lens_webhooks_received_total",
-		Help: "Webhook deliveries accepted by Lens",
+		Name: "gitseer_webhooks_received_total",
+		Help: "Webhook deliveries accepted by GitSeer",
 	}, []string{"event"})
 	WebhookProcessingErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "lens_webhook_processing_errors_total",
+		Name: "gitseer_webhook_processing_errors_total",
 		Help: "Webhook apply failures",
 	}, []string{"event"})
 	SSEEventsDroppedTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "lens_sse_events_dropped_total",
+		Name: "gitseer_sse_events_dropped_total",
 		Help: "Realtime SSE events dropped because a subscriber buffer was full",
 	})
 	SyncDurationSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "lens_sync_duration_seconds",
+		Name:    "gitseer_sync_duration_seconds",
 		Help:    "Duration of full forge syncs",
 		Buckets: prometheus.DefBuckets,
 	})
 	SyncErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "lens_sync_errors_total",
+		Name: "gitseer_sync_errors_total",
 		Help: "Full sync failures",
 	})
 	GiteaAPIRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "lens_gitea_api_requests_total",
+		Name: "gitseer_gitea_api_requests_total",
 		Help: "Outbound Gitea API requests",
 	}, []string{"status"})
 	GiteaAPIErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "lens_gitea_api_errors_total",
+		Name: "gitseer_gitea_api_errors_total",
 		Help: "Outbound Gitea API errors",
 	})
 )
 
-// Register registers all Lens metrics with the default Prometheus registry once.
+// Register registers all GitSeer metrics with the default Prometheus registry once.
 func Register() {
 	registerOnce.Do(func() {
 		prometheus.MustRegister(

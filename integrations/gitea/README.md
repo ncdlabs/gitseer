@@ -7,8 +7,8 @@
 
 Markers:
 
-- `<!-- BEGIN GITEA-LENS -->` … `<!-- END GITEA-LENS -->`
-- `<!-- BEGIN GITEA-LENS-TABS -->` … `<!-- END GITEA-LENS-TABS -->`
+- `<!-- BEGIN GITSEER -->` … `<!-- END GITSEER -->`
+- `<!-- BEGIN GITSEER-TABS -->` … `<!-- END GITSEER-TABS -->`
 
 Admin content outside markers is preserved. `uninstall-ui` removes only marker blocks.
 

@@ -5,17 +5,17 @@
 SSRF guard fails closed on DNS errors and checks dial-time private IPs. Set:
 
 ```bash
-export LENS_GITEA_ALLOW_PRIVATE_NETWORK=true
+export GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true
 ```
 
 (or `gitea.allow_private_network: true` / Settings).
 
 ## Startup fails: webhook secret required
 
-When `gitea.url` / `LENS_GITEA_URL` is set, provide `LENS_WEBHOOK_SECRET` (or file). Lab-only escape hatch:
+When `gitea.url` / `GITSEER_GITEA_URL` is set, provide `GITSEER_WEBHOOK_SECRET` (or file). Lab-only escape hatch:
 
 ```bash
-export LENS_WEBHOOK_ALLOW_UNSIGNED=true
+export GITSEER_WEBHOOK_ALLOW_UNSIGNED=true
 ```
 
 ## OAuth redirect mismatch
@@ -40,7 +40,7 @@ Ensure the SPA received a CSRF token (`/api/v1/ui-config` or `/auth/me`) and sen
 
 ## Bootstrap login unavailable
 
-Empty `LENS_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password or use OAuth.
+Empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password or use OAuth.
 
 ## Embed / blank production UI
 
@@ -56,4 +56,4 @@ Insert paths use `RETURNING id` for some flows; broader Postgres production read
 
 ## Metrics 401
 
-`GET /metrics` requires a logged-in session cookie or `Authorization: Bearer` when `LENS_METRICS_TOKEN` is configured — not an open scrape target.
+`GET /metrics` requires a logged-in session cookie or `Authorization: Bearer` when `GITSEER_METRICS_TOKEN` is configured — not an open scrape target.

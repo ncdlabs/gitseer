@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 const (
@@ -390,8 +390,9 @@ func (e *Engine) Sweep(ctx context.Context, instanceID int64) error {
 	return nil
 }
 
-// RunPeriodicSweep ticks attention re-evaluation in the background.
-func (e *Engine) RunPeriodicSweep(ctx context.Context, interval time.Duration, instanceIDFn func(context.Context) (int64, error)) {
+// RunPeriodicSweep ticks attention re-evaluation in the background for every
+// instance ID returned by instanceIDsFn (multi-forge aware).
+func (e *Engine) RunPeriodicSweep(ctx context.Context, interval time.Duration, instanceIDsFn func(context.Context) ([]int64, error)) {
 	if interval <= 0 {
 		interval = 10 * time.Minute
 	}
@@ -402,12 +403,17 @@ func (e *Engine) RunPeriodicSweep(ctx context.Context, interval time.Duration, i
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			id, err := instanceIDFn(ctx)
-			if err != nil || id == 0 {
+			ids, err := instanceIDsFn(ctx)
+			if err != nil || len(ids) == 0 {
 				continue
 			}
-			if err := e.Sweep(ctx, id); err != nil {
-				e.log.Warn("attention sweep failed", "err", err)
+			for _, id := range ids {
+				if id == 0 {
+					continue
+				}
+				if err := e.Sweep(ctx, id); err != nil {
+					e.log.Warn("attention sweep failed", "instance_id", id, "err", err)
+				}
 			}
 		}
 	}

@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/ncdlabs/gitea-lens/internal/forge"
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/forge"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 // ProbeStatus is the outcome of one permission / connectivity check.

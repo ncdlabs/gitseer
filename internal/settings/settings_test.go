@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/database"
-	"github.com/ncdlabs/gitea-lens/internal/settings"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/database"
+	"github.com/ncdlabs/gitseer/internal/settings"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 func TestManagerLoadUpdate(t *testing.T) {
@@ -170,8 +170,8 @@ func TestIntegrationMergeLeaveBlankAndSetup(t *testing.T) {
 
 	// URL without webhook secret requires allow-unsigned.
 	_, err = mgr2.UpdateIntegration(ctx, settings.IntegrationPatch{
-		GiteaURL:                 "https://git.db.example",
-		ClearGiteaWebhookSecret:  true,
+		GiteaURL:                   "https://git.db.example",
+		ClearGiteaWebhookSecret:    true,
 		GiteaAllowUnsignedWebhooks: false,
 	})
 	if err == nil {
@@ -251,5 +251,162 @@ func TestOpenFailsClosedOnCiphertextWithoutKey(t *testing.T) {
 		t.Fatal("expected load to fail without encryption key when secrets are sealed")
 	} else if !strings.Contains(err.Error(), "ENCRYPTION_KEY") && !strings.Contains(err.Error(), "decrypt") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadSeedsGiteaInstanceFromSettings(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "seed.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	cfg.UI.InstanceName = "Ops"
+	cfg.Auth.EncryptionKey = "sixteen-chars-key!!"
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:                   "https://git.seed.example",
+		GiteaToken:                 "seed-token",
+		GiteaWebhookSecret:         "seed-hook",
+		GiteaAllowPrivateNetwork:   true,
+		GiteaAllowUnsignedWebhooks: false,
+		OAuthClientID:              "oauth-id",
+		OAuthClientSecret:          "oauth-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// UpdateIntegration upserts instance secrets immediately (not only on Load seed).
+	instImmediate, err := st.GetInstanceByForgeAndURL(ctx, "gitea", "https://git.seed.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instImmediate == nil || !store.InstanceHasSecrets(instImmediate) {
+		t.Fatal("expected instance secrets after UpdateIntegration")
+	}
+
+	// UpdateIntegration now upserts instance secrets immediately.
+	mgr2 := settings.New(cfg, st)
+	if err := mgr2.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.GetInstanceByForgeAndURL(ctx, "gitea", "https://git.seed.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst == nil {
+		t.Fatal("expected seeded instance")
+	}
+	if inst.Name != "Ops" || inst.ForgeType != "gitea" {
+		t.Fatalf("seeded meta = %+v", inst)
+	}
+	if !store.InstanceHasSecrets(inst) {
+		t.Fatal("expected seeded secrets")
+	}
+	if !inst.AllowPrivateNetwork || inst.AllowUnsignedWebhooks {
+		t.Fatalf("flags = %+v", inst)
+	}
+	if inst.OAuthClientID != "oauth-id" || inst.OAuthClientSecretCipher == "" {
+		t.Fatalf("oauth = id=%q cipher empty=%v", inst.OAuthClientID, inst.OAuthClientSecretCipher == "")
+	}
+
+	id := inst.ID
+	// Second load must not duplicate or clear secrets.
+	mgr3 := settings.New(cfg, st)
+	if err := mgr3.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again, err := st.GetInstanceByForgeAndURL(ctx, "gitea", "https://git.seed.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again == nil || again.ID != id {
+		t.Fatalf("reseed changed instance: %+v", again)
+	}
+	list, err := st.ListInstances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected one instance, got %d", len(list))
+	}
+}
+
+func TestUpdateIntegrationGitHubApplyFlag(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "gh.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	cfg.Auth.EncryptionKey = "sixteen-chars-key!!"
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without apply_github, github fields are ignored.
+	pub, err := mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:                   "https://git.example",
+		GiteaToken:                 "gtok",
+		GiteaWebhookSecret:         "ghook",
+		GiteaAllowPrivateNetwork:   false,
+		GiteaAllowUnsignedWebhooks: false,
+		GitHubURL:                  "https://github.com",
+		GitHubToken:                "ignored",
+		GitHubWebhookSecret:        "ignored",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pub.GitHubURL != "" || pub.GitHubTokenConfigured {
+		t.Fatalf("github should be untouched without apply_github: %+v", pub)
+	}
+
+	pub2, err := mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:                    "https://git.example",
+		GiteaAllowPrivateNetwork:    false,
+		GiteaAllowUnsignedWebhooks:  false,
+		ApplyGitHub:                 true,
+		GitHubURL:                   "https://github.com",
+		GitHubToken:                 "gh-token",
+		GitHubWebhookSecret:         "gh-hook",
+		GitHubAllowPrivateNetwork:   false,
+		GitHubAllowUnsignedWebhooks: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pub2.GitHubURL != "https://api.github.com" || !pub2.GitHubTokenConfigured || !pub2.GitHubWebhookSecretConfigured {
+		t.Fatalf("github public = %+v", pub2)
+	}
+	if mgr.GitHub().Token != "gh-token" {
+		t.Fatalf("github token = %q", mgr.GitHub().Token)
+	}
+	inst, err := st.GetInstanceByForgeAndURL(ctx, "github", "https://api.github.com")
+	if err != nil || inst == nil || !store.InstanceHasSecrets(inst) {
+		t.Fatalf("github instance = %+v err=%v", inst, err)
+	}
+	if !mgr.AnyForgeConfigured() {
+		t.Fatal("expected any forge configured")
+	}
+
+	mgr2 := settings.New(cfg, st)
+	if err := mgr2.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mgr2.GitHub().URL != "https://api.github.com" || mgr2.GitHub().Token != "gh-token" {
+		t.Fatalf("reloaded github = %+v", mgr2.GitHub())
 	}
 }

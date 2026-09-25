@@ -3,9 +3,16 @@ package models
 
 import "time"
 
+// Forge type values persisted on instances.forge_type.
+const (
+	ForgeTypeGitea  = "gitea"
+	ForgeTypeGitHub = "github"
+)
+
 type Instance struct {
 	ID                       int64
 	Name                     string
+	ForgeType                string
 	BaseURL                  string
 	Version                  string
 	CapabilitiesJSON         string
@@ -14,6 +21,8 @@ type Instance struct {
 	OAuthClientID            string
 	OAuthClientSecretCipher  string
 	ExternalURL              string
+	AllowPrivateNetwork      bool
+	AllowUnsignedWebhooks    bool
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 }
@@ -57,6 +66,7 @@ type Repository struct {
 	Empty         bool       `json:"empty"`
 	Fork          bool       `json:"fork"`
 	HTMLURL       string     `json:"html_url"`
+	ForgeType     string     `json:"forge_type,omitempty"` // gitea | github; from instances join on list
 	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -95,6 +105,7 @@ type PullRequest struct {
 	RepoOwner        string     `json:"repo_owner"`
 	RepoName         string     `json:"repo_name"`
 	RepoFull         string     `json:"repo_full"`
+	ForgeType        string     `json:"forge_type,omitempty"` // gitea | github; from instances join on list
 }
 
 type Workflow struct {
@@ -144,6 +155,7 @@ type WorkflowRun struct {
 	RepoOwner          string     `json:"repo_owner"`
 	RepoName           string     `json:"repo_name"`
 	RepoFull           string     `json:"repo_full"`
+	ForgeType          string     `json:"forge_type,omitempty"` // gitea | github; from instances join on list
 }
 
 type AttentionItem struct {

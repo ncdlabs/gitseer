@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 // Reserved / collision errors for OAuth user upserts.

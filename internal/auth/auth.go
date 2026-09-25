@@ -20,14 +20,14 @@ import (
 	"sync"
 	"time"
 
-	lenscrypto "github.com/ncdlabs/gitea-lens/internal/crypto"
-	"github.com/ncdlabs/gitea-lens/internal/forge/gitea"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
+	"github.com/ncdlabs/gitseer/internal/forge/gitea"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
-const CookieName = "lens_session"
-const CSRFCookieName = "lens_csrf"
+const CookieName = "gitseer_session"
+const CSRFCookieName = "gitseer_csrf"
 const CSRFHeaderName = "X-CSRF-Token"
 
 var ErrUnauthorized = errors.New("unauthorized")
@@ -67,7 +67,7 @@ func New(st *store.Store, cfg Config) *Service {
 	}
 	var encKey []byte
 	if cfg.EncryptionKey != "" {
-		k, err := lenscrypto.KeyFromString(cfg.EncryptionKey)
+		k, err := gitseercrypto.KeyFromString(cfg.EncryptionKey)
 		if err != nil {
 			// Invalid keys are rejected by config.Validate; leave encryption disabled only if empty.
 			encKey = nil
@@ -254,13 +254,13 @@ func (s *Service) persistUserToken(ctx context.Context, userID int64, tok *token
 	if len(s.encKey) != 32 || tok == nil || tok.AccessToken == "" {
 		return nil
 	}
-	accessCipher, err := lenscrypto.Encrypt(s.encKey, tok.AccessToken)
+	accessCipher, err := gitseercrypto.Encrypt(s.encKey, tok.AccessToken)
 	if err != nil {
 		return err
 	}
 	refreshCipher := ""
 	if tok.RefreshToken != "" {
-		refreshCipher, err = lenscrypto.Encrypt(s.encKey, tok.RefreshToken)
+		refreshCipher, err = gitseercrypto.Encrypt(s.encKey, tok.RefreshToken)
 		if err != nil {
 			return err
 		}
@@ -408,14 +408,14 @@ func (s *Service) UserAccessToken(ctx context.Context, userID int64) (string, er
 	if row.AccessCipher == "" {
 		return "", nil
 	}
-	access, err := lenscrypto.Decrypt(s.encKey, row.AccessCipher)
+	access, err := gitseercrypto.Decrypt(s.encKey, row.AccessCipher)
 	if err != nil {
 		return "", err
 	}
 	if !tokenNeedsRefresh(row.ExpiresAt) || row.RefreshCipher == "" {
 		return access, nil
 	}
-	refresh, err := lenscrypto.Decrypt(s.encKey, row.RefreshCipher)
+	refresh, err := gitseercrypto.Decrypt(s.encKey, row.RefreshCipher)
 	if err != nil || refresh == "" {
 		return access, nil
 	}

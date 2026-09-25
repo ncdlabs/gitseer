@@ -55,7 +55,7 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
   return (
     <div className={`app-shell${isRailCollapsed ? " app-shell--rail-collapsed" : ""}`}>
       <aside className="sidebar" aria-label="Main navigation">
-        <Link className="brand" to="/" aria-label="Gitea Lens dashboard">
+        <Link className="brand" to="/" aria-label="GitSeer dashboard">
           {isRailCollapsed ? (
             <Brand variant="mark" className="brand__img brand__img--mark" />
           ) : (
@@ -125,11 +125,11 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
                 disabled={syncing}
                 onClick={onSync}
                 type="button"
-                aria-label={syncing ? "Syncing from Gitea" : "Sync Now"}
+                aria-label={syncing ? "Syncing from forges" : "Sync Now"}
                 title={
                   syncing
-                    ? "Syncing repositories, pull requests, and workflow runs from Gitea…"
-                    : "Sync repositories, pull requests, and workflow runs from Gitea"
+                    ? "Syncing repositories, pull requests, and workflow runs from connected forges…"
+                    : "Sync repositories, pull requests, and workflow runs from connected forges"
                 }
               >
                 <Glyph name="sync" />

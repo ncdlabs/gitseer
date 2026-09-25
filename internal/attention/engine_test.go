@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/database"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/database"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 func setup(t *testing.T) (context.Context, *store.Store, *Engine, int64, *models.Repository) {

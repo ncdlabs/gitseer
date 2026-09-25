@@ -12,6 +12,8 @@ export type User = {
   gitea_theme?: string | null;
 };
 
+export type ForgeType = "gitea" | "github";
+
 export type Repository = {
   id: number;
   external_id: number;
@@ -22,6 +24,7 @@ export type Repository = {
   private: boolean;
   archived: boolean;
   html_url: string;
+  forge_type?: ForgeType | string;
 };
 
 export type PullRequest = {
@@ -36,6 +39,7 @@ export type PullRequest = {
   repo_name?: string;
   repo_full?: string;
   html_url: string;
+  forge_type?: ForgeType | string;
 };
 
 export type WorkflowRun = {
@@ -51,6 +55,7 @@ export type WorkflowRun = {
   started_at?: string;
   completed_at?: string;
   html_url: string;
+  forge_type?: ForgeType | string;
 };
 
 export type Job = {
@@ -166,7 +171,7 @@ function readCookie(name: string): string {
 }
 
 function csrfHeader(): Record<string, string> {
-  const token = csrfToken || readCookie("lens_csrf");
+  const token = csrfToken || readCookie("gitseer_csrf");
   return token ? { "X-CSRF-Token": token } : {};
 }
 
@@ -188,7 +193,7 @@ export function safeExternalHref(url?: string | null): string | undefined {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = (typeof window !== "undefined" && window.__LENS_BASE__) || "";
+  const base = (typeof window !== "undefined" && window.__GITSEER_BASE__) || "";
   const headers = new Headers(init?.headers);
   if (init?.body != null && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -250,6 +255,11 @@ export type IntegrationPublic = {
   gitea_allow_unsigned_webhooks: boolean;
   oauth_client_id: string;
   oauth_client_secret_configured: boolean;
+  github_url: string;
+  github_token_configured: boolean;
+  github_webhook_secret_configured: boolean;
+  github_allow_private_network: boolean;
+  github_allow_unsigned_webhooks: boolean;
 };
 
 export type IntegrationPatch = {
@@ -263,6 +273,14 @@ export type IntegrationPatch = {
   oauth_client_id: string;
   oauth_client_secret?: string;
   clear_oauth_client_secret?: boolean;
+  apply_github?: boolean;
+  github_url?: string;
+  github_token?: string;
+  github_webhook_secret?: string;
+  clear_github_token?: boolean;
+  clear_github_webhook_secret?: boolean;
+  github_allow_private_network?: boolean;
+  github_allow_unsigned_webhooks?: boolean;
 };
 
 export type UpdateSettingsBody = Partial<LensSettings> & {
@@ -270,32 +288,81 @@ export type UpdateSettingsBody = Partial<LensSettings> & {
   setup_completed?: boolean;
 };
 
+export type ForgeStatusRow = {
+  forge_type: string;
+  url?: string;
+  configured?: boolean;
+  connected?: boolean;
+  webhook_hmac?: boolean;
+  oauth_configured?: boolean;
+  allow_private_network?: boolean;
+  allow_unsigned?: boolean;
+  version?: string;
+  instance_id?: number;
+  capabilities?: unknown;
+};
+
+export type SystemStatus = {
+  version?: string;
+  ui_name?: string;
+  gitea_configured?: boolean;
+  github_configured?: boolean;
+  bootstrap_auth?: boolean;
+  oauth_enabled?: boolean;
+  path_prefix?: string;
+  instance_connected?: boolean;
+  webhook_hmac?: boolean;
+  github_webhook_hmac?: boolean;
+  setup_completed?: boolean;
+  oauth_redirect_uri?: string;
+  server_external_url?: string;
+  gitea_version?: string;
+  github_version?: string;
+  forges?: ForgeStatusRow[];
+  [key: string]: unknown;
+};
+
 export type SettingsResponse = {
   editable: boolean;
   settings: LensSettings;
   integration: IntegrationPublic;
   setup_completed: boolean;
-  status: Record<string, unknown>;
+  status: SystemStatus;
+};
+
+export type CompleteSetupResponse = {
+  setup_completed: boolean;
+  status: SystemStatus;
 };
 
 export type CheckGiteaURLBody = {
-  gitea_url: string;
+  forge_type?: ForgeType | string;
+  gitea_url?: string;
   gitea_allow_private_network?: boolean;
+  github_url?: string;
+  github_allow_private_network?: boolean;
 };
 
 export type CheckGiteaURLResponse = {
   ok: boolean;
+  forge_type?: string;
   gitea_url?: string;
+  github_url?: string;
   private?: boolean;
   private_ip?: string;
   code?: "invalid" | "unreachable" | "private_network" | string;
   error?: string;
+  detail?: string;
 };
 
 export type TestConnectionBody = {
+  forge_type?: ForgeType | string;
   gitea_url?: string;
   gitea_token?: string;
   gitea_allow_private_network?: boolean;
+  github_url?: string;
+  github_token?: string;
+  github_allow_private_network?: boolean;
 };
 
 export type ProbeCheckStatus = "ok" | "fail" | "warn" | "skip" | "pending" | "running";
@@ -309,7 +376,7 @@ export type ProbeCheck = {
 };
 
 export type WebhookPreview = {
-  type: string;
+  type?: string;
   active: boolean;
   events: string[];
   config: Record<string, string>;
@@ -325,6 +392,7 @@ export type OAuthAppPreview = {
 
 export type TestConnectionResponse = {
   ok: boolean;
+  forge_type?: string;
   version: string;
   login?: string;
   is_admin?: boolean;
@@ -334,6 +402,7 @@ export type TestConnectionResponse = {
   can_create_oauth?: boolean;
   webhook_preview?: WebhookPreview;
   oauth_app_preview?: OAuthAppPreview;
+  manual_webhook?: boolean;
 };
 
 export type CreateWebhookBody = TestConnectionBody & {
@@ -342,6 +411,7 @@ export type CreateWebhookBody = TestConnectionBody & {
 
 export type CreateWebhookResponse = {
   ok: boolean;
+  forge_type?: string;
   created?: boolean;
   updated?: boolean;
   manual?: boolean;
@@ -349,6 +419,8 @@ export type CreateWebhookResponse = {
   webhook: WebhookPreview;
   integration: IntegrationPublic;
   delivery_url: string;
+  instance_id?: number;
+  hint?: string;
 };
 
 export type CreateOAuthBody = TestConnectionBody & {
@@ -368,11 +440,6 @@ export type CreateOAuthResponse = {
   integration: IntegrationPublic;
 };
 
-export type CompleteSetupResponse = {
-  setup_completed: boolean;
-  status: Record<string, unknown>;
-};
-
 export type SearchResult = {
   repositories: Repository[];
   pull_requests: PullRequest[];
@@ -386,7 +453,7 @@ export const api = {
     return cfg;
   },
   me: async () => {
-    const base = (typeof window !== "undefined" && window.__LENS_BASE__) || "";
+    const base = (typeof window !== "undefined" && window.__GITSEER_BASE__) || "";
     const res = await fetch(`${base}/api/v1/auth/me`, { credentials: "include" });
     if (!res.ok) {
       let msg = res.statusText;
@@ -449,7 +516,7 @@ export const api = {
       body: JSON.stringify(body ?? {}),
     }),
   checkGiteaURL: async (body: CheckGiteaURLBody) => {
-    const base = (typeof window !== "undefined" && window.__LENS_BASE__) || "";
+    const base = (typeof window !== "undefined" && window.__GITSEER_BASE__) || "";
     const headers = new Headers({ "Content-Type": "application/json" });
     for (const [k, v] of Object.entries(csrfHeader())) {
       headers.set(k, v);
@@ -485,7 +552,7 @@ export const api = {
   completeSetup: () =>
     request<CompleteSetupResponse>("/api/v1/setup/complete", { method: "POST" }),
   jobLogs: async (id: number) => {
-    const base = (typeof window !== "undefined" && window.__LENS_BASE__) || "";
+    const base = (typeof window !== "undefined" && window.__GITSEER_BASE__) || "";
     const res = await fetch(`${base}/api/v1/jobs/${id}/logs`, { credentials: "include" });
     if (res.status === 401) {
       onUnauthorized?.();
@@ -498,6 +565,27 @@ export const api = {
 
 export function repoLabel(item: { repo_full?: string; full_name?: string }) {
   return item.repo_full || item.full_name || "";
+}
+
+export function forgeLabel(forgeType?: string | null): string {
+  switch ((forgeType || "").toLowerCase()) {
+    case "github":
+      return "GitHub";
+    case "gitea":
+      return "Gitea";
+    case "gitlab":
+      return "GitLab";
+    case "bitbucket":
+      return "Bitbucket";
+    default:
+      return forgeType ? forgeType : "Forge";
+  }
+}
+
+export function openOnForgeLabel(forgeType?: string | null): string {
+  const name = forgeLabel(forgeType);
+  if (name === "Forge") return "Open on Forge →";
+  return `Open on ${name} →`;
 }
 
 export function ciLabel(state?: string) {

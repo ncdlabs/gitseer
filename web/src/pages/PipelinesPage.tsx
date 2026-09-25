@@ -1,8 +1,17 @@
 import { Fragment, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, repoLabel, safeExternalHref, type WorkflowNode, type WorkflowRun } from "../api/client";
+import {
+  api,
+  openOnForgeLabel,
+  repoLabel,
+  safeExternalHref,
+  type WorkflowNode,
+  type WorkflowRun,
+} from "../api/client";
 import { ExpandCollapseControls } from "../components/ExpandCollapseControls";
+import { ForgeBadge } from "../components/ForgeBadge";
+import { ForgeFilterChips, matchesForgeFilter, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
 import { WorkflowDAG } from "../components/WorkflowDAG";
 import { useViewMode } from "../hooks/useViewMode";
@@ -13,6 +22,7 @@ type ActionGroup = {
   name: string;
   workflowPath: string;
   repoFull: string;
+  forgeType?: string;
   latest: WorkflowRun;
   runs: WorkflowRun[];
 };
@@ -55,6 +65,7 @@ function groupByAction(runs: WorkflowRun[]): ActionGroup[] {
       name: latest.name || workflowPath || `Action`,
       workflowPath,
       repoFull: latest.repo_full || repoLabel(latest) || "—",
+      forgeType: latest.forge_type,
       latest,
       runs: sorted,
     });
@@ -90,6 +101,7 @@ function RunList({ runs }: { runs: WorkflowRun[] }) {
 export function PipelinesPage() {
   const { mode, setMode } = useViewMode();
   const [filter, setFilter] = useState("");
+  const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
   const q = useQuery({
     queryKey: ["runs", filter],
     queryFn: () => api.workflowRuns(filter),
@@ -97,7 +109,10 @@ export function PipelinesPage() {
   });
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
-  const groups = useMemo(() => groupByAction(q.data?.items ?? []), [q.data?.items]);
+  const groups = useMemo(() => {
+    const items = (q.data?.items ?? []).filter((run) => matchesForgeFilter(run.forge_type, forgeFilter));
+    return groupByAction(items);
+  }, [q.data?.items, forgeFilter]);
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pipelines…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
@@ -114,7 +129,8 @@ export function PipelinesPage() {
   const anyOpen = groups.some((group) => openKeys.has(group.key));
   const expandAll = () => setOpenKeys(new Set(groups.map((group) => group.key)));
   const collapseAll = () => setOpenKeys(new Set());
-  const empty = filter ? "No pipelines match this filter." : "No workflow runs indexed yet.";
+  const empty =
+    filter || forgeFilter !== "all" ? "No pipelines match this filter." : "No workflow runs indexed yet.";
 
   return (
     <>
@@ -133,6 +149,7 @@ export function PipelinesPage() {
           filterPlaceholder="Filter pipelines…"
           filterLabel="Filter pipelines"
         >
+          <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} />
           {groups.length > 0 && (
             <ExpandCollapseControls
               onExpandAll={expandAll}
@@ -161,6 +178,7 @@ export function PipelinesPage() {
                   onClick={() => toggle(group.key)}
                 >
                   <div className="item-card__meta">
+                    <ForgeBadge forgeType={group.forgeType} />
                     {statusBadge(group.latest)}
                     <span className="item-card__age muted">
                       {group.runs.length} run{group.runs.length === 1 ? "" : "s"}
@@ -187,6 +205,7 @@ export function PipelinesPage() {
               <tr>
                 <th>Action</th>
                 <th>Repository</th>
+                <th>Forge</th>
                 <th>Latest</th>
                 <th>Runs</th>
               </tr>
@@ -214,12 +233,15 @@ export function PipelinesPage() {
                         </button>
                       </td>
                       <td className="mono">{group.repoFull}</td>
+                      <td>
+                        <ForgeBadge forgeType={group.forgeType} />
+                      </td>
                       <td>{statusBadge(group.latest)}</td>
                       <td>{group.runs.length}</td>
                     </tr>
                     {open && (
                       <tr className="action-table__detail">
-                        <td colSpan={4}>
+                        <td colSpan={5}>
                           <RunList runs={group.runs} />
                         </td>
                       </tr>
@@ -264,7 +286,7 @@ export function PipelineDetailPage() {
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
   if (!q.data) return <div className="error">Run not found.</div>;
   const { run, jobs, graph } = q.data;
-  const giteaHref = safeExternalHref(run.html_url);
+  const forgeHref = safeExternalHref(run.html_url);
   return (
     <>
       <div className="topbar">
@@ -275,13 +297,13 @@ export function PipelineDetailPage() {
           </p>
           <h1>{run.name}</h1>
           <p className="muted">
-            {repoLabel(run)} · {run.branch} ·{" "}
+            {repoLabel(run)} · {run.branch} · <ForgeBadge forgeType={run.forge_type} /> ·{" "}
             <span className={`badge ${run.conclusion || run.status}`}>{run.conclusion || run.status}</span>
           </p>
         </div>
-        {giteaHref && (
-          <a className="btn" href={giteaHref} target="_blank" rel="noreferrer">
-            Open in Gitea
+        {forgeHref && (
+          <a className="btn" href={forgeHref} target="_blank" rel="noreferrer">
+            {openOnForgeLabel(run.forge_type).replace(" →", "")}
           </a>
         )}
       </div>

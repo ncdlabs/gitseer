@@ -5,12 +5,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-API_PORT="${LENS_API_PORT:-8090}"
-WEB_PORT="${LENS_WEB_PORT:-5173}"
+API_PORT="${GITSEER_API_PORT:-8090}"
+WEB_PORT="${GITSEER_WEB_PORT:-5173}"
 WEB_URL="http://127.0.0.1:${WEB_PORT}"
 API_URL="http://127.0.0.1:${API_PORT}"
 BOOTSTRAP_USER="bootstrap"
-DEFAULT_BOOTSTRAP_PASSWORD="lens-local"
+DEFAULT_BOOTSTRAP_PASSWORD="gitseer-local"
 
 load_dotenv() {
   local file="$1"
@@ -39,22 +39,22 @@ export GOPATH="${GOPATH:-$HOME/Library/Caches/go}"
 export GOMODCACHE="${GOMODCACHE:-$HOME/Library/Caches/go/pkg/mod}"
 mkdir -p "$GOPATH" "$GOMODCACHE"
 
-if [[ -z "${LENS_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
-  if [[ -n "${LENS_AUTH_BOOTSTRAP_PASSWORD_FILE:-}" && -r "${LENS_AUTH_BOOTSTRAP_PASSWORD_FILE}" ]]; then
-    LENS_AUTH_BOOTSTRAP_PASSWORD="$(tr -d '\r\n' <"${LENS_AUTH_BOOTSTRAP_PASSWORD_FILE}")"
+if [[ -z "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
+  if [[ -n "${GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE:-}" && -r "${GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE}" ]]; then
+    GITSEER_AUTH_BOOTSTRAP_PASSWORD="$(tr -d '\r\n' <"${GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE}")"
   fi
 fi
-if [[ -z "${LENS_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
-  export LENS_AUTH_BOOTSTRAP_PASSWORD="$DEFAULT_BOOTSTRAP_PASSWORD"
+if [[ -z "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
+  export GITSEER_AUTH_BOOTSTRAP_PASSWORD="$DEFAULT_BOOTSTRAP_PASSWORD"
 fi
-export LENS_AUTH_BOOTSTRAP_PASSWORD
+export GITSEER_AUTH_BOOTSTRAP_PASSWORD
 
 # Local npm start only: let bootstrap admins skip the first-run setup wizard.
-export LENS_ALLOW_SKIP_SETUP="${LENS_ALLOW_SKIP_SETUP:-true}"
+export GITSEER_ALLOW_SKIP_SETUP="${GITSEER_ALLOW_SKIP_SETUP:-true}"
 
 resolve_config() {
-  if [[ -n "${LENS_CONFIG:-}" ]]; then
-    echo "$LENS_CONFIG"
+  if [[ -n "${GITSEER_CONFIG:-}" ]]; then
+    echo "$GITSEER_CONFIG"
     return
   fi
   if [[ -f "$ROOT/config.yaml" ]]; then
@@ -65,20 +65,20 @@ resolve_config() {
 }
 
 CFG="$(resolve_config)"
-export LENS_CONFIG="$CFG"
+export GITSEER_CONFIG="$CFG"
 
 print_access() {
   echo ""
-  echo "Gitea Lens (local)"
+  echo "GitSeer (local)"
   echo "  App:      ${WEB_URL}"
   echo "  API:      ${API_URL}"
   echo "  Config:   ${CFG}"
   echo "  Username: ${BOOTSTRAP_USER}"
-  echo "  Password: ${LENS_AUTH_BOOTSTRAP_PASSWORD}"
-  if [[ -z "${LENS_GITEA_URL:-}" ]]; then
-    echo "  OAuth:    disabled (set LENS_GITEA_URL + OAuth client to enable)"
+  echo "  Password: ${GITSEER_AUTH_BOOTSTRAP_PASSWORD}"
+  if [[ -z "${GITSEER_GITEA_URL:-}" ]]; then
+    echo "  OAuth:    disabled (set GITSEER_GITEA_URL + OAuth client to enable)"
   else
-    echo "  OAuth:    Gitea ${LENS_GITEA_URL}"
+    echo "  OAuth:    Gitea ${GITSEER_GITEA_URL}"
   fi
   echo ""
 }
@@ -100,8 +100,8 @@ wait_http() {
 
 open_browser() {
   local url="$1"
-  if [[ "${LENS_NO_BROWSER:-}" == "1" || -n "${CI:-}" ]]; then
-    echo "Skipping browser open (LENS_NO_BROWSER or CI set)"
+  if [[ "${GITSEER_NO_BROWSER:-}" == "1" || -n "${CI:-}" ]]; then
+    echo "Skipping browser open (GITSEER_NO_BROWSER or CI set)"
     return 0
   fi
   if command -v open >/dev/null 2>&1; then

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 type Store struct {
@@ -109,14 +109,33 @@ func boolToInt(b bool) int {
 
 type scanner interface{ Scan(dest ...any) error }
 
+const instanceSelectCols = `
+id, name, forge_type, base_url, version, capabilities_json,
+sync_token_ciphertext, webhook_secret_ciphertext,
+oauth_client_id, oauth_client_secret_ciphertext, external_url,
+allow_private_network, allow_unsigned_webhooks, created_at, updated_at`
+
+// UpsertInstanceByURL inserts or updates instance metadata keyed by base_url.
+// Existing forge_type and credential columns are preserved on conflict; new rows default to gitea.
 func (s *Store) UpsertInstanceByURL(ctx context.Context, name, baseURL, version, capsJSON string) (*models.Instance, error) {
+	return s.UpsertInstanceMeta(ctx, models.ForgeTypeGitea, name, baseURL, version, capsJSON)
+}
+
+// UpsertInstanceMeta inserts or updates instance metadata for a forge type + base URL.
+// Credential ciphertext and allow_* flags are preserved on conflict.
+func (s *Store) UpsertInstanceMeta(ctx context.Context, forgeType, name, baseURL, version, capsJSON string) (*models.Instance, error) {
+	ft := normalizeForgeType(forgeType)
 	now := formatTime(time.Now().UTC())
 	_, err := s.exec(ctx, `
-INSERT INTO instances (name, base_url, version, capabilities_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO instances (name, forge_type, base_url, version, capabilities_json, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(base_url) DO UPDATE SET
-  name=excluded.name, version=excluded.version, capabilities_json=excluded.capabilities_json, updated_at=excluded.updated_at
-`, name, baseURL, version, capsJSON, now, now)
+  name=excluded.name,
+  forge_type=excluded.forge_type,
+  version=excluded.version,
+  capabilities_json=excluded.capabilities_json,
+  updated_at=excluded.updated_at
+`, name, ft, baseURL, version, capsJSON, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -124,26 +143,28 @@ ON CONFLICT(base_url) DO UPDATE SET
 }
 
 func (s *Store) GetInstanceByURL(ctx context.Context, baseURL string) (*models.Instance, error) {
-	row := s.queryRow(ctx, `
-SELECT id, name, base_url, version, capabilities_json, sync_token_ciphertext, webhook_secret_ciphertext,
-       oauth_client_id, oauth_client_secret_ciphertext, external_url, created_at, updated_at
-FROM instances WHERE base_url = ?`, baseURL)
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances WHERE base_url = ?`, baseURL)
 	return scanInstance(row)
 }
 
 func (s *Store) GetInstanceByID(ctx context.Context, id int64) (*models.Instance, error) {
-	row := s.queryRow(ctx, `
-SELECT id, name, base_url, version, capabilities_json, sync_token_ciphertext, webhook_secret_ciphertext,
-       oauth_client_id, oauth_client_secret_ciphertext, external_url, created_at, updated_at
-FROM instances WHERE id = ?`, id)
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances WHERE id = ?`, id)
 	return scanInstance(row)
 }
 
+// GetInstanceByForgeAndURL returns the instance for forge_type + base_url, or nil if missing.
+func (s *Store) GetInstanceByForgeAndURL(ctx context.Context, forgeType, baseURL string) (*models.Instance, error) {
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances WHERE forge_type = ? AND base_url = ?`,
+		normalizeForgeType(forgeType), baseURL)
+	inst, err := scanInstance(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return inst, err
+}
+
 func (s *Store) GetPrimaryInstance(ctx context.Context) (*models.Instance, error) {
-	row := s.queryRow(ctx, `
-SELECT id, name, base_url, version, capabilities_json, sync_token_ciphertext, webhook_secret_ciphertext,
-       oauth_client_id, oauth_client_secret_ciphertext, external_url, created_at, updated_at
-FROM instances ORDER BY id ASC LIMIT 1`)
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances ORDER BY id ASC LIMIT 1`)
 	inst, err := scanInstance(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -154,14 +175,31 @@ FROM instances ORDER BY id ASC LIMIT 1`)
 func scanInstance(row scanner) (*models.Instance, error) {
 	var inst models.Instance
 	var created, updated string
-	if err := row.Scan(&inst.ID, &inst.Name, &inst.BaseURL, &inst.Version, &inst.CapabilitiesJSON,
+	var allowPrivate, allowUnsigned int
+	if err := row.Scan(
+		&inst.ID, &inst.Name, &inst.ForgeType, &inst.BaseURL, &inst.Version, &inst.CapabilitiesJSON,
 		&inst.SyncTokenCiphertext, &inst.WebhookSecretCiphertext, &inst.OAuthClientID, &inst.OAuthClientSecretCipher,
-		&inst.ExternalURL, &created, &updated); err != nil {
+		&inst.ExternalURL, &allowPrivate, &allowUnsigned, &created, &updated,
+	); err != nil {
 		return nil, err
 	}
+	inst.AllowPrivateNetwork = allowPrivate != 0
+	inst.AllowUnsignedWebhooks = allowUnsigned != 0
 	inst.CreatedAt, _ = parseTime(created)
 	inst.UpdatedAt, _ = parseTime(updated)
+	if inst.ForgeType == "" {
+		inst.ForgeType = models.ForgeTypeGitea
+	}
 	return &inst, nil
+}
+
+func normalizeForgeType(ft string) string {
+	switch strings.ToLower(strings.TrimSpace(ft)) {
+	case models.ForgeTypeGitHub:
+		return models.ForgeTypeGitHub
+	default:
+		return models.ForgeTypeGitea
+	}
 }
 
 func (s *Store) UpsertOrganization(ctx context.Context, instanceID int64, org models.Organization) (*models.Organization, error) {
@@ -256,6 +294,38 @@ func scanRepo(row scanner) (*models.Repository, error) {
 	return &r, nil
 }
 
+func scanRepoWithForge(row scanner) (*models.Repository, error) {
+	var r models.Repository
+	var orgID sql.NullInt64
+	var private, archived, empty, fork int
+	var lastSynced, deleted, created, updated sql.NullString
+	var forgeType string
+	if err := row.Scan(
+		&r.ID, &r.InstanceID, &orgID, &r.ExternalID, &r.Owner, &r.Name, &r.FullName, &r.DefaultBranch,
+		&private, &archived, &empty, &fork, &r.HTMLURL, &lastSynced, &deleted, &created, &updated,
+		&forgeType,
+	); err != nil {
+		return nil, err
+	}
+	if orgID.Valid {
+		v := orgID.Int64
+		r.OrgID = &v
+	}
+	r.Private = private != 0
+	r.Archived = archived != 0
+	r.Empty = empty != 0
+	r.Fork = fork != 0
+	r.ForgeType = forgeType
+	if r.ForgeType == "" {
+		r.ForgeType = models.ForgeTypeGitea
+	}
+	r.LastSyncedAt = nullTime(lastSynced)
+	r.DeletedAt = nullTime(deleted)
+	r.CreatedAt, _ = parseTime(created.String)
+	r.UpdatedAt, _ = parseTime(updated.String)
+	return &r, nil
+}
+
 type ListRepositoriesOpts struct {
 	InstanceID     int64
 	UserID         int64 // when >0, join user_repository_access (unless BootstrapAllowAll)
@@ -299,11 +369,13 @@ func (s *Store) ListRepositories(ctx context.Context, opts ListRepositoriesOpts)
 	if err := s.queryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	listJoin := join + " LEFT JOIN instances i ON i.id = r.instance_id"
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := s.query(ctx, `
 SELECT r.id, r.instance_id, r.org_id, r.external_id, r.owner, r.name, r.full_name, r.default_branch,
-       r.private, r.archived, r.empty, r.fork, r.html_url, r.last_synced_at, r.deleted_at, r.created_at, r.updated_at
-FROM repositories r `+join+`
+       r.private, r.archived, r.empty, r.fork, r.html_url, r.last_synced_at, r.deleted_at, r.created_at, r.updated_at,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+FROM repositories r `+listJoin+`
 WHERE `+clause+`
 ORDER BY r.full_name ASC
 LIMIT ? OFFSET ?`, args...)
@@ -313,7 +385,7 @@ LIMIT ? OFFSET ?`, args...)
 	defer rows.Close()
 	var out []models.Repository
 	for rows.Next() {
-		r, err := scanRepo(rows)
+		r, err := scanRepoWithForge(rows)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -403,14 +475,19 @@ ON CONFLICT(instance_id, scope, scope_id) DO UPDATE SET
 	return err
 }
 
-func (s *Store) TryAcquireSyncLease(ctx context.Context, holder string, ttl time.Duration) (bool, error) {
+// TryAcquireSyncLease acquires a lease keyed by leaseID (typically instances.id)
+// so concurrent forges do not block each other. holder identifies the process claiming it.
+func (s *Store) TryAcquireSyncLease(ctx context.Context, leaseID int64, holder string, ttl time.Duration) (bool, error) {
+	if leaseID <= 0 {
+		return false, fmt.Errorf("sync lease id must be positive")
+	}
 	now := time.Now().UTC()
 	expires := formatTime(now.Add(ttl))
 	nowStr := formatTime(now)
 	res, err := s.exec(ctx, `
-INSERT INTO sync_leases (id, holder, expires_at) VALUES (1, ?, ?)
+INSERT INTO sync_leases (id, holder, expires_at) VALUES (?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET holder=excluded.holder, expires_at=excluded.expires_at
-WHERE sync_leases.expires_at < ? OR sync_leases.holder = ?`, holder, expires, nowStr, holder)
+WHERE sync_leases.expires_at < ? OR sync_leases.holder = ?`, leaseID, holder, expires, nowStr, holder)
 	if err != nil {
 		return false, err
 	}

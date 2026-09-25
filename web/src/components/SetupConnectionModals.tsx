@@ -193,6 +193,10 @@ type WebhookModalProps = {
   onCreate: () => void;
   onContinue: () => void;
   canCreate: boolean;
+  /** Display name for the forge (Gitea or GitHub). */
+  forgeLabel?: string;
+  /** When true, only the manual path is offered (GitHub). */
+  manualOnly?: boolean;
 };
 
 export function WebhookConfirmModal({
@@ -206,10 +210,12 @@ export function WebhookConfirmModal({
   onCreate,
   onContinue,
   canCreate,
+  forgeLabel = "Gitea",
+  manualOnly = false,
 }: WebhookModalProps) {
   const titleId = useId();
   const payload = preview ? JSON.stringify(preview, null, 2) : "";
-  const isManual = phase === "manual";
+  const isManual = phase === "manual" || manualOnly;
 
   useEffect(() => {
     if (!open) return;
@@ -222,15 +228,20 @@ export function WebhookConfirmModal({
 
   if (!open || !preview) return null;
 
+  const settingsHint =
+    forgeLabel === "GitHub"
+      ? "Add this webhook in GitHub under Organization or Repository → Settings → Webhooks."
+      : "Create a system webhook in Gitea using the payload below (Site Administration → Webhooks).";
+
   return (
     <div className="modal-backdrop" role="presentation">
       <div className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="modal__header">
-          <h2 id={titleId}>{isManual ? "Add Webhook in Gitea" : "Install System Webhook?"}</h2>
+          <h2 id={titleId}>{isManual ? `Add Webhook in ${forgeLabel}` : "Install System Webhook?"}</h2>
           <p className="muted">
             {isManual
-              ? "Lens generated and stored an HMAC secret. Create a system webhook in Gitea using the payload below (Site Administration → Webhooks)."
-              : "Gitea will POST live pull-request and Actions events to Lens. Without it, Lens relies on periodic sync only."}
+              ? `Lens generated and stored an HMAC secret. ${settingsHint}`
+              : `${forgeLabel} will POST live pull-request and Actions events to Lens. Without it, Lens relies on periodic sync only.`}
           </p>
         </header>
         <pre className="webhook-preview mono" tabIndex={0} aria-label="Webhook payload">
@@ -238,7 +249,7 @@ export function WebhookConfirmModal({
         </pre>
         {!isManual && (
           <p className="settings-form__hint">
-            System hook on your Gitea instance. Secret is generated when you confirm.
+            System hook on your {forgeLabel} instance. Secret is generated when you confirm.
           </p>
         )}
         {error && (
@@ -257,7 +268,7 @@ export function WebhookConfirmModal({
           ) : (
             <>
               <button className="btn" type="button" onClick={onManual} disabled={busy}>
-                {busy ? "Preparing…" : <>I&apos;ll Add It in Gitea</>}
+                {busy ? "Preparing…" : <>I&apos;ll Add It in {forgeLabel}</>}
               </button>
               <button
                 className="btn primary"

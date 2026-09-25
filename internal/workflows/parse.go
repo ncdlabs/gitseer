@@ -4,7 +4,7 @@ package workflows
 import (
 	"fmt"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 	"gopkg.in/yaml.v3"
 )
 

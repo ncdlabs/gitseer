@@ -36,11 +36,11 @@ ui:
 		t.Fatal(err)
 	}
 
-	t.Setenv("LENS_SERVER_LISTEN", "0.0.0.0:8091")
-	t.Setenv("LENS_UI_INSTANCE_NAME", "FromEnv")
-	t.Setenv("LENS_SYNC_HISTORY_DAYS", "7")
-	t.Setenv("LENS_SYNC_RECONCILE_INTERVAL", "2m")
-	t.Setenv("LENS_ALLOW_SKIP_SETUP", "true")
+	t.Setenv("GITSEER_SERVER_LISTEN", "0.0.0.0:8091")
+	t.Setenv("GITSEER_UI_INSTANCE_NAME", "FromEnv")
+	t.Setenv("GITSEER_SYNC_HISTORY_DAYS", "7")
+	t.Setenv("GITSEER_SYNC_RECONCILE_INTERVAL", "2m")
+	t.Setenv("GITSEER_ALLOW_SKIP_SETUP", "true")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -62,7 +62,7 @@ ui:
 		t.Fatalf("reconcile = %s", cfg.Sync.ReconcileInterval)
 	}
 	if !cfg.Dev.AllowSkipSetup {
-		t.Fatal("expected Dev.AllowSkipSetup from LENS_ALLOW_SKIP_SETUP")
+		t.Fatal("expected Dev.AllowSkipSetup from GITSEER_ALLOW_SKIP_SETUP")
 	}
 }
 
@@ -76,7 +76,7 @@ func TestTokenFileEnv(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("database:\n  path: "+filepath.Join(dir, "db")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LENS_GITEA_TOKEN_FILE", tokPath)
+	t.Setenv("GITSEER_GITEA_TOKEN_FILE", tokPath)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -139,7 +139,7 @@ func TestLookupEnvFileUnreadable(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("database:\n  path: "+filepath.Join(dir, "db")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LENS_GITEA_TOKEN_FILE", filepath.Join(dir, "missing-token"))
+	t.Setenv("GITSEER_GITEA_TOKEN_FILE", filepath.Join(dir, "missing-token"))
 	if _, err := Load(cfgPath); err == nil {
 		t.Fatal("expected error for unreadable token file")
 	}

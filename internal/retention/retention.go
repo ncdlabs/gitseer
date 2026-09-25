@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 // RetentionSource supplies the current retention windows (may change at runtime).

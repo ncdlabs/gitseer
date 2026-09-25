@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/database"
-	"github.com/ncdlabs/gitea-lens/internal/forge"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/store"
-	"github.com/ncdlabs/gitea-lens/internal/sync"
+	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/database"
+	"github.com/ncdlabs/gitseer/internal/forge"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/store"
+	"github.com/ncdlabs/gitseer/internal/sync"
 )
 
 type mockForge struct {
@@ -103,7 +103,7 @@ func TestFullSyncSkipsSoftDeleteOnEmptyCatalog(t *testing.T) {
 	}
 
 	f := &mockForge{repos: nil}
-	if _, err := svc.FullSync(ctx, f, "lab", "https://git.example.com", 30); err != nil {
+	if _, err := svc.FullSync(ctx, f, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +124,7 @@ func TestFullSyncSoftDeletesMissingRepos(t *testing.T) {
 		{ExternalID: 1, Owner: "org", Name: "a", FullName: "org/a", DefaultBranch: "main"},
 		{ExternalID: 2, Owner: "org", Name: "b", FullName: "org/b", DefaultBranch: "main"},
 	}}
-	if _, err := svc.FullSync(ctx, fSeed, "lab", "https://git.example.com", 30); err != nil {
+	if _, err := svc.FullSync(ctx, fSeed, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +133,7 @@ func TestFullSyncSoftDeletesMissingRepos(t *testing.T) {
 	fNext := &mockForge{repos: []models.Repository{
 		{ExternalID: 1, Owner: "org", Name: "a", FullName: "org/a", DefaultBranch: "main"},
 	}}
-	if _, err := svc.FullSync(ctx, fNext, "lab", "https://git.example.com", 30); err != nil {
+	if _, err := svc.FullSync(ctx, fNext, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,15 +160,47 @@ func TestSyncFromConfigRequiresGitea(t *testing.T) {
 func TestTryAcquireSyncLeaseGatesReconcile(t *testing.T) {
 	ctx := context.Background()
 	_, st := setupSync(t)
-	ok, err := st.TryAcquireSyncLease(ctx, "lens-a", time.Minute)
+	ok, err := st.TryAcquireSyncLease(ctx, 1, "gitseer-a", time.Minute)
 	if err != nil || !ok {
 		t.Fatalf("first acquire: ok=%v err=%v", ok, err)
 	}
-	ok2, err := st.TryAcquireSyncLease(ctx, "lens-b", time.Minute)
+	ok2, err := st.TryAcquireSyncLease(ctx, 1, "gitseer-b", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok2 {
 		t.Fatal("second holder must not acquire while lease is live")
+	}
+}
+
+func TestTryAcquireSyncLeasePerInstanceIndependent(t *testing.T) {
+	ctx := context.Background()
+	_, st := setupSync(t)
+	ok, err := st.TryAcquireSyncLease(ctx, 10, "gitseer-a", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("lease 10: ok=%v err=%v", ok, err)
+	}
+	ok2, err := st.TryAcquireSyncLease(ctx, 20, "gitseer-b", time.Minute)
+	if err != nil || !ok2 {
+		t.Fatalf("lease 20 must not block on 10: ok=%v err=%v", ok2, err)
+	}
+}
+
+func TestFullSyncPreservesForgeType(t *testing.T) {
+	ctx := context.Background()
+	svc, st := setupSync(t)
+	f := &mockForge{repos: []models.Repository{
+		{ExternalID: 7, Owner: "acme", Name: "app", FullName: "acme/app", DefaultBranch: "main"},
+	}}
+	res, err := svc.FullSync(ctx, f, models.ForgeTypeGitHub, "GitHub", "https://api.github.com", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.GetInstanceByID(ctx, res.InstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("instance: %v", err)
+	}
+	if inst.ForgeType != models.ForgeTypeGitHub {
+		t.Fatalf("forge_type=%q want github", inst.ForgeType)
 	}
 }

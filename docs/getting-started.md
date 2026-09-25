@@ -16,14 +16,14 @@ In-repo detail: [docs/install.md](install.md).
 
 - Go **1.26+** and Node **22+** (binary / local builds)
 - Podman Compose or Docker Compose (installer default)
-- A Gitea instance (~1.25+) with an API token that can list repos, PRs, and Actions
-- Public URL for Lens (needed for OAuth redirect and webhook delivery)
+- At least one forge: a Gitea instance (~1.25+) and/or GitHub / GitHub Enterprise with an API token that can list repos, PRs, and Actions/workflows
+- Public URL for GitSeer / Lens (needed for OAuth redirect and webhook delivery)
 
 ## 2. Run the installer
 
 ```bash
-git clone https://github.com/ncdlabs/gitea-lens.git
-cd gitea-lens
+git clone https://github.com/ncdlabs/gitseer.git
+cd gitseer  # or local folder name if unchanged
 ./scripts/install.sh
 # or: make install
 ```
@@ -40,11 +40,14 @@ The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, t
 
 ## 3. Complete the setup wizard
 
-On first bootstrap-admin visit (when `setup_completed` is false), Lens opens **`/setup`**:
+On first bootstrap-admin visit (when `setup_completed` is false), GitSeer opens **`/setup`**:
 
-1. **Connect** — Gitea URL, service token, Lens public URL  
-2. **Validate** — connectivity/permission checks; create or paste webhook + OAuth  
-3. **Finish** — mark setup complete  
+1. **Forge picker** — Gitea or GitHub (GitLab / Bitbucket Coming Soon)
+2. **Connect** — forge URL, service token / PAT, Lens public URL  
+3. **Validate** — connectivity/permission checks; create or paste webhook (+ Gitea OAuth when applicable)  
+4. **Finish** — mark setup complete when at least one forge is configured  
+
+A second forge can be added later under Settings → Integration.
 
 See [Setup Wizard](setup-wizard.md).
 
@@ -62,12 +65,12 @@ Webhook endpoint:
 POST {external_url}/api/webhooks/gitea
 ```
 
-HMAC secret must match `LENS_WEBHOOK_SECRET` / Settings. Fail-closed when Gitea URL is set and the secret is empty (unless unsigned webhooks are explicitly allowed for lab use).
+HMAC secret must match `GITSEER_WEBHOOK_SECRET` / Settings. Fail-closed when Gitea URL is set and the secret is empty (unless unsigned webhooks are explicitly allowed for lab use).
 
 ## Optional: Gitea navigation links
 
 ```bash
-./bin/lens install-ui --custom-path /var/lib/gitea/custom --lens-url https://lens.example.com
+./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com
 ```
 
 Opens Lens in a new tab from Gitea’s custom templates. Restart Gitea after template changes.

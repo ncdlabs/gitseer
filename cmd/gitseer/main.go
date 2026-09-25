@@ -8,10 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	applog "github.com/ncdlabs/gitea-lens/internal/log"
-	"github.com/ncdlabs/gitea-lens/internal/server"
-	"github.com/ncdlabs/gitea-lens/internal/uiinstall"
+	"github.com/ncdlabs/gitseer/internal/config"
+	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	applog "github.com/ncdlabs/gitseer/internal/log"
+	"github.com/ncdlabs/gitseer/internal/server"
+	"github.com/ncdlabs/gitseer/internal/uiinstall"
 )
 
 var version = "0.1.0-dev"
@@ -39,20 +40,20 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Fprintf(os.Stderr, `Gitea Lens — CI/CD and PR operations console for Gitea
+	fmt.Fprintf(os.Stderr, `GitSeer — CI/CD and PR operations console for Gitea
 
 Usage:
-  lens serve [flags]
-  lens version
-  lens install-ui --custom-path DIR --lens-url URL
-  lens uninstall-ui --custom-path DIR
+  gitseer serve [flags]
+  gitseer version
+  gitseer install-ui --custom-path DIR --gitseer-url URL
+  gitseer uninstall-ui --custom-path DIR
 
 `)
 }
 
 func serveCmd(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fs.String("config", envOr("LENS_CONFIG", ""), "path to config.yaml")
+	cfgPath := fs.String("config", envOr("GITSEER_CONFIG", ""), "path to config.yaml")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load(*cfgPath)

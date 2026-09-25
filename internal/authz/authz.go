@@ -4,8 +4,8 @@ package authz
 import (
 	"context"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 type Service struct {

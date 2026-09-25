@@ -2,13 +2,16 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
+  type ForgeStatusRow,
   type IntegrationPatch,
   type IntegrationPublic,
   type LensSettings,
   type SettingsResponse,
+  type SystemStatus,
 } from "../api/client";
 import { InfoTip } from "../components/InfoTip";
 import { PasswordInput } from "../components/PasswordInput";
+import { DEFAULT_GITHUB_URL } from "../lib/product";
 
 type SettingsTab = "preferences" | "integration" | "status";
 
@@ -45,6 +48,11 @@ function emptyIntegration(): IntegrationPublic {
     gitea_allow_unsigned_webhooks: false,
     oauth_client_id: "",
     oauth_client_secret_configured: false,
+    github_url: "",
+    github_token_configured: false,
+    github_webhook_secret_configured: false,
+    github_allow_private_network: false,
+    github_allow_unsigned_webhooks: false,
   };
 }
 
@@ -56,6 +64,11 @@ type IntegrationDraft = {
   gitea_allow_unsigned_webhooks: boolean;
   oauth_client_id: string;
   oauth_client_secret: string;
+  github_url: string;
+  github_token: string;
+  github_webhook_secret: string;
+  github_allow_private_network: boolean;
+  github_allow_unsigned_webhooks: boolean;
 };
 
 function draftFromPublic(integ: IntegrationPublic): IntegrationDraft {
@@ -67,6 +80,11 @@ function draftFromPublic(integ: IntegrationPublic): IntegrationDraft {
     gitea_allow_unsigned_webhooks: integ.gitea_allow_unsigned_webhooks,
     oauth_client_id: integ.oauth_client_id || "",
     oauth_client_secret: "",
+    github_url: integ.github_url || "",
+    github_token: "",
+    github_webhook_secret: "",
+    github_allow_private_network: integ.github_allow_private_network,
+    github_allow_unsigned_webhooks: integ.github_allow_unsigned_webhooks,
   };
 }
 
@@ -90,25 +108,77 @@ function sameIntegrationDraft(a: IntegrationDraft, b: IntegrationDraft): boolean
     a.gitea_allow_private_network === b.gitea_allow_private_network &&
     a.gitea_allow_unsigned_webhooks === b.gitea_allow_unsigned_webhooks &&
     a.oauth_client_id === b.oauth_client_id &&
-    a.oauth_client_secret === b.oauth_client_secret
+    a.oauth_client_secret === b.oauth_client_secret &&
+    a.github_url === b.github_url &&
+    a.github_token === b.github_token &&
+    a.github_webhook_secret === b.github_webhook_secret &&
+    a.github_allow_private_network === b.github_allow_private_network &&
+    a.github_allow_unsigned_webhooks === b.github_allow_unsigned_webhooks
   );
 }
 
-function statusRows(status: Record<string, unknown> | undefined): { label: string; value: string }[] {
+function forgeDisplayName(ft: string): string {
+  switch ((ft || "").toLowerCase()) {
+    case "github":
+      return "GitHub";
+    case "gitea":
+      return "Gitea";
+    default:
+      return ft || "Forge";
+  }
+}
+
+function yesNo(v: unknown): string {
+  return v ? "yes" : "no";
+}
+
+function statusRows(status: SystemStatus | undefined): { label: string; value: string }[] {
   if (!status) return [];
   const rows: { label: string; value: string }[] = [
-    { label: "Lens version", value: String(status.version ?? "—") },
-    { label: "Instance name", value: String(status.ui_name ?? "—") },
-    { label: "Gitea connected", value: status.instance_connected ? "yes" : "no" },
-    { label: "Gitea version", value: String(status.gitea_version ?? "—") },
-    { label: "Gitea credentials", value: status.gitea_configured ? "configured" : "missing" },
-    { label: "OAuth", value: status.oauth_enabled ? "enabled" : "disabled" },
-    { label: "Bootstrap auth", value: status.bootstrap_auth ? "enabled" : "disabled" },
-    { label: "Webhook HMAC", value: status.webhook_hmac ? "configured" : "missing" },
-    { label: "Setup completed", value: status.setup_completed ? "yes" : "no" },
-    { label: "OAuth redirect URI", value: String(status.oauth_redirect_uri ?? "—") },
-    { label: "Path prefix", value: String(status.path_prefix || "/") },
+    { label: "Lens Version", value: String(status.version ?? "—") },
+    { label: "Instance Name", value: String(status.ui_name ?? "—") },
+    { label: "Bootstrap Auth", value: status.bootstrap_auth ? "enabled" : "disabled" },
+    { label: "Setup Completed", value: yesNo(status.setup_completed) },
+    { label: "OAuth Redirect URI", value: String(status.oauth_redirect_uri ?? "—") },
+    { label: "Path Prefix", value: String(status.path_prefix || "/") },
   ];
+
+  const forges = Array.isArray(status.forges) ? (status.forges as ForgeStatusRow[]) : [];
+  if (forges.length > 0) {
+    for (const f of forges) {
+      const name = forgeDisplayName(f.forge_type);
+      rows.push(
+        { label: `${name} URL`, value: String(f.url || "—") },
+        { label: `${name} Connected`, value: yesNo(f.connected) },
+        { label: `${name} Credentials`, value: f.configured ? "configured" : "missing" },
+        { label: `${name} Version`, value: String(f.version ?? "—") },
+        { label: `${name} Webhook HMAC`, value: f.webhook_hmac ? "configured" : "missing" },
+      );
+      if ((f.forge_type || "").toLowerCase() === "gitea") {
+        rows.push({
+          label: "Gitea OAuth",
+          value: f.oauth_configured ? "configured" : "missing",
+        });
+      }
+    }
+  } else {
+    // Legacy flat keys when forges[] is absent.
+    rows.push(
+      { label: "Gitea Connected", value: status.instance_connected ? "yes" : "no" },
+      { label: "Gitea Version", value: String(status.gitea_version ?? "—") },
+      { label: "Gitea Credentials", value: status.gitea_configured ? "configured" : "missing" },
+      { label: "OAuth", value: status.oauth_enabled ? "enabled" : "disabled" },
+      { label: "Webhook HMAC", value: status.webhook_hmac ? "configured" : "missing" },
+      {
+        label: "GitHub Credentials",
+        value: status.github_configured ? "configured" : "missing",
+      },
+      {
+        label: "GitHub Webhook HMAC",
+        value: status.github_webhook_hmac ? "configured" : "missing",
+      },
+    );
+  }
   return rows;
 }
 
@@ -223,7 +293,17 @@ export function SettingsPage() {
         gitea_allow_unsigned_webhooks: integDraft.gitea_allow_unsigned_webhooks,
         oauth_client_id: integDraft.oauth_client_id.trim(),
         oauth_client_secret: integDraft.oauth_client_secret,
+        apply_github: true,
+        github_url: integDraft.github_url.trim() || DEFAULT_GITHUB_URL,
+        github_token: integDraft.github_token,
+        github_webhook_secret: integDraft.github_webhook_secret,
+        github_allow_private_network: integDraft.github_allow_private_network,
+        github_allow_unsigned_webhooks: integDraft.github_allow_unsigned_webhooks,
       };
+      // If GitHub URL is blank and no token was entered / configured, clear to empty URL.
+      if (!integDraft.github_url.trim() && !integDraft.github_token && !integMeta.github_token_configured) {
+        patch.github_url = "";
+      }
       const res: SettingsResponse = await api.updateSettings({ integration: patch });
       const integ = res.integration ?? emptyIntegration();
       const next = draftFromPublic(integ);
@@ -326,7 +406,7 @@ export function SettingsPage() {
                     aria-label="Display name"
                     autoComplete="off"
                   />
-                  <p className="settings-form__hint">Shown in status and used when labeling the connected Gitea instance.</p>
+                  <p className="settings-form__hint">Shown in status and used when labeling connected forges.</p>
                 </div>
                 <div className="settings-form__field">
                   <input
@@ -340,7 +420,7 @@ export function SettingsPage() {
                     autoComplete="off"
                   />
                   <p className="settings-form__hint">
-                    Public URL where Gitea can reach Lens for webhooks and OAuth. Maps to{" "}
+                    Public URL where forges can reach GitSeer for webhooks and Gitea OAuth. Maps to{" "}
                     <code className="mono">server.external_url</code>.
                   </p>
                 </div>
@@ -464,7 +544,7 @@ export function SettingsPage() {
                     placeholder={
                       integMeta.gitea_token_configured ? "Service token (leave blank to keep)" : "Service token"
                     }
-                    aria-label="Service token"
+                    aria-label="Gitea service token"
                     autoComplete="new-password"
                   />
                   <p className="settings-form__hint">
@@ -484,7 +564,7 @@ export function SettingsPage() {
                         ? "Webhook HMAC secret (leave blank to keep)"
                         : "Webhook HMAC secret"
                     }
-                    aria-label="Webhook HMAC secret"
+                    aria-label="Gitea webhook HMAC secret"
                     autoComplete="new-password"
                   />
                   <p className="settings-form__hint">
@@ -521,7 +601,7 @@ export function SettingsPage() {
                   <p className="settings-form__hint">
                     {integMeta.oauth_client_secret_configured
                       ? "Secret is configured. Leave blank to keep it."
-                      : "From the Gitea OAuth application."}
+                      : "From the Gitea OAuth application. GitHub has no OAuth login in this release."}
                   </p>
                 </div>
                 <label className="settings-form__check">
@@ -533,7 +613,7 @@ export function SettingsPage() {
                   <span className="settings-form__check-text">
                     Allow Private Network Addresses
                     <InfoTip label="About private network addresses">
-                      Lets Lens call Gitea on private or lab addresses (10.x, 192.168.x, localhost, and similar). Off by
+                      Lets GitSeer call Gitea on private or lab addresses (10.x, 192.168.x, localhost, and similar). Off by
                       default to block SSRF. Enable when Gitea is only reachable on a private network.
                     </InfoTip>
                   </span>
@@ -543,6 +623,84 @@ export function SettingsPage() {
                     type="checkbox"
                     checked={integDraft.gitea_allow_unsigned_webhooks}
                     onChange={(e) => setIntegField("gitea_allow_unsigned_webhooks", e.target.checked)}
+                  />
+                  Allow Unsigned Webhooks (Not Recommended)
+                </label>
+              </fieldset>
+
+              <fieldset className="settings-form__section" disabled={!editable || integSaving}>
+                <legend>GitHub</legend>
+                <div className="settings-form__field">
+                  <input
+                    id="integ_github_url"
+                    type="url"
+                    value={integDraft.github_url}
+                    onChange={(e) => setIntegField("github_url", e.target.value)}
+                    placeholder={`GitHub URL (${DEFAULT_GITHUB_URL})`}
+                    aria-label="GitHub URL"
+                    autoComplete="off"
+                  />
+                  <p className="settings-form__hint">
+                    github.com or GitHub Enterprise host. Leave blank if you are not connecting GitHub.
+                  </p>
+                </div>
+                <div className="settings-form__field">
+                  <PasswordInput
+                    id="integ_github_token"
+                    value={integDraft.github_token}
+                    onChange={(value) => setIntegField("github_token", value)}
+                    placeholder={
+                      integMeta.github_token_configured
+                        ? "Personal access token (leave blank to keep)"
+                        : "Personal access token"
+                    }
+                    aria-label="GitHub personal access token"
+                    autoComplete="new-password"
+                  />
+                  <p className="settings-form__hint">
+                    {integMeta.github_token_configured
+                      ? "Token is configured. Leave blank to keep it."
+                      : "Service PAT for sync and ACL. No GitHub OAuth login in this release."}
+                  </p>
+                </div>
+                <div className="settings-form__field">
+                  <input
+                    id="integ_github_webhook_secret"
+                    type="password"
+                    value={integDraft.github_webhook_secret}
+                    onChange={(e) => setIntegField("github_webhook_secret", e.target.value)}
+                    placeholder={
+                      integMeta.github_webhook_secret_configured
+                        ? "Webhook HMAC secret (leave blank to keep)"
+                        : "Webhook HMAC secret"
+                    }
+                    aria-label="GitHub webhook HMAC secret"
+                    autoComplete="new-password"
+                  />
+                  <p className="settings-form__hint">
+                    {integMeta.github_webhook_secret_configured
+                      ? "Secret is configured. Leave blank to keep it."
+                      : "Must match the GitHub webhook secret. Delivery path is /api/webhooks/github/{instanceID}."}
+                  </p>
+                </div>
+                <label className="settings-form__check">
+                  <input
+                    type="checkbox"
+                    checked={integDraft.github_allow_private_network}
+                    onChange={(e) => setIntegField("github_allow_private_network", e.target.checked)}
+                  />
+                  <span className="settings-form__check-text">
+                    Allow Private Network Addresses
+                    <InfoTip label="About private network addresses">
+                      Lets GitSeer call GitHub Enterprise on private or lab addresses. Off by default to block SSRF.
+                    </InfoTip>
+                  </span>
+                </label>
+                <label className="settings-form__check">
+                  <input
+                    type="checkbox"
+                    checked={integDraft.github_allow_unsigned_webhooks}
+                    onChange={(e) => setIntegField("github_allow_unsigned_webhooks", e.target.checked)}
                   />
                   Allow Unsigned Webhooks (Not Recommended)
                 </label>

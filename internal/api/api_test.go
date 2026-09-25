@@ -12,17 +12,17 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ncdlabs/gitea-lens/internal/attention"
-	"github.com/ncdlabs/gitea-lens/internal/auth"
-	"github.com/ncdlabs/gitea-lens/internal/authz"
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	"github.com/ncdlabs/gitea-lens/internal/database"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/realtime"
-	"github.com/ncdlabs/gitea-lens/internal/settings"
-	"github.com/ncdlabs/gitea-lens/internal/store"
-	"github.com/ncdlabs/gitea-lens/internal/sync"
-	"github.com/ncdlabs/gitea-lens/internal/webhooks"
+	"github.com/ncdlabs/gitseer/internal/attention"
+	"github.com/ncdlabs/gitseer/internal/auth"
+	"github.com/ncdlabs/gitseer/internal/authz"
+	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/database"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/realtime"
+	"github.com/ncdlabs/gitseer/internal/settings"
+	"github.com/ncdlabs/gitseer/internal/store"
+	"github.com/ncdlabs/gitseer/internal/sync"
+	"github.com/ncdlabs/gitseer/internal/webhooks"
 )
 
 func setupAPI(t *testing.T) (*Handler, *store.Store, *auth.Service) {

@@ -12,7 +12,7 @@ Container data directory defaults to `/data`. Prefer Podman Compose (`podman com
 
 ```bash
 make frontend && make build-go
-./bin/lens serve --config config.yaml
+./bin/gitseer serve --config config.yaml
 ```
 
 Commands:
@@ -20,25 +20,25 @@ Commands:
 ```text
 lens serve [--config path]
 lens version
-lens install-ui --custom-path DIR --lens-url URL
-lens uninstall-ui --custom-path DIR
+gitseer install-ui --custom-path DIR --gitseer-url URL
+gitseer uninstall-ui --custom-path DIR
 ```
 
 ## Helm
 
-Chart: [`deploy/helm/gitea-lens`](https://github.com/ncdlabs/gitea-lens/tree/main/deploy/helm/gitea-lens)
+Chart: [`deploy/helm/gitseer`](https://github.com/ncdlabs/gitseer/tree/main/deploy/helm/gitseer)
 
 Example upgrade:
 
 ```bash
-helm upgrade --install gitea-lens deploy/helm/gitea-lens \
-  -n gitea-lens \
-  -f deploy/helm/gitea-lens/values-k3s-home.yaml
+helm upgrade --install gitseer deploy/helm/gitseer \
+  -n gitseer \
+  -f deploy/helm/gitseer/values-k3s-home.yaml
 ```
 
-Provide secrets via a Kubernetes Secret (token, bootstrap password, OAuth, webhook secret, encryption key). When `LENS_GITEA_URL` is set, `LENS_WEBHOOK_SECRET` must be present at startup.
+Provide secrets via a Kubernetes Secret (token, bootstrap password, OAuth, webhook secret, encryption key). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup.
 
-Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitea-lens/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
+Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
 
 ## Reverse proxy
 
@@ -52,10 +52,10 @@ Image builds for some environments use host cross-compile + [`deploy/docker/Cont
 After deploy:
 
 ```bash
-./bin/lens install-ui --custom-path /var/lib/gitea/custom --lens-url https://lens.example.com
+./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com
 ```
 
-Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITEA-LENS -->` / `<!-- BEGIN GITEA-LENS-TABS -->`.
+Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITSEER -->` / `<!-- BEGIN GITSEER-TABS -->`.
 
 ## Checklist
 
@@ -63,6 +63,6 @@ Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITEA-LENS -->` / `
 - [ ] Webhook secret set and Gitea webhook registered
 - [ ] OAuth app redirect matches `{external_url}/api/v1/auth/callback`
 - [ ] Bootstrap password set for first admin **or** OAuth ready
-- [ ] Private Gitea? `allow_private_network` / `LENS_GITEA_ALLOW_PRIVATE_NETWORK=true`
+- [ ] Private Gitea? `allow_private_network` / `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true`
 - [ ] Encryption key set if OAuth tokens must persist for ACL refresh
 - [ ] First sync completed

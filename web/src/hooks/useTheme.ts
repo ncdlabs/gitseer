@@ -15,8 +15,8 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { id: "terminal", label: "Terminal" },
 ];
 
-const THEME_KEY = "lens-theme";
-const MANUAL_KEY = "lens-theme-manual";
+const THEME_KEY = "gitseer-theme";
+const MANUAL_KEY = "gitseer-theme-manual";
 
 function isTheme(v: string | null | undefined): v is Theme {
   return v === "light" || v === "dark" || v === "gruvbox" || v === "terminal" || v === "system";

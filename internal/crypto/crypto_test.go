@@ -4,22 +4,22 @@ import (
 	"strings"
 	"testing"
 
-	lenscrypto "github.com/ncdlabs/gitea-lens/internal/crypto"
+	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
-	key, err := lenscrypto.KeyFromString("sixteen-chars-ok")
+	key, err := gitseercrypto.KeyFromString("sixteen-chars-ok")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err := lenscrypto.Encrypt(key, "super-secret")
+	ct, err := gitseercrypto.Encrypt(key, "super-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ct == "" || ct == "super-secret" {
 		t.Fatalf("ciphertext = %q", ct)
 	}
-	pt, err := lenscrypto.Decrypt(key, ct)
+	pt, err := gitseercrypto.Decrypt(key, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,34 +29,34 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 }
 
 func TestLooksLikeCiphertext(t *testing.T) {
-	key, err := lenscrypto.KeyFromString("sixteen-chars-ok")
+	key, err := gitseercrypto.KeyFromString("sixteen-chars-ok")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err := lenscrypto.Encrypt(key, "tok")
+	ct, err := gitseercrypto.Encrypt(key, "tok")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !lenscrypto.LooksLikeCiphertext(ct) {
+	if !gitseercrypto.LooksLikeCiphertext(ct) {
 		t.Fatalf("expected ciphertext to look encrypted: %q", ct)
 	}
-	if lenscrypto.LooksLikeCiphertext("plain-token-value") {
+	if gitseercrypto.LooksLikeCiphertext("plain-token-value") {
 		t.Fatal("plaintext should not look encrypted")
 	}
-	if lenscrypto.LooksLikeCiphertext("") {
+	if gitseercrypto.LooksLikeCiphertext("") {
 		t.Fatal("empty should not look encrypted")
 	}
 	// Not valid base64 of a sealed blob.
-	if lenscrypto.LooksLikeCiphertext(strings.Repeat("A", 8)) {
+	if gitseercrypto.LooksLikeCiphertext(strings.Repeat("A", 8)) {
 		t.Fatal("short base64 should not look encrypted")
 	}
 }
 
 func TestKeyFromStringRejectsShort(t *testing.T) {
-	if _, err := lenscrypto.KeyFromString("short"); err == nil {
+	if _, err := gitseercrypto.KeyFromString("short"); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := lenscrypto.KeyFromString(""); err == nil {
+	if _, err := gitseercrypto.KeyFromString(""); err == nil {
 		t.Fatal("expected error")
 	}
 }

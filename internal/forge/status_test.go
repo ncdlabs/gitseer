@@ -3,7 +3,7 @@ package forge
 import (
 	"testing"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 func TestNormalizeStatus(t *testing.T) {

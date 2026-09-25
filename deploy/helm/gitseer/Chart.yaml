@@ -1,0 +1,6 @@
+apiVersion: v2
+name: gitseer
+description: GitSeer CI/CD operations console (Gitea + GitHub)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,4 +1,4 @@
-// Package config loads Lens configuration from a YAML file and LENS_* env overrides.
+// Package config loads GitSeer configuration from a YAML file and GITSEER_* env overrides.
 package config
 
 import (
@@ -13,11 +13,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the root configuration for Gitea Lens.
+// Config is the root configuration for GitSeer.
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Database  DatabaseConfig  `yaml:"database"`
 	Gitea     GiteaConfig     `yaml:"gitea"`
+	GitHub    GitHubConfig    `yaml:"github"`
 	Sync      SyncConfig      `yaml:"sync"`
 	Attention AttentionConfig `yaml:"attention"`
 	Auth      AuthConfig      `yaml:"auth"`
@@ -48,13 +49,24 @@ type DatabaseConfig struct {
 }
 
 type GiteaConfig struct {
-	URL                  string `yaml:"url"`
-	Token                string `yaml:"token"`
-	TokenFile            string `yaml:"token_file"`
-	WebhookSecret        string `yaml:"webhook_secret"`
-	WebhookSecretFile    string `yaml:"webhook_secret_file"`
-	AllowPrivateNetwork  bool   `yaml:"allow_private_network"`
-	AllowUnsignedWebhooks bool  `yaml:"allow_unsigned_webhooks"`
+	URL                   string `yaml:"url"`
+	Token                 string `yaml:"token"`
+	TokenFile             string `yaml:"token_file"`
+	WebhookSecret         string `yaml:"webhook_secret"`
+	WebhookSecretFile     string `yaml:"webhook_secret_file"`
+	AllowPrivateNetwork   bool   `yaml:"allow_private_network"`
+	AllowUnsignedWebhooks bool   `yaml:"allow_unsigned_webhooks"`
+}
+
+// GitHubConfig holds optional GitHub / GitHub Enterprise defaults (service PAT; no OAuth in this slice).
+type GitHubConfig struct {
+	URL                   string `yaml:"url"` // github.com, api.github.com, or GHE base
+	Token                 string `yaml:"token"`
+	TokenFile             string `yaml:"token_file"`
+	WebhookSecret         string `yaml:"webhook_secret"`
+	WebhookSecretFile     string `yaml:"webhook_secret_file"`
+	AllowPrivateNetwork   bool   `yaml:"allow_private_network"`
+	AllowUnsignedWebhooks bool   `yaml:"allow_unsigned_webhooks"`
 }
 
 type SyncConfig struct {
@@ -103,7 +115,7 @@ func Default() Config {
 		},
 		Database: DatabaseConfig{
 			Driver: "sqlite",
-			Path:   "data/lens.db",
+			Path:   "data/gitseer.db",
 		},
 		Sync: SyncConfig{
 			ReconcileInterval: 5 * time.Minute,
@@ -118,7 +130,7 @@ func Default() Config {
 			ACLRefreshInterval: 6 * time.Hour,
 		},
 		UI: UIConfig{
-			InstanceName: "Gitea Lens",
+			InstanceName: "GitSeer",
 		},
 		Log: LogConfig{
 			Level:  "info",
@@ -188,6 +200,20 @@ func (c *Config) resolveSecrets() error {
 		}
 		c.Gitea.WebhookSecret = sec
 	}
+	if c.GitHub.TokenFile != "" {
+		tok, err := readSecretFile(c.GitHub.TokenFile)
+		if err != nil {
+			return fmt.Errorf("github.token_file: %w", err)
+		}
+		c.GitHub.Token = tok
+	}
+	if c.GitHub.WebhookSecretFile != "" {
+		sec, err := readSecretFile(c.GitHub.WebhookSecretFile)
+		if err != nil {
+			return fmt.Errorf("github.webhook_secret_file: %w", err)
+		}
+		c.GitHub.WebhookSecret = sec
+	}
 	if c.Auth.EncryptionKeyFile != "" {
 		key, err := readSecretFile(c.Auth.EncryptionKeyFile)
 		if err != nil {
@@ -231,7 +257,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("unsupported database.driver %q", c.Database.Driver)
 	}
 	if c.Gitea.URL != "" && c.Gitea.WebhookSecret == "" && !c.Gitea.AllowUnsignedWebhooks {
-		return fmt.Errorf("gitea.webhook_secret is required when gitea.url is set (or set gitea.allow_unsigned_webhooks / LENS_WEBHOOK_ALLOW_UNSIGNED=true for lab use)")
+		return fmt.Errorf("gitea.webhook_secret is required when gitea.url is set (or set gitea.allow_unsigned_webhooks / GITSEER_WEBHOOK_ALLOW_UNSIGNED=true for lab use)")
+	}
+	if c.GitHub.URL != "" && c.GitHub.WebhookSecret == "" && !c.GitHub.AllowUnsignedWebhooks {
+		return fmt.Errorf("github.webhook_secret is required when github.url is set (or set github.allow_unsigned_webhooks / GITSEER_GITHUB_ALLOW_UNSIGNED_WEBHOOKS=true for lab use)")
 	}
 	if c.Auth.EncryptionKey != "" && len(c.Auth.EncryptionKey) < 16 {
 		return fmt.Errorf("auth.encryption_key must be at least 16 characters")
@@ -384,13 +413,13 @@ func applyEnv(cfg *Config) error {
 		return nil
 	}
 
-	if err := setStr(&cfg.Server.Listen, "LENS_SERVER_LISTEN"); err != nil {
+	if err := setStr(&cfg.Server.Listen, "GITSEER_SERVER_LISTEN"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Server.ExternalURL, "LENS_SERVER_EXTERNAL_URL"); err != nil {
+	if err := setStr(&cfg.Server.ExternalURL, "GITSEER_SERVER_EXTERNAL_URL"); err != nil {
 		return err
 	}
-	if v, ok, err := lookupEnv("LENS_SERVER_TRUSTED_PROXIES"); err != nil {
+	if v, ok, err := lookupEnv("GITSEER_SERVER_TRUSTED_PROXIES"); err != nil {
 		return err
 	} else if ok {
 		var parts []string
@@ -402,115 +431,136 @@ func applyEnv(cfg *Config) error {
 		}
 		cfg.Server.TrustedProxies = parts
 	}
-	if err := setStr(&cfg.Server.MetricsToken, "LENS_METRICS_TOKEN"); err != nil {
+	if err := setStr(&cfg.Server.MetricsToken, "GITSEER_METRICS_TOKEN"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Server.MetricsTokenFile, "LENS_METRICS_TOKEN_FILE"); err != nil {
+	if err := setStr(&cfg.Server.MetricsTokenFile, "GITSEER_METRICS_TOKEN_FILE"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Database.Driver, "LENS_DATABASE_DRIVER"); err != nil {
+	if err := setStr(&cfg.Database.Driver, "GITSEER_DATABASE_DRIVER"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Database.Path, "LENS_DATABASE_PATH"); err != nil {
+	if err := setStr(&cfg.Database.Path, "GITSEER_DATABASE_PATH"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Database.DSN, "LENS_DATABASE_DSN"); err != nil {
+	if err := setStr(&cfg.Database.DSN, "GITSEER_DATABASE_DSN"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.URL, "LENS_GITEA_URL"); err != nil {
+	if err := setStr(&cfg.Gitea.URL, "GITSEER_GITEA_URL"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.Token, "LENS_GITEA_TOKEN"); err != nil {
+	if err := setStr(&cfg.Gitea.Token, "GITSEER_GITEA_TOKEN"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.TokenFile, "LENS_GITEA_TOKEN_FILE"); err != nil {
+	if err := setStr(&cfg.Gitea.TokenFile, "GITSEER_GITEA_TOKEN_FILE"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.WebhookSecret, "LENS_GITEA_WEBHOOK_SECRET"); err != nil {
+	if err := setStr(&cfg.Gitea.WebhookSecret, "GITSEER_GITEA_WEBHOOK_SECRET"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.WebhookSecretFile, "LENS_GITEA_WEBHOOK_SECRET_FILE"); err != nil {
+	if err := setStr(&cfg.Gitea.WebhookSecretFile, "GITSEER_GITEA_WEBHOOK_SECRET_FILE"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.WebhookSecret, "LENS_WEBHOOK_SECRET"); err != nil {
+	if err := setStr(&cfg.Gitea.WebhookSecret, "GITSEER_WEBHOOK_SECRET"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Gitea.WebhookSecretFile, "LENS_WEBHOOK_SECRET_FILE"); err != nil {
+	if err := setStr(&cfg.Gitea.WebhookSecretFile, "GITSEER_WEBHOOK_SECRET_FILE"); err != nil {
 		return err
 	}
-	if err := setBool(&cfg.Gitea.AllowPrivateNetwork, "LENS_GITEA_ALLOW_PRIVATE_NETWORK"); err != nil {
+	if err := setBool(&cfg.Gitea.AllowPrivateNetwork, "GITSEER_GITEA_ALLOW_PRIVATE_NETWORK"); err != nil {
 		return err
 	}
-	if err := setBool(&cfg.Gitea.AllowUnsignedWebhooks, "LENS_WEBHOOK_ALLOW_UNSIGNED"); err != nil {
+	if err := setBool(&cfg.Gitea.AllowUnsignedWebhooks, "GITSEER_WEBHOOK_ALLOW_UNSIGNED"); err != nil {
 		return err
 	}
-	if err := setDur(&cfg.Sync.ReconcileInterval, "LENS_SYNC_RECONCILE_INTERVAL"); err != nil {
+	if err := setStr(&cfg.GitHub.URL, "GITSEER_GITHUB_URL"); err != nil {
 		return err
 	}
-	if err := setInt(&cfg.Sync.HistoryDays, "LENS_SYNC_HISTORY_DAYS"); err != nil {
+	if err := setStr(&cfg.GitHub.Token, "GITSEER_GITHUB_TOKEN"); err != nil {
 		return err
 	}
-	if err := setDur(&cfg.Attention.LongRunningAfter, "LENS_ATTENTION_LONG_RUNNING_AFTER"); err != nil {
+	if err := setStr(&cfg.GitHub.TokenFile, "GITSEER_GITHUB_TOKEN_FILE"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.Provider, "LENS_AUTH_PROVIDER"); err != nil {
+	if err := setStr(&cfg.GitHub.WebhookSecret, "GITSEER_GITHUB_WEBHOOK_SECRET"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.BootstrapPassword, "LENS_AUTH_BOOTSTRAP_PASSWORD"); err != nil {
+	if err := setStr(&cfg.GitHub.WebhookSecretFile, "GITSEER_GITHUB_WEBHOOK_SECRET_FILE"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.BootstrapPasswordFile, "LENS_AUTH_BOOTSTRAP_PASSWORD_FILE"); err != nil {
+	if err := setBool(&cfg.GitHub.AllowPrivateNetwork, "GITSEER_GITHUB_ALLOW_PRIVATE_NETWORK"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.OAuthClientID, "LENS_AUTH_OAUTH_CLIENT_ID"); err != nil {
+	if err := setBool(&cfg.GitHub.AllowUnsignedWebhooks, "GITSEER_GITHUB_ALLOW_UNSIGNED_WEBHOOKS"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.OAuthClientSecret, "LENS_AUTH_OAUTH_CLIENT_SECRET"); err != nil {
+	if err := setDur(&cfg.Sync.ReconcileInterval, "GITSEER_SYNC_RECONCILE_INTERVAL"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.OAuthClientSecretFile, "LENS_AUTH_OAUTH_CLIENT_SECRET_FILE"); err != nil {
+	if err := setInt(&cfg.Sync.HistoryDays, "GITSEER_SYNC_HISTORY_DAYS"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.EncryptionKey, "LENS_ENCRYPTION_KEY"); err != nil {
+	if err := setDur(&cfg.Attention.LongRunningAfter, "GITSEER_ATTENTION_LONG_RUNNING_AFTER"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Auth.EncryptionKeyFile, "LENS_ENCRYPTION_KEY_FILE"); err != nil {
+	if err := setStr(&cfg.Auth.Provider, "GITSEER_AUTH_PROVIDER"); err != nil {
 		return err
 	}
-	if err := setDur(&cfg.Auth.SessionTTL, "LENS_AUTH_SESSION_TTL"); err != nil {
+	if err := setStr(&cfg.Auth.BootstrapPassword, "GITSEER_AUTH_BOOTSTRAP_PASSWORD"); err != nil {
 		return err
 	}
-	if err := setDur(&cfg.Auth.ACLRefreshInterval, "LENS_AUTH_ACL_REFRESH_INTERVAL"); err != nil {
+	if err := setStr(&cfg.Auth.BootstrapPasswordFile, "GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE"); err != nil {
 		return err
 	}
-	if v, ok, err := lookupEnv("LENS_AUTH_COOKIE_SECURE"); err != nil {
+	if err := setStr(&cfg.Auth.OAuthClientID, "GITSEER_AUTH_OAUTH_CLIENT_ID"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Auth.OAuthClientSecret, "GITSEER_AUTH_OAUTH_CLIENT_SECRET"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Auth.OAuthClientSecretFile, "GITSEER_AUTH_OAUTH_CLIENT_SECRET_FILE"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Auth.EncryptionKey, "GITSEER_ENCRYPTION_KEY"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Auth.EncryptionKeyFile, "GITSEER_ENCRYPTION_KEY_FILE"); err != nil {
+		return err
+	}
+	if err := setDur(&cfg.Auth.SessionTTL, "GITSEER_AUTH_SESSION_TTL"); err != nil {
+		return err
+	}
+	if err := setDur(&cfg.Auth.ACLRefreshInterval, "GITSEER_AUTH_ACL_REFRESH_INTERVAL"); err != nil {
+		return err
+	}
+	if v, ok, err := lookupEnv("GITSEER_AUTH_COOKIE_SECURE"); err != nil {
 		return err
 	} else if ok && v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return fmt.Errorf("LENS_AUTH_COOKIE_SECURE: %w", err)
+			return fmt.Errorf("GITSEER_AUTH_COOKIE_SECURE: %w", err)
 		}
 		cfg.Auth.CookieSecure = &b
 	}
-	if err := setStr(&cfg.UI.InstanceName, "LENS_UI_INSTANCE_NAME"); err != nil {
+	if err := setStr(&cfg.UI.InstanceName, "GITSEER_UI_INSTANCE_NAME"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Log.Level, "LENS_LOG_LEVEL"); err != nil {
+	if err := setStr(&cfg.Log.Level, "GITSEER_LOG_LEVEL"); err != nil {
 		return err
 	}
-	if err := setStr(&cfg.Log.Format, "LENS_LOG_FORMAT"); err != nil {
+	if err := setStr(&cfg.Log.Format, "GITSEER_LOG_FORMAT"); err != nil {
 		return err
 	}
-	if err := setInt(&cfg.Retention.RunsDays, "LENS_RETENTION_RUNS_DAYS"); err != nil {
+	if err := setInt(&cfg.Retention.RunsDays, "GITSEER_RETENTION_RUNS_DAYS"); err != nil {
 		return err
 	}
-	if err := setInt(&cfg.Retention.WebhooksDays, "LENS_RETENTION_WEBHOOKS_DAYS"); err != nil {
+	if err := setInt(&cfg.Retention.WebhooksDays, "GITSEER_RETENTION_WEBHOOKS_DAYS"); err != nil {
 		return err
 	}
-	if err := setInt(&cfg.Retention.AttentionDays, "LENS_RETENTION_ATTENTION_DAYS"); err != nil {
+	if err := setInt(&cfg.Retention.AttentionDays, "GITSEER_RETENTION_ATTENTION_DAYS"); err != nil {
 		return err
 	}
-	if err := setBool(&cfg.Dev.AllowSkipSetup, "LENS_ALLOW_SKIP_SETUP"); err != nil {
+	if err := setBool(&cfg.Dev.AllowSkipSetup, "GITSEER_ALLOW_SKIP_SETUP"); err != nil {
 		return err
 	}
 	return nil

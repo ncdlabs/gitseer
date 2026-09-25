@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 func clampLimit(n, def, max int) int {
@@ -161,17 +161,30 @@ WHERE pr.repo_id=? AND pr.number=?`, repoID, number)
 }
 
 func scanPR(row scanner) (*models.PullRequest, error) {
+	return scanPRList(row, false)
+}
+
+func scanPRWithForge(row scanner) (*models.PullRequest, error) {
+	return scanPRList(row, true)
+}
+
+func scanPRList(row scanner, withForge bool) (*models.PullRequest, error) {
 	var pr models.PullRequest
 	var authorID sql.NullInt64
 	var draft int
 	var mergeable sql.NullInt64
 	var created, updated, closed, merged sql.NullString
-	if err := row.Scan(
+	var forgeType string
+	dest := []any{
 		&pr.ID, &pr.RepoID, &pr.ExternalID, &pr.Number, &pr.Title, &pr.BodyExcerpt, &pr.AuthorLogin, &authorID,
 		&pr.SourceBranch, &pr.TargetBranch, &pr.HeadSHA, &pr.BaseSHA, &pr.State, &draft, &mergeable, &pr.MergeableState,
 		&pr.ReviewState, &pr.CIState, &pr.HTMLURL, &created, &updated, &closed, &merged,
 		&pr.RepoOwner, &pr.RepoName, &pr.RepoFull,
-	); err != nil {
+	}
+	if withForge {
+		dest = append(dest, &forgeType)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if authorID.Valid {
@@ -182,6 +195,12 @@ func scanPR(row scanner) (*models.PullRequest, error) {
 	if mergeable.Valid {
 		b := mergeable.Int64 != 0
 		pr.Mergeable = &b
+	}
+	if withForge {
+		pr.ForgeType = forgeType
+		if pr.ForgeType == "" {
+			pr.ForgeType = models.ForgeTypeGitea
+		}
 	}
 	pr.CreatedAt = nullTime(created)
 	pr.UpdatedAt = nullTime(updated)
@@ -232,12 +251,14 @@ func (s *Store) ListPullRequests(ctx context.Context, opts ListPRsOpts) ([]model
 		return nil, 0, err
 	}
 	args = append(args, opts.Limit, opts.Offset)
+	listJoin := join + " LEFT JOIN instances i ON i.id = r.instance_id"
 	rows, err := s.query(ctx, `
 SELECT pr.id, pr.repo_id, pr.external_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
        pr.source_branch, pr.target_branch, pr.head_sha, pr.base_sha, pr.state, pr.draft, pr.mergeable, pr.mergeable_state,
        pr.review_state, pr.ci_state, pr.html_url, pr.created_at, pr.updated_at, pr.closed_at, pr.merged_at,
-       r.owner, r.name, r.full_name
-FROM pull_requests pr `+join+`
+       r.owner, r.name, r.full_name,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+FROM pull_requests pr `+listJoin+`
 WHERE `+clause+`
 ORDER BY COALESCE(pr.updated_at, pr.created_at) DESC
 LIMIT ? OFFSET ?`, args...)
@@ -247,7 +268,7 @@ LIMIT ? OFFSET ?`, args...)
 	defer rows.Close()
 	var out []models.PullRequest
 	for rows.Next() {
-		pr, err := scanPR(rows)
+		pr, err := scanPRWithForge(rows)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -360,26 +381,48 @@ func (s *Store) GetWorkflowRunByID(ctx context.Context, id int64) (*models.Workf
 	row := s.queryRow(ctx, `
 SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
-       wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name
-FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id
+       wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+FROM workflow_runs wr
+JOIN repositories r ON r.id = wr.repo_id
+LEFT JOIN instances i ON i.id = r.instance_id
 WHERE wr.id=?`, id)
-	return scanRun(row)
+	return scanRunWithForge(row)
 }
 
 func scanRun(row scanner) (*models.WorkflowRun, error) {
+	return scanRunList(row, false)
+}
+
+func scanRunWithForge(row scanner) (*models.WorkflowRun, error) {
+	return scanRunList(row, true)
+}
+
+func scanRunList(row scanner, withForge bool) (*models.WorkflowRun, error) {
 	var run models.WorkflowRun
 	var wfID sql.NullInt64
 	var started, completed sql.NullString
-	if err := row.Scan(
+	var forgeType string
+	dest := []any{
 		&run.ID, &run.RepoID, &wfID, &run.ExternalID, &run.Name, &run.Event, &run.Branch, &run.CommitSHA,
 		&run.Status, &run.Conclusion, &run.UpstreamStatus, &run.UpstreamConclusion, &run.ActorLogin, &run.HTMLURL,
 		&run.WorkflowPath, &started, &completed, &run.RunAttempt, &run.RepoOwner, &run.RepoName, &run.RepoFull,
-	); err != nil {
+	}
+	if withForge {
+		dest = append(dest, &forgeType)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if wfID.Valid {
 		v := wfID.Int64
 		run.WorkflowID = &v
+	}
+	if withForge {
+		run.ForgeType = forgeType
+		if run.ForgeType == "" {
+			run.ForgeType = models.ForgeTypeGitea
+		}
 	}
 	run.StartedAt = nullTime(started)
 	run.CompletedAt = nullTime(completed)
@@ -436,11 +479,13 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, opts ListRunsOpts) ([]mode
 		return nil, 0, err
 	}
 	args = append(args, opts.Limit, opts.Offset)
+	listJoin := join + " LEFT JOIN instances i ON i.id = r.instance_id"
 	rows, err := s.query(ctx, `
 SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
-       wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name
-FROM workflow_runs wr `+join+`
+       wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+FROM workflow_runs wr `+listJoin+`
 WHERE `+clause+`
 ORDER BY wr.id DESC
 LIMIT ? OFFSET ?`, args...)
@@ -450,7 +495,7 @@ LIMIT ? OFFSET ?`, args...)
 	defer rows.Close()
 	var out []models.WorkflowRun
 	for rows.Next() {
-		run, err := scanRun(rows)
+		run, err := scanRunWithForge(rows)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -885,13 +930,38 @@ WHERE ura.user_id=? AND ura.repo_id=? AND r.deleted_at IS NULL`, userID, repoID)
 }
 
 func (s *Store) ReplaceUserRepoAccess(ctx context.Context, userID int64, repoIDs []int64) error {
+	return s.ReplaceUserRepoAccessForInstances(ctx, userID, nil, repoIDs)
+}
+
+// ReplaceUserRepoAccessForInstances replaces ACL rows for the given user.
+// When instanceIDs is non-empty, only deletes access to repos belonging to those
+// instances (so Gitea OAuth refresh does not wipe GitHub PAT-scoped grants).
+// When instanceIDs is empty, deletes all access for the user (legacy full replace).
+func (s *Store) ReplaceUserRepoAccessForInstances(ctx context.Context, userID int64, instanceIDs []int64, repoIDs []int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, s.sql(`DELETE FROM user_repository_access WHERE user_id=?`), userID); err != nil {
-		return err
+	if len(instanceIDs) == 0 {
+		if _, err := tx.ExecContext(ctx, s.sql(`DELETE FROM user_repository_access WHERE user_id=?`), userID); err != nil {
+			return err
+		}
+	} else {
+		ph := make([]string, len(instanceIDs))
+		args := []any{userID}
+		for i, id := range instanceIDs {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		q := fmt.Sprintf(`
+DELETE FROM user_repository_access
+WHERE user_id=? AND repo_id IN (
+  SELECT id FROM repositories WHERE instance_id IN (%s)
+)`, joinComma(ph))
+		if _, err := tx.ExecContext(ctx, s.sql(q), args...); err != nil {
+			return err
+		}
 	}
 	now := formatTime(time.Now().UTC())
 	for _, rid := range repoIDs {
@@ -939,6 +1009,26 @@ func (s *Store) GrantBootstrapAllAccess(ctx context.Context, userID, instanceID 
 	ids := make([]int64, 0, len(repos))
 	for _, r := range repos {
 		ids = append(ids, r.ID)
+	}
+	// Scope delete/insert to this instance so other forges' ACL rows are preserved.
+	return s.ReplaceUserRepoAccessForInstances(ctx, userID, []int64{instanceID}, ids)
+}
+
+// GrantBootstrapAllAccessAllInstances grants read ACL for every alive repo across all forges.
+func (s *Store) GrantBootstrapAllAccessAllInstances(ctx context.Context, userID int64) error {
+	instances, err := s.ListInstances(ctx)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for _, inst := range instances {
+		repos, err := s.ListAllAliveRepos(ctx, inst.ID)
+		if err != nil {
+			return err
+		}
+		for _, r := range repos {
+			ids = append(ids, r.ID)
+		}
 	}
 	return s.ReplaceUserRepoAccess(ctx, userID, ids)
 }

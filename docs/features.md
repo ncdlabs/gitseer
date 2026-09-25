@@ -5,7 +5,7 @@
 - Flat ops-console layout (IBM Plex; themes: system / light / dark / gruvbox / terminal via `data-theme`; terminal uses ANSI/ASCII graphics)
 - Light/dark palettes align with Gitea built-ins (`gitea-light` / `gitea-dark`)
 - Optional theme sync from Gitea user settings for OAuth users (mapped themes only); manual ThemePicker stops sync
-- List pages share a table/card view toggle (`lens-view-mode` in localStorage)
+- List pages share a table/card view toggle (`gitseer-view-mode` in localStorage)
 
 ## Routes
 
@@ -64,4 +64,4 @@ Covered in [Setup Wizard](setup-wizard.md).
 
 ## Gitea UI integration
 
-`lens install-ui` writes markers under Gitea’s custom templates so Lens opens in a new tab from nav / repo tabs. Does not leave the current Gitea page.
+`gitseer install-ui` writes markers under Gitea’s custom templates so Lens opens in a new tab from nav / repo tabs. Does not leave the current Gitea page.

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { repoLabel, safeExternalHref, type AttentionItem } from "../api/client";
+import { openOnForgeLabel, repoLabel, safeExternalHref, type AttentionItem } from "../api/client";
 import type { ViewMode } from "../hooks/useViewMode";
 import { relativeAge } from "../lib/relativeAge";
 
@@ -136,7 +136,7 @@ export function AttentionCards({ items, empty = "Nothing needs attention.", limi
             <div className="item-card__repo mono">{repoLabel(item) || "—"}</div>
             {link && (
               <span className="item-card__cta muted">
-                {link.external ? "Open in Gitea →" : "Open in Lens →"}
+                {link.external ? openOnForgeLabel() : "Open in GitSeer →"}
               </span>
             )}
           </ItemLink>

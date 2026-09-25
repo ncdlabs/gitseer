@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/models"
+	"github.com/ncdlabs/gitseer/internal/models"
 )
 
 // StatsReport returns authz-scoped dashboard series for the [since, now] window.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gitea Lens guided installer.
+# GitSeer guided installer.
 #
 # Interactive (default):
 #   ./scripts/install.sh
@@ -39,18 +39,18 @@ START_AFTER=""
 
 usage() {
   cat <<'EOF'
-Gitea Lens installer
+GitSeer installer
 
 Usage:
   ./scripts/install.sh [options]
 
 Options:
-  --config PATH           Read values from a YAML file (install or lens format)
+  --config PATH           Read values from a YAML file (install or gitseer format)
   --non-interactive, -y   Do not prompt; fail if required values are missing
   --method MODE           compose (default) | binary
   --no-start              Configure only; do not build or start the service
   --no-write-config       Do not write config.yaml / .env (use env only)
-  --install-ui            After start, run lens install-ui against Gitea custom/
+  --install-ui            After start, run gitseer install-ui against Gitea custom/
   --gitea-custom PATH     Gitea custom templates root (with --install-ui)
   -h, --help              Show this help
 
@@ -158,64 +158,64 @@ load_dotenv() {
       value="${value:1:${#value}-2}"
     fi
     case "$key" in
-      LENS_GITEA_URL) set_if_empty GITEA_URL "$value" ;;
-      LENS_GITEA_TOKEN) set_if_empty GITEA_TOKEN "$value" ;;
-      LENS_SERVER_EXTERNAL_URL) set_if_empty SERVER_EXTERNAL_URL "$value" ;;
-      LENS_SERVER_LISTEN) set_if_empty SERVER_LISTEN "$value" ;;
-      LENS_AUTH_OAUTH_CLIENT_ID) set_if_empty OAUTH_CLIENT_ID "$value" ;;
-      LENS_AUTH_OAUTH_CLIENT_SECRET) set_if_empty OAUTH_CLIENT_SECRET "$value" ;;
-      LENS_AUTH_BOOTSTRAP_PASSWORD) set_if_empty BOOTSTRAP_PASSWORD "$value" ;;
-      LENS_GITEA_ALLOW_PRIVATE_NETWORK) set_if_empty ALLOW_PRIVATE_NETWORK "$value" ;;
-      LENS_UI_INSTANCE_NAME) set_if_empty INSTANCE_NAME "$value" ;;
-      LENS_DATABASE_DRIVER) set_if_empty DATABASE_DRIVER "$value" ;;
-      LENS_DATABASE_PATH) set_if_empty DATABASE_PATH "$value" ;;
-      LENS_DATABASE_DSN) set_if_empty DATABASE_DSN "$value" ;;
-      LENS_INSTALL_METHOD) set_if_empty METHOD "$value" ;;
-      LENS_INSTALL_UI) set_if_empty INSTALL_UI "$value" ;;
-      LENS_GITEA_CUSTOM_PATH) set_if_empty GITEA_CUSTOM_PATH "$value" ;;
-      LENS_INSTALL_START) set_if_empty START_AFTER "$value" ;;
+      GITSEER_GITEA_URL) set_if_empty GITEA_URL "$value" ;;
+      GITSEER_GITEA_TOKEN) set_if_empty GITEA_TOKEN "$value" ;;
+      GITSEER_SERVER_EXTERNAL_URL) set_if_empty SERVER_EXTERNAL_URL "$value" ;;
+      GITSEER_SERVER_LISTEN) set_if_empty SERVER_LISTEN "$value" ;;
+      GITSEER_AUTH_OAUTH_CLIENT_ID) set_if_empty OAUTH_CLIENT_ID "$value" ;;
+      GITSEER_AUTH_OAUTH_CLIENT_SECRET) set_if_empty OAUTH_CLIENT_SECRET "$value" ;;
+      GITSEER_AUTH_BOOTSTRAP_PASSWORD) set_if_empty BOOTSTRAP_PASSWORD "$value" ;;
+      GITSEER_GITEA_ALLOW_PRIVATE_NETWORK) set_if_empty ALLOW_PRIVATE_NETWORK "$value" ;;
+      GITSEER_UI_INSTANCE_NAME) set_if_empty INSTANCE_NAME "$value" ;;
+      GITSEER_DATABASE_DRIVER) set_if_empty DATABASE_DRIVER "$value" ;;
+      GITSEER_DATABASE_PATH) set_if_empty DATABASE_PATH "$value" ;;
+      GITSEER_DATABASE_DSN) set_if_empty DATABASE_DSN "$value" ;;
+      GITSEER_INSTALL_METHOD) set_if_empty METHOD "$value" ;;
+      GITSEER_INSTALL_UI) set_if_empty INSTALL_UI "$value" ;;
+      GITSEER_GITEA_CUSTOM_PATH) set_if_empty GITEA_CUSTOM_PATH "$value" ;;
+      GITSEER_INSTALL_START) set_if_empty START_AFTER "$value" ;;
     esac
   done <"$file"
 }
 
-# Pull already-exported LENS_* into locals (env wins over file for prompts later).
+# Pull already-exported GITSEER_* into locals (env wins over file for prompts later).
 load_process_env() {
-  set_if_empty GITEA_URL "${LENS_GITEA_URL:-}"
-  set_if_empty GITEA_TOKEN "${LENS_GITEA_TOKEN:-}"
-  set_if_empty SERVER_EXTERNAL_URL "${LENS_SERVER_EXTERNAL_URL:-}"
-  set_if_empty SERVER_LISTEN "${LENS_SERVER_LISTEN:-}"
-  set_if_empty OAUTH_CLIENT_ID "${LENS_AUTH_OAUTH_CLIENT_ID:-}"
-  set_if_empty OAUTH_CLIENT_SECRET "${LENS_AUTH_OAUTH_CLIENT_SECRET:-}"
-  set_if_empty BOOTSTRAP_PASSWORD "${LENS_AUTH_BOOTSTRAP_PASSWORD:-}"
-  set_if_empty ALLOW_PRIVATE_NETWORK "${LENS_GITEA_ALLOW_PRIVATE_NETWORK:-}"
-  set_if_empty INSTANCE_NAME "${LENS_UI_INSTANCE_NAME:-}"
-  set_if_empty DATABASE_DRIVER "${LENS_DATABASE_DRIVER:-}"
-  set_if_empty DATABASE_PATH "${LENS_DATABASE_PATH:-}"
-  set_if_empty DATABASE_DSN "${LENS_DATABASE_DSN:-}"
-  set_if_empty METHOD "${LENS_INSTALL_METHOD:-}"
-  set_if_empty INSTALL_UI "${LENS_INSTALL_UI:-}"
-  set_if_empty GITEA_CUSTOM_PATH "${LENS_GITEA_CUSTOM_PATH:-}"
-  set_if_empty START_AFTER "${LENS_INSTALL_START:-}"
+  set_if_empty GITEA_URL "${GITSEER_GITEA_URL:-}"
+  set_if_empty GITEA_TOKEN "${GITSEER_GITEA_TOKEN:-}"
+  set_if_empty SERVER_EXTERNAL_URL "${GITSEER_SERVER_EXTERNAL_URL:-}"
+  set_if_empty SERVER_LISTEN "${GITSEER_SERVER_LISTEN:-}"
+  set_if_empty OAUTH_CLIENT_ID "${GITSEER_AUTH_OAUTH_CLIENT_ID:-}"
+  set_if_empty OAUTH_CLIENT_SECRET "${GITSEER_AUTH_OAUTH_CLIENT_SECRET:-}"
+  set_if_empty BOOTSTRAP_PASSWORD "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}"
+  set_if_empty ALLOW_PRIVATE_NETWORK "${GITSEER_GITEA_ALLOW_PRIVATE_NETWORK:-}"
+  set_if_empty INSTANCE_NAME "${GITSEER_UI_INSTANCE_NAME:-}"
+  set_if_empty DATABASE_DRIVER "${GITSEER_DATABASE_DRIVER:-}"
+  set_if_empty DATABASE_PATH "${GITSEER_DATABASE_PATH:-}"
+  set_if_empty DATABASE_DSN "${GITSEER_DATABASE_DSN:-}"
+  set_if_empty METHOD "${GITSEER_INSTALL_METHOD:-}"
+  set_if_empty INSTALL_UI "${GITSEER_INSTALL_UI:-}"
+  set_if_empty GITEA_CUSTOM_PATH "${GITSEER_GITEA_CUSTOM_PATH:-}"
+  set_if_empty START_AFTER "${GITSEER_INSTALL_START:-}"
 }
 
 # Prefer env over config for final apply — call after config load to re-apply env.
 apply_env_overrides() {
-  [[ -n "${LENS_GITEA_URL:-}" ]] && GITEA_URL="$LENS_GITEA_URL"
-  [[ -n "${LENS_GITEA_TOKEN:-}" ]] && GITEA_TOKEN="$LENS_GITEA_TOKEN"
-  [[ -n "${LENS_SERVER_EXTERNAL_URL:-}" ]] && SERVER_EXTERNAL_URL="$LENS_SERVER_EXTERNAL_URL"
-  [[ -n "${LENS_SERVER_LISTEN:-}" ]] && SERVER_LISTEN="$LENS_SERVER_LISTEN"
-  [[ -n "${LENS_AUTH_OAUTH_CLIENT_ID:-}" ]] && OAUTH_CLIENT_ID="$LENS_AUTH_OAUTH_CLIENT_ID"
-  [[ -n "${LENS_AUTH_OAUTH_CLIENT_SECRET:-}" ]] && OAUTH_CLIENT_SECRET="$LENS_AUTH_OAUTH_CLIENT_SECRET"
-  [[ -n "${LENS_AUTH_BOOTSTRAP_PASSWORD:-}" ]] && BOOTSTRAP_PASSWORD="$LENS_AUTH_BOOTSTRAP_PASSWORD"
-  [[ -n "${LENS_GITEA_ALLOW_PRIVATE_NETWORK:-}" ]] && ALLOW_PRIVATE_NETWORK="$LENS_GITEA_ALLOW_PRIVATE_NETWORK"
-  [[ -n "${LENS_UI_INSTANCE_NAME:-}" ]] && INSTANCE_NAME="$LENS_UI_INSTANCE_NAME"
-  [[ -n "${LENS_DATABASE_DRIVER:-}" ]] && DATABASE_DRIVER="$LENS_DATABASE_DRIVER"
-  [[ -n "${LENS_DATABASE_PATH:-}" ]] && DATABASE_PATH="$LENS_DATABASE_PATH"
-  [[ -n "${LENS_DATABASE_DSN:-}" ]] && DATABASE_DSN="$LENS_DATABASE_DSN"
-  [[ -n "${LENS_INSTALL_METHOD:-}" ]] && METHOD="$LENS_INSTALL_METHOD"
-  [[ -n "${LENS_INSTALL_UI:-}" ]] && INSTALL_UI="$LENS_INSTALL_UI"
-  [[ -n "${LENS_GITEA_CUSTOM_PATH:-}" ]] && GITEA_CUSTOM_PATH="$LENS_GITEA_CUSTOM_PATH"
-  [[ -n "${LENS_INSTALL_START:-}" ]] && START_AFTER="$LENS_INSTALL_START"
+  [[ -n "${GITSEER_GITEA_URL:-}" ]] && GITEA_URL="$GITSEER_GITEA_URL"
+  [[ -n "${GITSEER_GITEA_TOKEN:-}" ]] && GITEA_TOKEN="$GITSEER_GITEA_TOKEN"
+  [[ -n "${GITSEER_SERVER_EXTERNAL_URL:-}" ]] && SERVER_EXTERNAL_URL="$GITSEER_SERVER_EXTERNAL_URL"
+  [[ -n "${GITSEER_SERVER_LISTEN:-}" ]] && SERVER_LISTEN="$GITSEER_SERVER_LISTEN"
+  [[ -n "${GITSEER_AUTH_OAUTH_CLIENT_ID:-}" ]] && OAUTH_CLIENT_ID="$GITSEER_AUTH_OAUTH_CLIENT_ID"
+  [[ -n "${GITSEER_AUTH_OAUTH_CLIENT_SECRET:-}" ]] && OAUTH_CLIENT_SECRET="$GITSEER_AUTH_OAUTH_CLIENT_SECRET"
+  [[ -n "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]] && BOOTSTRAP_PASSWORD="$GITSEER_AUTH_BOOTSTRAP_PASSWORD"
+  [[ -n "${GITSEER_GITEA_ALLOW_PRIVATE_NETWORK:-}" ]] && ALLOW_PRIVATE_NETWORK="$GITSEER_GITEA_ALLOW_PRIVATE_NETWORK"
+  [[ -n "${GITSEER_UI_INSTANCE_NAME:-}" ]] && INSTANCE_NAME="$GITSEER_UI_INSTANCE_NAME"
+  [[ -n "${GITSEER_DATABASE_DRIVER:-}" ]] && DATABASE_DRIVER="$GITSEER_DATABASE_DRIVER"
+  [[ -n "${GITSEER_DATABASE_PATH:-}" ]] && DATABASE_PATH="$GITSEER_DATABASE_PATH"
+  [[ -n "${GITSEER_DATABASE_DSN:-}" ]] && DATABASE_DSN="$GITSEER_DATABASE_DSN"
+  [[ -n "${GITSEER_INSTALL_METHOD:-}" ]] && METHOD="$GITSEER_INSTALL_METHOD"
+  [[ -n "${GITSEER_INSTALL_UI:-}" ]] && INSTALL_UI="$GITSEER_INSTALL_UI"
+  [[ -n "${GITSEER_GITEA_CUSTOM_PATH:-}" ]] && GITEA_CUSTOM_PATH="$GITSEER_GITEA_CUSTOM_PATH"
+  [[ -n "${GITSEER_INSTALL_START:-}" ]] && START_AFTER="$GITSEER_INSTALL_START"
   return 0
 }
 
@@ -456,7 +456,7 @@ gather_interactive() {
     else
       prompt BOOTSTRAP_PASSWORD "Bootstrap password" "" --secret
     fi
-    prompt INSTANCE_NAME "UI instance name" "Gitea Lens"
+    prompt INSTANCE_NAME "UI instance name" "GitSeer"
     if [[ -z "$ALLOW_PRIVATE_NETWORK" ]]; then
       if looks_private_url "$GITEA_URL"; then
         prompt ALLOW_PRIVATE_NETWORK "Allow private/lab Gitea URL (true|false)" "true"
@@ -471,9 +471,9 @@ gather_interactive() {
       prompt DATABASE_DSN "Postgres DSN"
     else
       if [[ "$METHOD" == compose ]]; then
-        prompt DATABASE_PATH "SQLite path (in container)" "/data/lens.db"
+        prompt DATABASE_PATH "SQLite path (in container)" "/data/gitseer.db"
       else
-        prompt DATABASE_PATH "SQLite path" "data/lens.db"
+        prompt DATABASE_PATH "SQLite path" "data/gitseer.db"
       fi
     fi
     if [[ -z "$START_AFTER" && $NO_START -eq 0 ]]; then
@@ -492,7 +492,7 @@ apply_defaults() {
   set_if_empty METHOD "compose"
   set_if_empty SERVER_EXTERNAL_URL "http://127.0.0.1:8090"
   set_if_empty SERVER_LISTEN "0.0.0.0:8090"
-  set_if_empty INSTANCE_NAME "Gitea Lens"
+  set_if_empty INSTANCE_NAME "GitSeer"
   set_if_empty DATABASE_DRIVER "sqlite"
   set_if_empty ALLOW_PRIVATE_NETWORK "false"
   set_if_empty INSTALL_UI "false"
@@ -505,14 +505,14 @@ apply_defaults() {
   fi
   if [[ -z "$DATABASE_PATH" ]]; then
     if [[ "$METHOD" == compose ]]; then
-      DATABASE_PATH="/data/lens.db"
+      DATABASE_PATH="/data/gitseer.db"
     else
-      DATABASE_PATH="data/lens.db"
+      DATABASE_PATH="data/gitseer.db"
     fi
   fi
   if [[ -z "$BOOTSTRAP_PASSWORD" ]]; then
     if [[ $NON_INTERACTIVE -eq 1 ]]; then
-      die "missing required value: bootstrap_password / LENS_AUTH_BOOTSTRAP_PASSWORD"
+      die "missing required value: bootstrap_password / GITSEER_AUTH_BOOTSTRAP_PASSWORD"
     fi
     BOOTSTRAP_PASSWORD="$(generate_password)"
     warn "Generated bootstrap password (saved to .env / config.yaml)"
@@ -520,10 +520,10 @@ apply_defaults() {
 }
 
 validate_required() {
-  require_value GITEA_URL "gitea_url / LENS_GITEA_URL"
-  require_value GITEA_TOKEN "gitea_token / LENS_GITEA_TOKEN"
-  require_value SERVER_EXTERNAL_URL "server_external_url / LENS_SERVER_EXTERNAL_URL"
-  require_value BOOTSTRAP_PASSWORD "bootstrap_password / LENS_AUTH_BOOTSTRAP_PASSWORD"
+  require_value GITEA_URL "gitea_url / GITSEER_GITEA_URL"
+  require_value GITEA_TOKEN "gitea_token / GITSEER_GITEA_TOKEN"
+  require_value SERVER_EXTERNAL_URL "server_external_url / GITSEER_SERVER_EXTERNAL_URL"
+  require_value BOOTSTRAP_PASSWORD "bootstrap_password / GITSEER_AUTH_BOOTSTRAP_PASSWORD"
 
   [[ -n "$GITEA_URL" ]] || die "Gitea URL is required"
   [[ -n "$GITEA_TOKEN" ]] || die "Gitea API token is required"
@@ -531,7 +531,7 @@ validate_required() {
   [[ -n "$BOOTSTRAP_PASSWORD" ]] || die "bootstrap password is required"
 
   if [[ -z "$OAUTH_CLIENT_ID" ]]; then
-    warn "OAuth client ID is empty — only bootstrap password login will work until you set LENS_AUTH_OAUTH_CLIENT_ID"
+    warn "OAuth client ID is empty — only bootstrap password login will work until you set GITSEER_AUTH_OAUTH_CLIENT_ID"
   fi
 
   case "$METHOD" in
@@ -611,21 +611,21 @@ write_dotenv() {
   umask 077
   cat >"$out" <<EOF
 # Generated by scripts/install.sh — do not commit
-LENS_GITEA_URL=${GITEA_URL}
-LENS_GITEA_TOKEN=${GITEA_TOKEN}
-LENS_SERVER_EXTERNAL_URL=${SERVER_EXTERNAL_URL}
-LENS_SERVER_LISTEN=${SERVER_LISTEN}
-LENS_AUTH_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
-LENS_AUTH_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
-LENS_AUTH_BOOTSTRAP_PASSWORD=${BOOTSTRAP_PASSWORD}
-LENS_GITEA_ALLOW_PRIVATE_NETWORK=${ALLOW_PRIVATE_NETWORK}
-LENS_UI_INSTANCE_NAME=${INSTANCE_NAME}
-LENS_DATABASE_DRIVER=${DATABASE_DRIVER}
-LENS_DATABASE_PATH=${DATABASE_PATH}
-LENS_DATABASE_DSN=${DATABASE_DSN}
-LENS_INSTALL_METHOD=${METHOD}
-LENS_INSTALL_UI=${INSTALL_UI}
-LENS_GITEA_CUSTOM_PATH=${GITEA_CUSTOM_PATH}
+GITSEER_GITEA_URL=${GITEA_URL}
+GITSEER_GITEA_TOKEN=${GITEA_TOKEN}
+GITSEER_SERVER_EXTERNAL_URL=${SERVER_EXTERNAL_URL}
+GITSEER_SERVER_LISTEN=${SERVER_LISTEN}
+GITSEER_AUTH_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
+GITSEER_AUTH_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
+GITSEER_AUTH_BOOTSTRAP_PASSWORD=${BOOTSTRAP_PASSWORD}
+GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=${ALLOW_PRIVATE_NETWORK}
+GITSEER_UI_INSTANCE_NAME=${INSTANCE_NAME}
+GITSEER_DATABASE_DRIVER=${DATABASE_DRIVER}
+GITSEER_DATABASE_PATH=${DATABASE_PATH}
+GITSEER_DATABASE_DSN=${DATABASE_DSN}
+GITSEER_INSTALL_METHOD=${METHOD}
+GITSEER_INSTALL_UI=${INSTALL_UI}
+GITSEER_GITEA_CUSTOM_PATH=${GITEA_CUSTOM_PATH}
 EOF
   ok "Wrote .env"
 }
@@ -647,10 +647,10 @@ EOF
     if [[ "${DATABASE_DRIVER}" == postgres* ]]; then
       printf '  dsn: %s\n' "$DATABASE_DSN"
     else
-      # Host path for binary; compose overrides via LENS_DATABASE_PATH
+      # Host path for binary; compose overrides via GITSEER_DATABASE_PATH
       local host_path="$DATABASE_PATH"
       if [[ "$METHOD" == compose && "$DATABASE_PATH" == /data/* ]]; then
-        host_path="data/lens.db"
+        host_path="data/gitseer.db"
       fi
       printf '  path: %s\n' "$host_path"
     fi
@@ -659,7 +659,7 @@ EOF
 gitea:
   url: ${GITEA_URL}
   allow_private_network: ${ALLOW_PRIVATE_NETWORK}
-  # token via LENS_GITEA_TOKEN / .env
+  # token via GITSEER_GITEA_TOKEN / .env
 
 sync:
   reconcile_interval: 5m
@@ -690,18 +690,18 @@ EOF
 }
 
 export_runtime_env() {
-  export LENS_GITEA_URL="$GITEA_URL"
-  export LENS_GITEA_TOKEN="$GITEA_TOKEN"
-  export LENS_SERVER_EXTERNAL_URL="$SERVER_EXTERNAL_URL"
-  export LENS_SERVER_LISTEN="$SERVER_LISTEN"
-  export LENS_AUTH_OAUTH_CLIENT_ID="$OAUTH_CLIENT_ID"
-  export LENS_AUTH_OAUTH_CLIENT_SECRET="$OAUTH_CLIENT_SECRET"
-  export LENS_AUTH_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
-  export LENS_GITEA_ALLOW_PRIVATE_NETWORK="$ALLOW_PRIVATE_NETWORK"
-  export LENS_UI_INSTANCE_NAME="$INSTANCE_NAME"
-  export LENS_DATABASE_DRIVER="$DATABASE_DRIVER"
-  export LENS_DATABASE_PATH="$DATABASE_PATH"
-  export LENS_DATABASE_DSN="$DATABASE_DSN"
+  export GITSEER_GITEA_URL="$GITEA_URL"
+  export GITSEER_GITEA_TOKEN="$GITEA_TOKEN"
+  export GITSEER_SERVER_EXTERNAL_URL="$SERVER_EXTERNAL_URL"
+  export GITSEER_SERVER_LISTEN="$SERVER_LISTEN"
+  export GITSEER_AUTH_OAUTH_CLIENT_ID="$OAUTH_CLIENT_ID"
+  export GITSEER_AUTH_OAUTH_CLIENT_SECRET="$OAUTH_CLIENT_SECRET"
+  export GITSEER_AUTH_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
+  export GITSEER_GITEA_ALLOW_PRIVATE_NETWORK="$ALLOW_PRIVATE_NETWORK"
+  export GITSEER_UI_INSTANCE_NAME="$INSTANCE_NAME"
+  export GITSEER_DATABASE_DRIVER="$DATABASE_DRIVER"
+  export GITSEER_DATABASE_PATH="$DATABASE_PATH"
+  export GITSEER_DATABASE_DSN="$DATABASE_DSN"
 }
 
 run_compose_install() {
@@ -724,19 +724,19 @@ run_binary_install() {
     log "Installing module / frontend deps and building"
     make -C "$ROOT" deps
     make -C "$ROOT" build
-    ok "Built $ROOT/bin/lens"
-    log "Starting ./bin/lens serve --config config.yaml"
+    ok "Built $ROOT/bin/gitseer"
+    log "Starting ./bin/gitseer serve --config config.yaml"
     mkdir -p "$ROOT/data"
-    nohup "$ROOT/bin/lens" serve --config "$ROOT/config.yaml" \
-      >"$ROOT/data/lens.log" 2>&1 &
-    echo $! >"$ROOT/data/lens.pid"
-    ok "Lens started (pid $(cat "$ROOT/data/lens.pid"), log data/lens.log)"
+    nohup "$ROOT/bin/gitseer" serve --config "$ROOT/config.yaml" \
+      >"$ROOT/data/gitseer.log" 2>&1 &
+    echo $! >"$ROOT/data/gitseer.pid"
+    ok "GitSeer started (pid $(cat "$ROOT/data/gitseer.pid"), log data/gitseer.log)"
     log "Open ${SERVER_EXTERNAL_URL}"
   else
     log "Installing module / frontend deps and building"
     make -C "$ROOT" deps
     make -C "$ROOT" build
-    ok "Built $ROOT/bin/lens — start later with: ./bin/lens serve --config config.yaml"
+    ok "Built $ROOT/bin/gitseer — start later with: ./bin/gitseer serve --config config.yaml"
   fi
 }
 
@@ -744,22 +744,22 @@ maybe_install_ui() {
   is_true "$INSTALL_UI" || return 0
   [[ -n "$GITEA_CUSTOM_PATH" ]] || die "--install-ui requires gitea custom path"
 
-  local bin="$ROOT/bin/lens"
+  local bin="$ROOT/bin/gitseer"
   if [[ ! -x "$bin" ]]; then
     if [[ "$METHOD" == binary ]]; then
-      die "lens binary missing; build failed?"
+      die "gitseer binary missing; build failed?"
     fi
-    log "Building lens binary for install-ui"
+    log "Building gitseer binary for install-ui"
     if have go && have node && have make; then
       ensure_binary_deps
       make -C "$ROOT" build
     else
-      die "install-ui needs a local ./bin/lens (install Go/Node and re-run, or build first)"
+      die "install-ui needs a local ./bin/gitseer (install Go/Node and re-run, or build first)"
     fi
   fi
 
   log "Installing Gitea UI links → $GITEA_CUSTOM_PATH"
-  "$bin" install-ui --custom-path "$GITEA_CUSTOM_PATH" --lens-url "$SERVER_EXTERNAL_URL"
+  "$bin" install-ui --custom-path "$GITEA_CUSTOM_PATH" --gitseer-url "$SERVER_EXTERNAL_URL"
   ok "Gitea UI templates updated (restart Gitea to pick them up)"
 }
 
@@ -789,7 +789,7 @@ main() {
   parse_args "$@"
 
   echo
-  log "Gitea Lens installer"
+  log "GitSeer installer"
   echo "   repo: $ROOT"
   echo
 

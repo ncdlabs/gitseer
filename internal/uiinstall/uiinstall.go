@@ -12,26 +12,26 @@ import (
 )
 
 const (
-	beginLinks = "<!-- BEGIN GITEA-LENS -->"
-	endLinks   = "<!-- END GITEA-LENS -->"
-	beginTabs  = "<!-- BEGIN GITEA-LENS-TABS -->"
-	endTabs    = "<!-- END GITEA-LENS-TABS -->"
+	beginLinks = "<!-- BEGIN GITSEER -->"
+	endLinks   = "<!-- END GITSEER -->"
+	beginTabs  = "<!-- BEGIN GITSEER-TABS -->"
+	endTabs    = "<!-- END GITSEER-TABS -->"
 )
 
 func InstallCmd(args []string) {
 	fs := flag.NewFlagSet("install-ui", flag.ExitOnError)
 	customPath := fs.String("custom-path", "", "path to Gitea custom/ directory")
-	lensURL := fs.String("lens-url", "", "public Lens base URL (e.g. https://git.example.com/lens)")
+	gitseerURL := fs.String("gitseer-url", "", "public GitSeer base URL (e.g. https://git.example.com/gitseer)")
 	_ = fs.Parse(args)
-	if *customPath == "" || *lensURL == "" {
-		fmt.Fprintln(os.Stderr, "usage: lens install-ui --custom-path DIR --lens-url URL")
+	if *customPath == "" || *gitseerURL == "" {
+		fmt.Fprintln(os.Stderr, "usage: gitseer install-ui --custom-path DIR --gitseer-url URL")
 		os.Exit(2)
 	}
-	if err := Install(*customPath, strings.TrimRight(*lensURL, "/")); err != nil {
+	if err := Install(*customPath, strings.TrimRight(*gitseerURL, "/")); err != nil {
 		fmt.Fprintf(os.Stderr, "install-ui: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Gitea Lens UI snippets installed (marker-safe).")
+	fmt.Println("GitSeer UI snippets installed (marker-safe).")
 }
 
 func UninstallCmd(args []string) {
@@ -39,18 +39,18 @@ func UninstallCmd(args []string) {
 	customPath := fs.String("custom-path", "", "path to Gitea custom/ directory")
 	_ = fs.Parse(args)
 	if *customPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: lens uninstall-ui --custom-path DIR")
+		fmt.Fprintln(os.Stderr, "usage: gitseer uninstall-ui --custom-path DIR")
 		os.Exit(2)
 	}
 	if err := Uninstall(*customPath); err != nil {
 		fmt.Fprintf(os.Stderr, "uninstall-ui: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Gitea Lens UI snippets removed.")
+	fmt.Println("GitSeer UI snippets removed.")
 }
 
-func Install(customPath, lensURL string) error {
-	safeURL, err := sanitizeLensURL(lensURL)
+func Install(customPath, gitseerURL string) error {
+	safeURL, err := sanitizeGitSeerURL(gitseerURL)
 	if err != nil {
 		return err
 	}
@@ -60,11 +60,11 @@ func Install(customPath, lensURL string) error {
 	}
 	href := html.EscapeString(safeURL)
 	linksSnippet := fmt.Sprintf(`%s
-<a class="item" href="%s" target="_blank" rel="noopener noreferrer">Lens</a>
+<a class="item" href="%s" target="_blank" rel="noopener noreferrer">GitSeer</a>
 %s
 `, beginLinks, href, endLinks)
 	tabsSnippet := fmt.Sprintf(`%s
-<a class="item" href="%s/repositories/{{.Owner.Name}}/{{.Repository.Name}}" target="_blank" rel="noopener noreferrer">Lens</a>
+<a class="item" href="%s/repositories/{{.Owner.Name}}/{{.Repository.Name}}" target="_blank" rel="noopener noreferrer">GitSeer</a>
 %s
 `, beginTabs, href, endTabs)
 
@@ -151,16 +151,16 @@ func removeBetween(content, begin, end string) (string, error) {
 	return out, nil
 }
 
-func sanitizeLensURL(raw string) (string, error) {
+func sanitizeGitSeerURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
-		return "", fmt.Errorf("invalid lens-url: %w", err)
+		return "", fmt.Errorf("invalid gitseer-url: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("lens-url must be http or https")
+		return "", fmt.Errorf("gitseer-url must be http or https")
 	}
 	if u.Host == "" {
-		return "", fmt.Errorf("lens-url host is required")
+		return "", fmt.Errorf("gitseer-url host is required")
 	}
 	u.Fragment = ""
 	u.RawQuery = ""

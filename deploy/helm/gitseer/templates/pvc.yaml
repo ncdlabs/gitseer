@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "gitea-lens.fullname" . }}
+  name: {{ include "gitseer.fullname" . }}
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:

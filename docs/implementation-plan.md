@@ -1,9 +1,9 @@
-# Gitea Lens — Implementation Plan
+# GitSeer — Implementation Plan
 
-**Status:** Execution-ready blueprint  
+**Status:** Execution-ready blueprint (amended for dual-forge / GitSeer branding)  
 **Source of truth:** [`./docs/prd-spec.md`](./prd-spec.md)  
 **Repository state at planning:** greenfield (PRD only; no commits; no application code)  
-**Date:** 2026-09-20  
+**Date:** 2026-09-20 (ADR-029 dual-forge amendment 2026-09-24)  
 **License target:** Apache-2.0  
 
 This document is the implementation blueprint future Cursor Agent sessions should follow. Do not silently reinterpret major PRD requirements. If repository reality later conflicts with this plan, update both this file and `PROJECT_SHARED_STATE.md`.
@@ -36,7 +36,7 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 
 ### What not to do
 
-- Do not invent Forgejo/GitHub/GitLab adapters in V1.
+- Do not invent GitLab/Bitbucket adapters until approved (Coming Soon in the forge picker only). Gitea + GitHub are in scope (ADR-029).
 - Do not add Redis for V1 (PRD ADR-011).
 - Do not use WebSockets unless SSE is proven insufficient (PRD §24).
 - Do not fork or patch Gitea source.
@@ -48,7 +48,7 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 
 ### Product
 
-Gitea Lens is a **self-hosted CI/CD and pull-request operations console** for a Gitea instance. It answers: **what requires attention right now?** across all accessible repositories without per-repo setup (PRD §1–§5).
+**GitSeer** (historical PRD name: GitSeer) is a **self-hosted CI/CD and pull-request operations console** for configured forge instances. Dual-forge v1 covers **Gitea + GitHub**. It answers: **what requires attention right now?** across accessible repositories without per-repo setup (PRD §1–§5).
 
 ### Non-negotiables (must not be weakened)
 
@@ -91,26 +91,27 @@ Browser (React SPA, embedded in binary)
         │  REST /api/v1 + SSE /api/v1/events
         ▼
 ┌───────────────────────────────────────────┐
-│  Gitea Lens (Go)                          │
+│  GitSeer / lens (Go)                      │
 │  HTTP API · Auth · Authz · Realtime SSE   │
 │  Sync · Webhooks · Attention · Workflows  │
 │  Forge adapter boundary                   │
-│       └── forge/gitea (only impl in V1)   │
+│       └── forge/gitea + forge/github      │
+│           (GitLab/Bitbucket Coming Soon)  │
 └───────────────────┬───────────────────────┘
                     │ encrypted secrets, normalized rows
                     ▼
               SQLite / PostgreSQL
                     ▲
-         API + webhooks (service token)
+         API + webhooks (per-instance tokens)
                     │
-                 Gitea
+              Gitea / GitHub
 ```
 
 ### Runtime components
 
 | Component | Responsibility |
 | --- | --- |
-| `cmd/lens` | Process entry: config, DB, HTTP, workers |
+| `cmd/gitseer` | Process entry: config, DB, HTTP, workers |
 | Gitea adapter | Version/capability probe; translate Gitea ↔ Lens models |
 | Synchronizer | Initial import, incremental sync, reconciliation loop |
 | Webhook engine | Validate, dedupe, enqueue, idempotent apply |
@@ -122,11 +123,11 @@ Browser (React SPA, embedded in binary)
 | Workflow package | YAML fetch at commit SHA, `needs` DAG, cache |
 | Embed FS | Serve built `web/dist` from Go binary |
 
-### Explicit non-components (V1)
+### Explicit non-components (current slice)
 
 - No Redis / message broker
 - No WebSocket gateway (unless a later ADR overturns)
-- No multi-forge implementations beyond interface stubs
+- No GitLab / Bitbucket forge clients (Coming Soon UI only — see ADR-029)
 - No CI log blob store by default
 
 ---
@@ -141,18 +142,19 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 | ADR-016 | **HTTP router:** `chi` (lightweight, middleware-friendly, common in Go ops tools) | Decide at foundation |
 | ADR-017 | **Migrations:** `golang-migrate` or `pressly/goose` with SQL files in `migrations/` — prefer **goose** for embeddable single-binary UX | Foundation |
 | ADR-018 | **DB access:** `database/sql` + `sqlc` for typed queries (SQLite + Postgres dialect parity). Avoid heavy ORM. | Foundation |
-| ADR-019 | **Config:** YAML file + env overrides (`LENS_*`); secrets via `_FILE` suffix pattern | Foundation |
+| ADR-019 | **Config:** YAML file + env overrides (`GITSEER_*`); secrets via `_FILE` suffix pattern | Foundation |
 | ADR-020 | **Frontend:** Vite + React 18/19 + TS; TanStack Query + TanStack Table; React Flow for DAGs; CSS variables + small primitives (no heavy UI kit) | Foundation |
 | ADR-021 | **Session store:** server-side sessions in DB (SQLite/PG); signed cookie session ID; no JWT-as-session for V1 | Auth phase |
-| ADR-022 | **Credential encryption:** AES-256-GCM with `LENS_ENCRYPTION_KEY` (32-byte); rotate via re-encrypt command later | Auth/sync |
+| ADR-022 | **Credential encryption:** AES-256-GCM with `GITSEER_ENCRYPTION_KEY` (32-byte); rotate via re-encrypt command later | Auth/sync |
 | ADR-023 | **User repo ACL cache:** table `user_repository_access` refreshed on login + periodic + webhook-driven invalidation; **every** list/aggregate query joins/filters by it | Authz — critical |
 | ADR-024 | **Webhook processing:** accept → persist raw envelope → `202`/`200` quickly → in-process worker pool (no Redis) | Sync |
 | ADR-025 | **SSE:** one stream per authenticated session; events are opaque entity refs (`type`, `id`, `repo_id`); clients refetch via Query | Realtime |
 | ADR-026 | **Minimum Gitea version:** declare after capability matrix spike (see Open Questions); degrade Actions features when APIs missing | Before M1 exit |
-| ADR-027 | **Module path:** `github.com/ncdlabs/gitea-lens` (matches PRD working repo) | Foundation |
+| ADR-027 | **Module path:** `github.com/ncdlabs/gitseer` (binary `gitseer`, Helm chart/namespace `gitseer`, env `GITSEER_*`) | Foundation |
 | ADR-028 | **Compose filename:** `compose.yaml` (project preference for `.yaml`) while keeping `docker-compose.yaml` symlink or doc alias if useful | Packaging |
+| ADR-029 | **Dual-forge:** Gitea + GitHub are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). GitLab and Bitbucket remain **Coming Soon** (picker only) until explicitly approved. No GitHub OAuth login in this slice (service PAT). | Dual-forge slice |
 
-**No ADR needed yet for:** Forgejo (interface only), write ops (post-MVP), notifications.
+**No ADR needed yet for:** Forgejo, write ops (post-MVP), notifications, GitLab/Bitbucket clients.
 
 ---
 
@@ -570,14 +572,14 @@ V1: hardcoded thresholds in config file (e.g. long-running duration). User-confi
 ### Artifacts under `integrations/gitea/`
 
 - Snippets for `extra_links.tmpl`, `extra_tabs.tmpl`  
-- Optional `gitea-lens.css`  
-- Marker comments: `{{/* gitea-lens:begin */}}` … `{{/* gitea-lens:end */}}`
+- Optional `gitseer.css`  
+- Marker comments: `{{/* gitseer:begin */}}` … `{{/* gitseer:end */}}`
 
 ### CLI
 
 ```text
-gitea-lens install-ui --gitea-custom $GITEA_CUSTOM --lens-url https://...
-gitea-lens uninstall-ui --gitea-custom $GITEA_CUSTOM
+gitseer install-ui --gitea-custom $GITEA_CUSTOM --gitseer-url https://...
+gitseer uninstall-ui --gitea-custom $GITEA_CUSTOM
 ```
 
 ### Rules (PRD §18)
@@ -597,10 +599,10 @@ gitea-lens uninstall-ui --gitea-custom $GITEA_CUSTOM
 
 | Artifact | Detail |
 | --- | --- |
-| OCI image | `ghcr.io/ncdlabs/gitea-lens` multi-arch amd64/arm64 |
+| OCI image | `ghcr.io/ncdlabs/gitseer` multi-arch amd64/arm64 |
 | Compose | `deploy/compose/compose.yaml` — port 8090, volume `/data` |
 | Binary | `goreleaser` or `go build` matrix: linux/mac amd64+arm64, windows amd64 |
-| Helm | `deploy/helm/gitea-lens` — Deployment, Service, PVC/PG options, Ingress subpath |
+| Helm | `deploy/helm/gitseer` — Deployment, Service, PVC/PG options, Ingress subpath |
 | Secrets | env or `*_FILE` |
 
 First-run wizard persists config into DB/`/data/config.yaml` as designed in foundation.
@@ -699,8 +701,8 @@ Only genuine unknowns; verify as noted. Do not block overall sequencing.
 | Q4 | Whether job **steps** are always populated in API for failed jobs across versions | Fixture runs on matrix versions |
 | Q5 | OAuth app creation via API vs manual for non-admin installers | Try `POST` oauth apps with limited token |
 | Q6 | Runner list APIs sufficient for V1 Runners page or degrade to “not available” | Inspect admin/org/repo runner endpoints |
-| Q7 | Subpath: does Gitea OAuth redirect allow Lens under `/lens` without extra Gitea config | End-to-end with Traefik/Caddy path strip |
-| Q8 | Module/org GitHub path final (`ncdlabs/gitea-lens`) and GHCR permissions | Confirm org before first release |
+| Q7 | Subpath: does Gitea OAuth redirect allow GitSeer under `/gitseer` without extra Gitea config | End-to-end with Traefik/Caddy path strip |
+| Q8 | Module/org GitHub path final (`ncdlabs/gitseer`) and GHCR permissions | Confirm org before first release |
 
 Minor unknowns must not stall M0–M2.
 
@@ -711,10 +713,10 @@ Minor unknowns must not stall M0–M2.
 ### M0 — Repository and architecture baseline
 
 - **Scope:** Go module, cmd skeleton, config, logging, chi router, health, embed placeholder, Vite React shell, Makefile/task, CI lint stub, LICENSE/README draft, `compose` for Lens-only  
-- **Key paths:** `cmd/lens`, `internal/config`, `internal/httpapi` (or `internal/server`), `web/`, `Dockerfile`, `.github/workflows/ci.yaml`  
+- **Key paths:** `cmd/gitseer`, `internal/config`, `internal/httpapi` (or `internal/server`), `web/`, `Dockerfile`, `.github/workflows/ci.yaml`  
 - **Deps:** none  
 - **Tests:** config load unit tests; health handler test  
-- **Exit:** `go run ./cmd/lens` serves `/health/live` + empty UI shell  
+- **Exit:** `go run ./cmd/gitseer` serves `/health/live` + empty UI shell  
 
 ### M1 — Gitea connectivity and discovery
 
@@ -775,7 +777,7 @@ Minor unknowns must not stall M0–M2.
 ### M8 — Gitea native integration
 
 - **Scope:** install-ui/uninstall-ui, extra_links/tabs, Repository Lens entry, subpath docs/tests  
-- **Key paths:** `integrations/gitea`, `cmd/lens` subcommands  
+- **Key paths:** `integrations/gitea`, `cmd/gitseer` subcommands  
 - **Deps:** M5  
 - **Tests:** installer dry-run on sample custom dir with pre-existing tmpl  
 - **Exit:** markers preserve admin content; tab links to Lens  
@@ -800,7 +802,7 @@ Minor unknowns must not stall M0–M2.
 
 ```text
 /
-├── cmd/lens/                    # main + subcommands (serve, install-ui, uninstall-ui, version)
+├── cmd/gitseer/                    # main + subcommands (serve, install-ui, uninstall-ui, version)
 ├── internal/
 │   ├── api/                     # /api/v1 HTTP handlers, DTOs, OpenAPI wiring
 │   ├── auth/                    # OAuth PKCE, sessions, cookies
@@ -868,8 +870,8 @@ Avoid micro-packages like `internal/pr` / `internal/job` unless a file grows unw
 
 Dependencies noted as `(needs: N)`.
 
-1. Initialize Go module `github.com/ncdlabs/gitea-lens`, `cmd/lens` stub, Makefile.  
-2. Implement `internal/config` (YAML + `LENS_*` env overrides + `*_FILE` secrets).  
+1. Initialize Go module `github.com/ncdlabs/gitseer`, `cmd/gitseer` stub, Makefile.  
+2. Implement `internal/config` (YAML + `GITSEER_*` env overrides + `*_FILE` secrets).  
 3. Structured JSON logging + request ID middleware (`internal/log`, server middleware).  
 4. HTTP server skeleton with chi: `/health/live`, `/health/ready` (ready = config loaded; DB later).  
 5. Database open helper + SQLite WAL; Postgres DSN path stub.  
@@ -971,7 +973,7 @@ Lens boots
 ### Acceptance criteria
 
 1. `podman compose up` (or local `go run`) serves UI on `:8090`.  
-2. With `LENS_GITEA_URL` + token, operator triggers sync.  
+2. With `GITSEER_GITEA_URL` + token, operator triggers sync.  
 3. DB contains normalized rows (Lens IDs ≠ only Gitea IDs).  
 4. UI shows repository list from Lens API, not direct browser→Gitea calls.  
 5. Health endpoints respond; logs are JSON without secrets.  

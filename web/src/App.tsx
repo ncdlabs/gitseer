@@ -34,7 +34,7 @@ function invalidateKeys(queryClient: QueryClient, keys: string[]) {
 function useRealtimeInvalidation() {
   const queryClient = useQueryClient();
   useEffect(() => {
-    const base = window.__LENS_BASE__ || "";
+    const base = window.__GITSEER_BASE__ || "";
     const es = new EventSource(`${base}/api/v1/events`);
     const onMessage = (event: MessageEvent) => {
       let type = "";
@@ -197,12 +197,12 @@ function Root() {
 
 declare global {
   interface Window {
-    __LENS_BASE__?: string;
+    __GITSEER_BASE__?: string;
   }
 }
 
 export default function App() {
-  const basename = window.__LENS_BASE__ || "";
+  const basename = window.__GITSEER_BASE__ || "";
   return (
     <QueryClientProvider client={qc}>
       <BrowserRouter basename={basename || undefined}>

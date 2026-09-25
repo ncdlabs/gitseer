@@ -14,7 +14,7 @@ import (
 var Dist embed.FS
 
 // Handler serves the SPA with history-fallback to index.html.
-// basePath is the public path prefix (e.g. "/lens") used to inject window.__LENS_BASE__.
+// basePath is the public path prefix (e.g. "/gitseer") used to inject window.__GITSEER_BASE__.
 func Handler(basePath string) http.Handler {
 	sub, err := fs.Sub(Dist, "dist")
 	if err != nil {
@@ -49,7 +49,7 @@ func serveIndex(w http.ResponseWriter, sub fs.FS, basePath string) {
 		return
 	}
 	html := string(b)
-	inject := `<script>window.__LENS_BASE__=` + jsString(basePath) + `;</script>`
+	inject := `<script>window.__GITSEER_BASE__=` + jsString(basePath) + `;</script>`
 	if strings.Contains(html, "</head>") {
 		html = strings.Replace(html, "</head>", inject+"</head>", 1)
 	} else {

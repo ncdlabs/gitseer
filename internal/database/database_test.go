@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ncdlabs/gitea-lens/internal/database"
+	"github.com/ncdlabs/gitseer/internal/database"
 )
 
 func TestOpenMigrates(t *testing.T) {

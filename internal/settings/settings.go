@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/config"
-	lenscrypto "github.com/ncdlabs/gitea-lens/internal/crypto"
-	"github.com/ncdlabs/gitea-lens/internal/store"
+	"github.com/ncdlabs/gitseer/internal/config"
+	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/store"
 )
 
 // Values are the user-editable Lens settings (non-secret).
@@ -28,39 +29,66 @@ type Values struct {
 
 // Integration is the effective Gitea/OAuth connection (secrets in memory only).
 type Integration struct {
-	URL                     string
-	Token                   string
-	WebhookSecret           string
-	AllowPrivateNetwork     bool
-	AllowUnsignedWebhooks   bool
-	OAuthClientID           string
-	OAuthClientSecret       string
+	URL                   string
+	Token                 string
+	WebhookSecret         string
+	AllowPrivateNetwork   bool
+	AllowUnsignedWebhooks bool
+	OAuthClientID         string
+	OAuthClientSecret     string
+}
+
+// GitHubIntegration is the effective GitHub connection (service PAT; no OAuth in this slice).
+type GitHubIntegration struct {
+	URL                   string
+	Token                 string
+	WebhookSecret         string
+	AllowPrivateNetwork   bool
+	AllowUnsignedWebhooks bool
 }
 
 // IntegrationPublic is the API-safe view (never includes secret values).
+// Flat gitea_* / github_* fields; OAuth client fields remain Gitea-only.
 type IntegrationPublic struct {
-	GiteaURL                       string `json:"gitea_url"`
-	GiteaTokenConfigured           bool   `json:"gitea_token_configured"`
-	GiteaWebhookSecretConfigured   bool   `json:"gitea_webhook_secret_configured"`
-	GiteaAllowPrivateNetwork       bool   `json:"gitea_allow_private_network"`
-	GiteaAllowUnsignedWebhooks     bool   `json:"gitea_allow_unsigned_webhooks"`
-	OAuthClientID                  string `json:"oauth_client_id"`
-	OAuthClientSecretConfigured    bool   `json:"oauth_client_secret_configured"`
+	GiteaURL                     string `json:"gitea_url"`
+	GiteaTokenConfigured         bool   `json:"gitea_token_configured"`
+	GiteaWebhookSecretConfigured bool   `json:"gitea_webhook_secret_configured"`
+	GiteaAllowPrivateNetwork     bool   `json:"gitea_allow_private_network"`
+	GiteaAllowUnsignedWebhooks   bool   `json:"gitea_allow_unsigned_webhooks"`
+	OAuthClientID                string `json:"oauth_client_id"`
+	OAuthClientSecretConfigured  bool   `json:"oauth_client_secret_configured"`
+
+	GitHubURL                     string `json:"github_url"`
+	GitHubTokenConfigured         bool   `json:"github_token_configured"`
+	GitHubWebhookSecretConfigured bool   `json:"github_webhook_secret_configured"`
+	GitHubAllowPrivateNetwork     bool   `json:"github_allow_private_network"`
+	GitHubAllowUnsignedWebhooks   bool   `json:"github_allow_unsigned_webhooks"`
 }
 
 // IntegrationPatch is a PUT body for integration fields.
 // Empty secret strings leave the stored secret unchanged; clear_* flags clear them.
+// GitHub fields are applied only when ApplyGitHub is true (Settings Integration form);
+// setup Gitea handlers leave ApplyGitHub false so GitHub state is preserved.
 type IntegrationPatch struct {
-	GiteaURL                     string `json:"gitea_url"`
-	GiteaToken                   string `json:"gitea_token"`
-	GiteaWebhookSecret           string `json:"gitea_webhook_secret"`
-	ClearGiteaToken              bool   `json:"clear_gitea_token"`
-	ClearGiteaWebhookSecret      bool   `json:"clear_gitea_webhook_secret"`
-	GiteaAllowPrivateNetwork     bool   `json:"gitea_allow_private_network"`
-	GiteaAllowUnsignedWebhooks   bool   `json:"gitea_allow_unsigned_webhooks"`
-	OAuthClientID                string `json:"oauth_client_id"`
-	OAuthClientSecret            string `json:"oauth_client_secret"`
-	ClearOAuthClientSecret       bool   `json:"clear_oauth_client_secret"`
+	GiteaURL                   string `json:"gitea_url"`
+	GiteaToken                 string `json:"gitea_token"`
+	GiteaWebhookSecret         string `json:"gitea_webhook_secret"`
+	ClearGiteaToken            bool   `json:"clear_gitea_token"`
+	ClearGiteaWebhookSecret    bool   `json:"clear_gitea_webhook_secret"`
+	GiteaAllowPrivateNetwork   bool   `json:"gitea_allow_private_network"`
+	GiteaAllowUnsignedWebhooks bool   `json:"gitea_allow_unsigned_webhooks"`
+	OAuthClientID              string `json:"oauth_client_id"`
+	OAuthClientSecret          string `json:"oauth_client_secret"`
+	ClearOAuthClientSecret     bool   `json:"clear_oauth_client_secret"`
+
+	ApplyGitHub                 bool   `json:"apply_github"`
+	GitHubURL                   string `json:"github_url"`
+	GitHubToken                 string `json:"github_token"`
+	GitHubWebhookSecret         string `json:"github_webhook_secret"`
+	ClearGitHubToken            bool   `json:"clear_github_token"`
+	ClearGitHubWebhookSecret    bool   `json:"clear_github_webhook_secret"`
+	GitHubAllowPrivateNetwork   bool   `json:"github_allow_private_network"`
+	GitHubAllowUnsignedWebhooks bool   `json:"github_allow_unsigned_webhooks"`
 }
 
 // OnIntegrationChange is invoked after a successful integration update (live apply).
@@ -88,6 +116,11 @@ type Manager struct {
 	dbExternalURL   string
 	setupCompleted  bool
 
+	baseGitHub GitHubIntegration
+	github     GitHubIntegration
+	// Last known GitHub instance base URL (normalized) for upsert after URL changes.
+	githubInstanceURL string
+
 	encKey  []byte
 	st      *store.Store
 	onInteg OnIntegrationChange
@@ -106,7 +139,7 @@ func New(cfg config.Config, st *store.Store) *Manager {
 		ServerExternalURL:         strings.TrimSpace(cfg.Server.ExternalURL),
 	}
 	if base.InstanceName == "" {
-		base.InstanceName = "Gitea Lens"
+		base.InstanceName = "GitSeer"
 	}
 	if base.AttentionLongRunningAfter == "" {
 		base.AttentionLongRunningAfter = "2h"
@@ -120,9 +153,16 @@ func New(cfg config.Config, st *store.Store) *Manager {
 		OAuthClientID:         strings.TrimSpace(cfg.Auth.OAuthClientID),
 		OAuthClientSecret:     cfg.Auth.OAuthClientSecret,
 	}
+	baseGitHub := GitHubIntegration{
+		URL:                   strings.TrimSpace(cfg.GitHub.URL),
+		Token:                 cfg.GitHub.Token,
+		WebhookSecret:         cfg.GitHub.WebhookSecret,
+		AllowPrivateNetwork:   cfg.GitHub.AllowPrivateNetwork,
+		AllowUnsignedWebhooks: cfg.GitHub.AllowUnsignedWebhooks,
+	}
 	var encKey []byte
 	if cfg.Auth.EncryptionKey != "" {
-		k, err := lenscrypto.KeyFromString(cfg.Auth.EncryptionKey)
+		k, err := gitseercrypto.KeyFromString(cfg.Auth.EncryptionKey)
 		if err != nil {
 			// Invalid keys must not silently disable encryption (fail closed at Load/Validate).
 			encKey = nil
@@ -133,6 +173,7 @@ func New(cfg config.Config, st *store.Store) *Manager {
 	return &Manager{
 		base: base, cur: base,
 		baseInteg: baseInteg, integ: baseInteg,
+		baseGitHub: baseGitHub, github: baseGitHub,
 		encKey: encKey, st: st,
 	}
 }
@@ -152,16 +193,19 @@ func (m *Manager) SetOnExternalURLChange(fn OnExternalURLChange) {
 }
 
 // Load merges persisted overrides from the database onto defaults.
+// When a Gitea URL is configured but no matching instances row holds secrets,
+// seeds/upserts a gitea instance from app_settings (one-time migrate path).
+// GitHub is loaded from instances (and config defaults); seeded when config has a URL.
 func (m *Manager) Load(ctx context.Context) error {
 	row, err := m.st.GetAppSettings(ctx)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.cur = merge(m.base, row)
 	integ, err := m.mergeIntegrationLocked(row)
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
 	m.integ = integ
@@ -186,7 +230,225 @@ func (m *Manager) Load(ctx context.Context) error {
 		m.dbExternalURL = ""
 		m.setupCompleted = false
 	}
+	seedName := strings.TrimSpace(m.cur.InstanceName)
+	seedInteg := m.integ
+	tokenCipher := m.dbTokenCipher
+	webhookCipher := m.dbWebhookCipher
+	oauthCipher := m.dbOAuthCipher
+	oauthID := m.dbOAuthID
+	extURL := m.dbExternalURL
+	if extURL == "" {
+		extURL = m.cur.ServerExternalURL
+	}
+	if extURL == "" {
+		extURL = m.base.ServerExternalURL
+	}
+	baseGitHub := m.baseGitHub
+	m.mu.Unlock()
+
+	if err := m.seedGiteaInstanceFromSettings(ctx, seedName, seedInteg, tokenCipher, webhookCipher, oauthID, oauthCipher, extURL); err != nil {
+		return fmt.Errorf("seed gitea instance from settings: %w", err)
+	}
+	if err := m.loadAndSeedGitHub(ctx, seedName, baseGitHub, extURL); err != nil {
+		return fmt.Errorf("load github integration: %w", err)
+	}
 	return nil
+}
+
+// seedGiteaInstanceFromSettings upserts a gitea instances row when a URL is configured
+// and the matching instance does not yet hold sync/webhook secret ciphertext.
+func (m *Manager) seedGiteaInstanceFromSettings(
+	ctx context.Context,
+	name string,
+	integ Integration,
+	tokenCipher, webhookCipher, oauthID, oauthCipher, externalURL string,
+) error {
+	baseURL := strings.TrimSpace(integ.URL)
+	if baseURL == "" {
+		return nil
+	}
+
+	inst, err := m.st.GetInstanceByForgeAndURL(ctx, models.ForgeTypeGitea, baseURL)
+	if err != nil {
+		return err
+	}
+	if store.InstanceHasSecrets(inst) {
+		return nil
+	}
+	// Also treat a same-URL row (legacy sync upsert, forge_type may already be gitea) as seeded
+	// when it already has secrets — GetInstanceByForgeAndURL misses forge_type mismatches.
+	if inst == nil {
+		byURL, err := m.st.GetInstanceByURL(ctx, baseURL)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if store.InstanceHasSecrets(byURL) {
+			return nil
+		}
+	}
+
+	if tokenCipher == "" && strings.TrimSpace(integ.Token) != "" {
+		if sealed, sealErr := m.seal(strings.TrimSpace(integ.Token)); sealErr == nil {
+			tokenCipher = sealed
+		}
+	}
+	if webhookCipher == "" && strings.TrimSpace(integ.WebhookSecret) != "" {
+		if sealed, sealErr := m.seal(strings.TrimSpace(integ.WebhookSecret)); sealErr == nil {
+			webhookCipher = sealed
+		}
+	}
+	if oauthCipher == "" && strings.TrimSpace(integ.OAuthClientSecret) != "" {
+		if sealed, sealErr := m.seal(strings.TrimSpace(integ.OAuthClientSecret)); sealErr == nil {
+			oauthCipher = sealed
+		}
+	}
+	if oauthID == "" {
+		oauthID = strings.TrimSpace(integ.OAuthClientID)
+	}
+	if name == "" {
+		name = "Gitea"
+	}
+
+	_, err = m.st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name:                    name,
+		ForgeType:               models.ForgeTypeGitea,
+		BaseURL:                 baseURL,
+		SyncTokenCiphertext:     tokenCipher,
+		WebhookSecretCiphertext: webhookCipher,
+		OAuthClientID:           oauthID,
+		OAuthClientSecretCipher: oauthCipher,
+		ExternalURL:             strings.TrimSpace(externalURL),
+		AllowPrivateNetwork:     integ.AllowPrivateNetwork,
+		AllowUnsignedWebhooks:   integ.AllowUnsignedWebhooks,
+	})
+	return err
+}
+
+// loadAndSeedGitHub merges config defaults with the first matching github instance row,
+// and seeds an instances row when config has a GitHub URL but the instance lacks secrets.
+func (m *Manager) loadAndSeedGitHub(ctx context.Context, name string, base GitHubIntegration, externalURL string) error {
+	out := base
+	instURL := ""
+
+	list, err := m.st.ListInstances(ctx)
+	if err != nil {
+		return err
+	}
+	var selected *models.Instance
+	wantURL := strings.TrimSpace(base.URL)
+	if wantURL != "" {
+		if norm, nerr := normalizeGitHubURL(wantURL); nerr == nil {
+			wantURL = norm
+			out.URL = norm
+		}
+	}
+	for i := range list {
+		if list[i].ForgeType != models.ForgeTypeGitHub {
+			continue
+		}
+		if wantURL != "" && list[i].BaseURL == wantURL {
+			selected = &list[i]
+			break
+		}
+		if selected == nil {
+			selected = &list[i]
+		}
+	}
+	if selected != nil {
+		instURL = selected.BaseURL
+		out.URL = selected.BaseURL
+		out.AllowPrivateNetwork = selected.AllowPrivateNetwork
+		out.AllowUnsignedWebhooks = selected.AllowUnsignedWebhooks
+		if selected.SyncTokenCiphertext != "" {
+			tok, err := m.open(selected.SyncTokenCiphertext)
+			if err != nil {
+				return fmt.Errorf("decrypt github token: %w", err)
+			}
+			out.Token = tok
+		}
+		if selected.WebhookSecretCiphertext != "" {
+			sec, err := m.open(selected.WebhookSecretCiphertext)
+			if err != nil {
+				return fmt.Errorf("decrypt github webhook secret: %w", err)
+			}
+			out.WebhookSecret = sec
+		}
+	}
+
+	m.mu.Lock()
+	m.github = out
+	m.githubInstanceURL = instURL
+	m.mu.Unlock()
+
+	if strings.TrimSpace(out.URL) == "" {
+		return nil
+	}
+	if store.InstanceHasSecrets(selected) {
+		return nil
+	}
+	return m.upsertGitHubInstance(ctx, name, out, "", "", externalURL)
+}
+
+func normalizeGitHubURL(raw string) (string, error) {
+	// Late import avoided: duplicate minimal trim; callers that need full normalize
+	// use forge/github.NormalizeBaseURL via upsert path.
+	return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
+}
+
+func (m *Manager) upsertGitHubInstance(ctx context.Context, name string, gh GitHubIntegration, tokenCipher, webhookCipher, externalURL string) error {
+	baseURL := strings.TrimSpace(gh.URL)
+	if baseURL == "" {
+		return nil
+	}
+	// Prefer canonical API root when the github package is available via a light helper.
+	if norm, err := tryNormalizeGitHubAPI(baseURL); err == nil {
+		baseURL = norm
+	}
+	if name == "" {
+		name = "GitHub"
+	}
+	if tokenCipher == "" && strings.TrimSpace(gh.Token) != "" {
+		sealed, err := m.seal(strings.TrimSpace(gh.Token))
+		if err != nil {
+			return err
+		}
+		tokenCipher = sealed
+	}
+	if webhookCipher == "" && strings.TrimSpace(gh.WebhookSecret) != "" {
+		sealed, err := m.seal(strings.TrimSpace(gh.WebhookSecret))
+		if err != nil {
+			return err
+		}
+		webhookCipher = sealed
+	}
+	inst, err := m.st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name:                    name,
+		ForgeType:               models.ForgeTypeGitHub,
+		BaseURL:                 baseURL,
+		SyncTokenCiphertext:     tokenCipher,
+		WebhookSecretCiphertext: webhookCipher,
+		ExternalURL:             strings.TrimSpace(externalURL),
+		AllowPrivateNetwork:     gh.AllowPrivateNetwork,
+		AllowUnsignedWebhooks:   gh.AllowUnsignedWebhooks,
+	})
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.github.URL = baseURL
+	if inst != nil {
+		m.githubInstanceURL = inst.BaseURL
+	} else {
+		m.githubInstanceURL = baseURL
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// tryNormalizeGitHubAPI is set from an init in github_norm.go when linked;
+// default keeps the trimmed URL.
+var tryNormalizeGitHubAPI = func(raw string) (string, error) {
+	return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
 }
 
 // Get returns the effective settings.
@@ -212,11 +474,27 @@ func (m *Manager) Integration() Integration {
 	return m.integ
 }
 
+// GitHub returns the effective GitHub connection (includes secrets).
+func (m *Manager) GitHub() GitHubIntegration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.github
+}
+
 // IntegrationPublic returns the API-safe integration view.
 func (m *Manager) IntegrationPublic() IntegrationPublic {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return publicFrom(m.integ)
+	return publicFrom(m.integ, m.github)
+}
+
+// AnyForgeConfigured reports whether at least one forge has URL + token.
+func (m *Manager) AnyForgeConfigured() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	giteaOK := strings.TrimSpace(m.integ.URL) != "" && strings.TrimSpace(m.integ.Token) != ""
+	githubOK := strings.TrimSpace(m.github.URL) != "" && strings.TrimSpace(m.github.Token) != ""
+	return giteaOK || githubOK
 }
 
 // SetupCompleted reports whether the setup wizard has been finished.
@@ -265,6 +543,8 @@ func (m *Manager) Update(ctx context.Context, next Values) (Values, error) {
 }
 
 // UpdateIntegration validates, encrypts secrets, persists, and live-applies integration settings.
+// Always updates Gitea (app_settings + instances upsert when URL set).
+// Updates GitHub only when patch.ApplyGitHub is true (instances upsert when URL set).
 func (m *Manager) UpdateIntegration(ctx context.Context, patch IntegrationPatch) (IntegrationPublic, error) {
 	m.mu.Lock()
 	cur := m.integ
@@ -272,6 +552,15 @@ func (m *Manager) UpdateIntegration(ctx context.Context, patch IntegrationPatch)
 	dbWebhook := m.dbWebhookCipher
 	dbOAuth := m.dbOAuthCipher
 	onChange := m.onInteg
+	curGitHub := m.github
+	instanceName := strings.TrimSpace(m.cur.InstanceName)
+	extURL := m.dbExternalURL
+	if extURL == "" {
+		extURL = m.cur.ServerExternalURL
+	}
+	if extURL == "" {
+		extURL = m.base.ServerExternalURL
+	}
 	m.mu.Unlock()
 
 	next := cur
@@ -301,6 +590,36 @@ func (m *Manager) UpdateIntegration(ctx context.Context, patch IntegrationPatch)
 
 	if err := ValidateIntegration(next); err != nil {
 		return IntegrationPublic{}, err
+	}
+
+	nextGitHub := curGitHub
+	if patch.ApplyGitHub {
+		nextGitHub = curGitHub
+		rawURL := strings.TrimSpace(patch.GitHubURL)
+		if rawURL != "" {
+			if norm, err := tryNormalizeGitHubAPI(rawURL); err == nil {
+				nextGitHub.URL = norm
+			} else {
+				nextGitHub.URL = rawURL
+			}
+		} else {
+			nextGitHub.URL = ""
+		}
+		nextGitHub.AllowPrivateNetwork = patch.GitHubAllowPrivateNetwork
+		nextGitHub.AllowUnsignedWebhooks = patch.GitHubAllowUnsignedWebhooks
+		if patch.ClearGitHubToken {
+			nextGitHub.Token = ""
+		} else if strings.TrimSpace(patch.GitHubToken) != "" {
+			nextGitHub.Token = strings.TrimSpace(patch.GitHubToken)
+		}
+		if patch.ClearGitHubWebhookSecret {
+			nextGitHub.WebhookSecret = ""
+		} else if strings.TrimSpace(patch.GitHubWebhookSecret) != "" {
+			nextGitHub.WebhookSecret = strings.TrimSpace(patch.GitHubWebhookSecret)
+		}
+		if err := ValidateGitHubIntegration(nextGitHub); err != nil {
+			return IntegrationPublic{}, err
+		}
 	}
 
 	// Empty secret on PUT = leave DB cipher unchanged (may still be empty → config fallback).
@@ -349,6 +668,79 @@ func (m *Manager) UpdateIntegration(ctx context.Context, patch IntegrationPatch)
 		return IntegrationPublic{}, err
 	}
 
+	// Persist Gitea instance secrets when a URL is configured.
+	if strings.TrimSpace(next.URL) != "" {
+		name := instanceName
+		if name == "" {
+			name = "Gitea"
+		}
+		if _, err := m.st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+			Name:                    name,
+			ForgeType:               models.ForgeTypeGitea,
+			BaseURL:                 next.URL,
+			SyncTokenCiphertext:     tokenCipher,
+			ClearSyncToken:          patch.ClearGiteaToken,
+			WebhookSecretCiphertext: webhookCipher,
+			ClearWebhookSecret:      patch.ClearGiteaWebhookSecret,
+			OAuthClientID:           next.OAuthClientID,
+			OAuthClientSecretCipher: oauthCipher,
+			ClearOAuthClientSecret:  patch.ClearOAuthClientSecret,
+			ExternalURL:             strings.TrimSpace(extURL),
+			AllowPrivateNetwork:     next.AllowPrivateNetwork,
+			AllowUnsignedWebhooks:   next.AllowUnsignedWebhooks,
+		}); err != nil {
+			return IntegrationPublic{}, fmt.Errorf("upsert gitea instance secrets: %w", err)
+		}
+	}
+
+	if patch.ApplyGitHub {
+		var ghTokenCipher, ghWebhookCipher string
+		if patch.ClearGitHubToken {
+			ghTokenCipher = ""
+		} else if strings.TrimSpace(patch.GitHubToken) != "" {
+			ghTokenCipher, err = m.seal(strings.TrimSpace(patch.GitHubToken))
+			if err != nil {
+				return IntegrationPublic{}, err
+			}
+		}
+		if patch.ClearGitHubWebhookSecret {
+			ghWebhookCipher = ""
+		} else if strings.TrimSpace(patch.GitHubWebhookSecret) != "" {
+			ghWebhookCipher, err = m.seal(strings.TrimSpace(patch.GitHubWebhookSecret))
+			if err != nil {
+				return IntegrationPublic{}, err
+			}
+		}
+		if strings.TrimSpace(nextGitHub.URL) != "" {
+			name := instanceName
+			if name == "" {
+				name = "GitHub"
+			}
+			baseURL := nextGitHub.URL
+			if _, err := m.st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+				Name:                    name,
+				ForgeType:               models.ForgeTypeGitHub,
+				BaseURL:                 baseURL,
+				SyncTokenCiphertext:     ghTokenCipher,
+				ClearSyncToken:          patch.ClearGitHubToken,
+				WebhookSecretCiphertext: ghWebhookCipher,
+				ClearWebhookSecret:      patch.ClearGitHubWebhookSecret,
+				ExternalURL:             strings.TrimSpace(extURL),
+				AllowPrivateNetwork:     nextGitHub.AllowPrivateNetwork,
+				AllowUnsignedWebhooks:   nextGitHub.AllowUnsignedWebhooks,
+			}); err != nil {
+				return IntegrationPublic{}, fmt.Errorf("upsert github instance secrets: %w", err)
+			}
+			m.mu.Lock()
+			m.githubInstanceURL = baseURL
+			m.mu.Unlock()
+		} else {
+			m.mu.Lock()
+			m.githubInstanceURL = ""
+			m.mu.Unlock()
+		}
+	}
+
 	m.mu.Lock()
 	m.integ = next
 	m.dbURL = next.URL
@@ -358,12 +750,16 @@ func (m *Manager) UpdateIntegration(ctx context.Context, patch IntegrationPatch)
 	m.dbOAuthCipher = oauthCipher
 	m.dbAllowPrivate = allowPrivate
 	m.dbAllowUnsigned = allowUnsigned
+	if patch.ApplyGitHub {
+		m.github = nextGitHub
+	}
+	pub := publicFrom(m.integ, m.github)
 	m.mu.Unlock()
 
 	if onChange != nil {
 		onChange(next)
 	}
-	return publicFrom(next), nil
+	return pub, nil
 }
 
 // SetSetupCompleted persists and applies the setup wizard completion flag.
@@ -455,6 +851,15 @@ func ValidateIntegration(i Integration) error {
 	return nil
 }
 
+// ValidateGitHubIntegration checks GitHub integration invariants.
+func ValidateGitHubIntegration(i GitHubIntegration) error {
+	url := strings.TrimSpace(i.URL)
+	if url != "" && strings.TrimSpace(i.WebhookSecret) == "" && !i.AllowUnsignedWebhooks {
+		return fmt.Errorf("github_webhook_secret is required when github_url is set (or enable github_allow_unsigned_webhooks)")
+	}
+	return nil
+}
+
 func (m *Manager) mergeIntegrationLocked(row *store.AppSettings) (Integration, error) {
 	out := m.baseInteg
 	if row == nil {
@@ -501,9 +906,9 @@ func (m *Manager) seal(plaintext string) (string, error) {
 		return "", nil
 	}
 	if len(m.encKey) != 32 {
-		return "", fmt.Errorf("LENS_ENCRYPTION_KEY is required to store secrets in the database")
+		return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to store secrets in the database")
 	}
-	return lenscrypto.Encrypt(m.encKey, plaintext)
+	return gitseercrypto.Encrypt(m.encKey, plaintext)
 }
 
 func (m *Manager) open(stored string) (string, error) {
@@ -511,28 +916,39 @@ func (m *Manager) open(stored string) (string, error) {
 		return "", nil
 	}
 	if len(m.encKey) != 32 {
-		if lenscrypto.LooksLikeCiphertext(stored) {
-			return "", fmt.Errorf("LENS_ENCRYPTION_KEY is required to decrypt stored secrets")
+		if gitseercrypto.LooksLikeCiphertext(stored) {
+			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
 		}
 		// No key: treat as legacy plaintext row (pre-encryption installs).
 		return stored, nil
 	}
-	pt, err := lenscrypto.Decrypt(m.encKey, stored)
+	pt, err := gitseercrypto.Decrypt(m.encKey, stored)
 	if err != nil {
 		return "", fmt.Errorf("decrypt failed (re-enter the secret if it was stored before encryption was enabled): %w", err)
 	}
 	return pt, nil
 }
 
-func publicFrom(i Integration) IntegrationPublic {
+// OpenSecret decrypts a stored ciphertext (or returns plaintext for legacy rows).
+// Used by sync and webhooks for per-instance credentials.
+func (m *Manager) OpenSecret(stored string) (string, error) {
+	return m.open(stored)
+}
+
+func publicFrom(i Integration, gh GitHubIntegration) IntegrationPublic {
 	return IntegrationPublic{
-		GiteaURL:                     i.URL,
-		GiteaTokenConfigured:         i.Token != "",
-		GiteaWebhookSecretConfigured: i.WebhookSecret != "",
-		GiteaAllowPrivateNetwork:     i.AllowPrivateNetwork,
-		GiteaAllowUnsignedWebhooks:   i.AllowUnsignedWebhooks,
-		OAuthClientID:                i.OAuthClientID,
-		OAuthClientSecretConfigured:  i.OAuthClientSecret != "",
+		GiteaURL:                      i.URL,
+		GiteaTokenConfigured:          i.Token != "",
+		GiteaWebhookSecretConfigured:  i.WebhookSecret != "",
+		GiteaAllowPrivateNetwork:      i.AllowPrivateNetwork,
+		GiteaAllowUnsignedWebhooks:    i.AllowUnsignedWebhooks,
+		OAuthClientID:                 i.OAuthClientID,
+		OAuthClientSecretConfigured:   i.OAuthClientSecret != "",
+		GitHubURL:                     gh.URL,
+		GitHubTokenConfigured:         gh.Token != "",
+		GitHubWebhookSecretConfigured: gh.WebhookSecret != "",
+		GitHubAllowPrivateNetwork:     gh.AllowPrivateNetwork,
+		GitHubAllowUnsignedWebhooks:   gh.AllowUnsignedWebhooks,
 	}
 }
 

@@ -1,21 +1,28 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { api, ciBadgeClass, ciLabel, repoLabel, safeExternalHref } from "../api/client";
+import { api, ciBadgeClass, ciLabel, openOnForgeLabel, repoLabel, safeExternalHref } from "../api/client";
+import { ForgeBadge } from "../components/ForgeBadge";
+import { ForgeFilterChips, matchesForgeFilter, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
 import { useViewMode } from "../hooks/useViewMode";
 
 export function RepositoriesPage() {
   const { mode, setMode } = useViewMode();
   const [filter, setFilter] = useState("");
+  const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
   const q = useQuery({
     queryKey: ["repositories", filter],
     queryFn: () => api.repositories(filter),
     placeholderData: keepPreviousData,
   });
+  const items = useMemo(() => {
+    const all = q.data?.items ?? [];
+    return all.filter((repo) => matchesForgeFilter(repo.forge_type, forgeFilter));
+  }, [q.data?.items, forgeFilter]);
+
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading repositories…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
-  const items = q.data?.items ?? [];
-  const empty = filter
+  const empty = filter || forgeFilter !== "all"
     ? "No repositories match this filter."
     : "No repositories yet. Use Sync in the header (bootstrap admin).";
   return (
@@ -25,7 +32,8 @@ export function RepositoriesPage() {
           <h1>Repositories</h1>
           <p className="muted">
             {q.data?.total ?? 0} repositor{q.data?.total === 1 ? "y" : "ies"} visible to you
-            {filter ? ` matching “${filter}”` : ""}.
+            {filter ? ` matching “${filter}”` : ""}
+            {forgeFilter !== "all" ? ` · ${forgeFilter}` : ""}.
           </p>
         </div>
         <ListControls
@@ -35,7 +43,9 @@ export function RepositoriesPage() {
           onFilter={setFilter}
           filterPlaceholder="Filter repositories…"
           filterLabel="Filter repositories"
-        />
+        >
+          <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} />
+        </ListControls>
       </div>
       {mode === "cards" ? (
         items.length === 0 ? (
@@ -48,16 +58,18 @@ export function RepositoriesPage() {
                 <a key={repo.id} className="item-card" href={href} target="_blank" rel="noreferrer">
                   <div className="item-card__title">{repo.full_name}</div>
                   <div className="item-card__meta">
+                    <ForgeBadge forgeType={repo.forge_type} />
                     <span className="badge">{repo.private ? "private" : "public"}</span>
                     {repo.archived && <span className="badge">archived</span>}
                   </div>
                   <div className="item-card__repo mono">{repo.default_branch || "—"}</div>
-                  <span className="item-card__cta muted">Open in Gitea →</span>
+                  <span className="item-card__cta muted">{openOnForgeLabel(repo.forge_type)}</span>
                 </a>
               ) : (
                 <div key={repo.id} className="item-card item-card--static">
                   <div className="item-card__title">{repo.full_name}</div>
                   <div className="item-card__meta">
+                    <ForgeBadge forgeType={repo.forge_type} />
                     <span className="badge">{repo.private ? "private" : "public"}</span>
                     {repo.archived && <span className="badge">archived</span>}
                   </div>
@@ -73,6 +85,7 @@ export function RepositoriesPage() {
             <thead>
               <tr>
                 <th>Repository</th>
+                <th>Forge</th>
                 <th>Default branch</th>
                 <th>Visibility</th>
               </tr>
@@ -91,6 +104,9 @@ export function RepositoriesPage() {
                         repo.full_name
                       )}
                     </td>
+                    <td>
+                      <ForgeBadge forgeType={repo.forge_type} />
+                    </td>
                     <td className="mono">{repo.default_branch || "—"}</td>
                     <td>
                       {repo.private ? "Private" : "Public"}
@@ -101,7 +117,7 @@ export function RepositoriesPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="empty">
+                  <td colSpan={4} className="empty">
                     {empty}
                   </td>
                 </tr>
@@ -117,15 +133,21 @@ export function RepositoriesPage() {
 export function PullRequestsPage() {
   const { mode, setMode } = useViewMode();
   const [filter, setFilter] = useState("");
+  const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
   const q = useQuery({
     queryKey: ["prs", filter],
     queryFn: () => api.pullRequests(filter),
     placeholderData: keepPreviousData,
   });
+  const items = useMemo(() => {
+    const all = q.data?.items ?? [];
+    return all.filter((pr) => matchesForgeFilter(pr.forge_type, forgeFilter));
+  }, [q.data?.items, forgeFilter]);
+
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pull requests…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
-  const items = q.data?.items ?? [];
-  const empty = filter ? "No pull requests match this filter." : "No open pull requests.";
+  const empty =
+    filter || forgeFilter !== "all" ? "No pull requests match this filter." : "No open pull requests.";
   return (
     <>
       <div className="topbar">
@@ -140,7 +162,9 @@ export function PullRequestsPage() {
           onFilter={setFilter}
           filterPlaceholder="Filter pull requests…"
           filterLabel="Filter pull requests"
-        />
+        >
+          <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} />
+        </ListControls>
       </div>
       {mode === "cards" ? (
         items.length === 0 ? (
@@ -153,6 +177,7 @@ export function PullRequestsPage() {
                 <>
                   <div className="item-card__meta">
                     <span className="mono">#{pr.number}</span>
+                    <ForgeBadge forgeType={pr.forge_type} />
                     <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{ciLabel(pr.ci_state)}</span>
                     {pr.draft && <span className="badge">draft</span>}
                   </div>
@@ -162,7 +187,7 @@ export function PullRequestsPage() {
                   </div>
                   <div className="item-card__repo mono">{repoLabel(pr)}</div>
                   <div className="muted mono">{pr.author_login}</div>
-                  {href && <span className="item-card__cta muted">Open in Gitea →</span>}
+                  {href && <span className="item-card__cta muted">{openOnForgeLabel(pr.forge_type)}</span>}
                 </>
               );
               return href ? (
@@ -184,6 +209,7 @@ export function PullRequestsPage() {
               <tr>
                 <th>PR</th>
                 <th>Repository</th>
+                <th>Forge</th>
                 <th>Author</th>
                 <th>CI</th>
               </tr>
@@ -207,6 +233,9 @@ export function PullRequestsPage() {
                       )}
                     </td>
                     <td className="mono">{repoLabel(pr)}</td>
+                    <td>
+                      <ForgeBadge forgeType={pr.forge_type} />
+                    </td>
                     <td>{pr.author_login}</td>
                     <td>
                       <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{ciLabel(pr.ci_state)}</span>
@@ -216,7 +245,7 @@ export function PullRequestsPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="empty">
+                  <td colSpan={5} className="empty">
                     {empty}
                   </td>
                 </tr>

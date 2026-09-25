@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 export type ViewMode = "table" | "cards";
 
-const STORAGE_KEY = "lens-view-mode";
+const STORAGE_KEY = "gitseer-view-mode";
 
 function readStored(): ViewMode {
   const stored = localStorage.getItem(STORAGE_KEY);

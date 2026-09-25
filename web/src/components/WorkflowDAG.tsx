@@ -26,7 +26,7 @@ type JobNodeData = {
   unknownDeps: boolean;
 };
 
-const START_ID = "__lens_start__";
+const START_ID = "__gitseer_start__";
 const COL_GAP = 200;
 const ROW_GAP = 110;
 const NODE_W = 160;

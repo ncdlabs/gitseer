@@ -1,31 +1,31 @@
-# Gitea Lens
+# GitSeer
 
 **Product Requirements Document & Technical Specification**  
 **Status:** Draft for Implementation  
 **License:** Apache-2.0 recommended  
 **Distribution:** Public open-source project  
-**Working repository:** `github.com/ncdlabs/gitea-lens`  
+**Working repository:** `github.com/ncdlabs/gitseer`  
 **Product type:** Self-hosted Gitea CI/CD and Pull Request Operations Console
 
 ---
 
 # 1. Executive Summary
 
-Gitea Lens is an open-source companion application for Gitea that provides a single operational view of CI/CD activity, pull requests, repository health, workflow failures, approvals, and related developer activity across an entire Gitea instance.
+GitSeer is an open-source companion application for Gitea that provides a single operational view of CI/CD activity, pull requests, repository health, workflow failures, approvals, and related developer activity across an entire Gitea instance.
 
-The primary problem Lens solves is fragmentation.
+The primary problem GitSeer solves is fragmentation.
 
-Gitea provides repository-level views for pull requests and Actions, but users managing multiple repositories must navigate into individual projects to understand overall CI/CD and pull-request health. Lens aggregates that information into a unified operational console designed to answer:
+Gitea provides repository-level views for pull requests and Actions, but users managing multiple repositories must navigate into individual projects to understand overall CI/CD and pull-request health. GitSeer aggregates that information into a unified operational console designed to answer:
 
 > **What requires my attention right now?**
 
-Lens will integrate deeply enough with Gitea to appear and behave like a native Gitea capability while remaining architecturally separate from the Gitea codebase.
+GitSeer will integrate deeply enough with Gitea to appear and behave like a native Gitea capability while remaining architecturally separate from the Gitea codebase.
 
 The central architectural principle is:
 
 > **Native experience. External architecture.**
 
-Lens will run as an independent service, communicate with Gitea through supported APIs and webhooks, integrate into Gitea's navigation and repository UI using supported customization hooks, and authenticate users through Gitea.
+GitSeer will run as an independent service, communicate with Gitea through supported APIs and webhooks, integrate into Gitea's navigation and repository UI using supported customization hooks, and authenticate users through Gitea.
 
 It will not require a custom Gitea fork.
 
@@ -33,25 +33,25 @@ It will not require modification of individual repositories.
 
 It will not require users to add workflow steps, configuration files, agents, or badges to each repository.
 
-A new installation should require only a Gitea URL, appropriate credentials, and a Lens instance. Once connected, Lens should automatically discover accessible repositories, workflows, open pull requests, current CI status, and recent historical activity.
+A new installation should require only a Gitea URL, appropriate credentials, and a GitSeer instance. Once connected, GitSeer should automatically discover accessible repositories, workflows, open pull requests, current CI status, and recent historical activity.
 
 ---
 
 # 2. Product Vision
 
-Gitea Lens should become the operational cockpit for teams running CI/CD through Gitea.
+GitSeer should become the operational cockpit for teams running CI/CD through Gitea.
 
 Instead of:
 
 `Repository → Actions → Workflow → Run → Job → Logs`
 
-repeated across many repositories, Lens should provide:
+repeated across many repositories, GitSeer should provide:
 
 `Gitea Instance → Everything requiring attention`
 
 The application should make it possible to understand the state of dozens or hundreds of repositories from one screen.
 
-Lens should answer questions such as:
+GitSeer should answer questions such as:
 
 - Which repositories currently have failing CI?
 - Which pull requests are ready to merge?
@@ -66,7 +66,7 @@ Lens should answer questions such as:
 - What failed most recently?
 - What needs human intervention?
 
-Lens is primarily an **observability and operations layer**, not a CI engine.
+GitSeer is primarily an **observability and operations layer**, not a CI engine.
 
 Gitea remains the system of record.
 
@@ -76,31 +76,31 @@ Gitea remains the system of record.
 
 ## 3.1 Primary Goals
 
-Lens must provide a unified view of CI/CD activity across all repositories visible to the connected Gitea installation.
+GitSeer must provide a unified view of CI/CD activity across all repositories visible to the connected Gitea installation.
 
-Lens must aggregate pull-request state across repositories.
+GitSeer must aggregate pull-request state across repositories.
 
-Lens must automatically discover repositories and workflows.
+GitSeer must automatically discover repositories and workflows.
 
-Lens must update in near real time through Gitea webhooks.
+GitSeer must update in near real time through Gitea webhooks.
 
-Lens must maintain eventual consistency through API reconciliation.
+GitSeer must maintain eventual consistency through API reconciliation.
 
-Lens must visually represent workflow/job dependencies.
+GitSeer must visually represent workflow/job dependencies.
 
-Lens must make failures immediately visible and easy to investigate.
+GitSeer must make failures immediately visible and easy to investigate.
 
-Lens must support direct navigation back into the corresponding Gitea repository, pull request, workflow, run, commit, and job.
+GitSeer must support direct navigation back into the corresponding Gitea repository, pull request, workflow, run, commit, and job.
 
-Lens must integrate with Gitea authentication.
+GitSeer must integrate with Gitea authentication.
 
-Lens must respect Gitea repository permissions.
+GitSeer must respect Gitea repository permissions.
 
-Lens must install without modifying Gitea source code.
+GitSeer must install without modifying Gitea source code.
 
-Lens must support simple self-hosting.
+GitSeer must support simple self-hosting.
 
-Lens must remain useful without external SaaS dependencies.
+GitSeer must remain useful without external SaaS dependencies.
 
 ---
 
@@ -116,11 +116,11 @@ The initial product will not:
 - edit workflow YAML graphically;
 - provide an independent source-control platform;
 - require repository-specific configuration;
-- require a cloud service controlled by the Lens project;
+- require a cloud service controlled by the GitSeer project;
 - require telemetry to function;
-- require users to create Lens accounts separate from Gitea.
+- require users to create GitSeer accounts separate from Gitea.
 
-Lens may eventually initiate supported Gitea operations such as reruns or cancellations, but Gitea remains authoritative.
+GitSeer may eventually initiate supported Gitea operations such as reruns or cancellations, but Gitea remains authoritative.
 
 ---
 
@@ -152,23 +152,23 @@ Write capabilities must be separately permissioned.
 
 ## Capability detection
 
-Lens should discover what a connected Gitea instance supports rather than assuming every installation behaves identically.
+GitSeer should discover what a connected Gitea instance supports rather than assuming every installation behaves identically.
 
 The initial development target should be the current Gitea 1.26 API family. The current published API documentation is 1.26.4.
 
-Lens must detect Gitea version and supported API capabilities during connection.
+GitSeer must detect Gitea version and supported API capabilities during connection.
 
 ## Graceful degradation
 
-If a connected version of Gitea lacks a capability, Lens should disable that feature and explain why rather than failing globally.
+If a connected version of Gitea lacks a capability, GitSeer should disable that feature and explain why rather than failing globally.
 
 ## Gitea remains authoritative
 
-Lens caches and indexes Gitea data to provide fast cross-repository views, but it is not the canonical source for repository or workflow state.
+GitSeer caches and indexes Gitea data to provide fast cross-repository views, but it is not the canonical source for repository or workflow state.
 
 ## Self-hosting first
 
-Lens must work fully in an isolated environment without dependence on ncdLabs, GitHub, analytics platforms, cloud databases, or external identity providers.
+GitSeer must work fully in an isolated environment without dependence on ncdLabs, GitHub, analytics platforms, cloud databases, or external identity providers.
 
 ---
 
@@ -205,7 +205,7 @@ The default page is **Attention**.
 Example:
 
 ```
-Gitea Lens
+GitSeer
 
 47 repositories     8 open PRs
 3 failing           4 workflows running
@@ -265,7 +265,7 @@ It is to surface **what matters**.
 
 # 8. Navigation
 
-The primary Lens navigation should contain:
+The primary GitSeer navigation should contain:
 
 
 | View          | Purpose                                     |
@@ -276,10 +276,10 @@ The primary Lens navigation should contain:
 | Repositories  | Repository health and CI summary            |
 | Runners       | Runner state and activity where supported   |
 | Activity      | Chronological cross-repository event stream |
-| Settings      | Instance integration and Lens configuration |
+| Settings      | Instance integration and GitSeer configuration |
 
 
-Repository-specific Lens views should additionally be available when launched from Gitea repository tabs.
+Repository-specific GitSeer views should additionally be available when launched from Gitea repository tabs.
 
 ---
 
@@ -308,7 +308,7 @@ The dashboard must prioritize actionable events over passive information.
 
 # 10. Attention Engine
 
-Lens should maintain an internal normalized **Attention Item** model.
+GitSeer should maintain an internal normalized **Attention Item** model.
 
 Initial attention conditions include:
 
@@ -446,13 +446,13 @@ date range.
 
 Historical search must not require accessing Gitea repository-by-repository at query time.
 
-Lens should query its normalized local database.
+GitSeer should query its normalized local database.
 
 ---
 
 # 14. Workflow Run Detail
 
-The workflow run page is one of Lens's signature features.
+The workflow run page is one of GitSeer's signature features.
 
 It should visually represent the workflow dependency graph.
 
@@ -493,7 +493,7 @@ finish time.
 
 Selecting a node opens job details and logs.
 
-Where runtime API data does not provide complete topology, Lens should inspect the repository workflow definition and derive dependencies from workflow YAML.
+Where runtime API data does not provide complete topology, GitSeer should inspect the repository workflow definition and derive dependencies from workflow YAML.
 
 Runtime state comes from Gitea.
 
@@ -533,7 +533,7 @@ The Gitea API exposes downloadable job logs through:
 
 Logs must be searchable.
 
-Lens should support linking directly to the corresponding job/run in Gitea.
+GitSeer should support linking directly to the corresponding job/run in Gitea.
 
 Step-level status may require parsing logs when the upstream API does not provide normalized step information.
 
@@ -572,19 +572,19 @@ recent workflow failures.
 
 ---
 
-# 17. Repository Lens
+# 17. Repository GitSeer
 
-Lens should support contextual entry from a Gitea repository.
+GitSeer should support contextual entry from a Gitea repository.
 
 Gitea supports additional repository tabs using `$GITEA_CUSTOM/templates/custom/extra_tabs.tmpl`, and additional navigation links through `extra_links.tmpl`.
 
 The installation process should optionally add:
 
 ```
-Code | Issues | Pull Requests | Actions | Projects | Lens
+Code | Issues | Pull Requests | Actions | Projects | GitSeer
 ```
 
-The Lens tab should link to a repository-scoped view such as:
+The GitSeer tab should link to a repository-scoped view such as:
 
 ```
 /lens/repositories/{owner}/{repo}
@@ -592,7 +592,7 @@ The Lens tab should link to a repository-scoped view such as:
 
 or equivalent.
 
-Repository Lens displays:
+Repository GitSeer displays:
 
 CI status,
 
@@ -612,7 +612,7 @@ links into native Gitea pages.
 
 # 18. Native Gitea Integration
 
-Lens must not maintain a modified Gitea distribution.
+GitSeer must not maintain a modified Gitea distribution.
 
 Supported integration should use Gitea's customization mechanisms.
 
@@ -627,26 +627,26 @@ $GITEA_CUSTOM/
 
   public/
     assets/
-      gitea-lens.css
+      gitseer.css
 ```
 
-Lens must avoid replacing full upstream Gitea templates.
+GitSeer must avoid replacing full upstream Gitea templates.
 
 Template injection files should remain as small as possible to reduce upgrade sensitivity.
 
-Lens should expose:
+GitSeer should expose:
 
 ```
-gitea-lens install-ui
+gitseer install-ui
 ```
 
 and:
 
 ```
-gitea-lens uninstall-ui
+gitseer uninstall-ui
 ```
 
-The install command should modify only Lens-owned customization sections or files.
+The install command should modify only GitSeer-owned customization sections or files.
 
 Existing administrator customization must never be silently overwritten.
 
@@ -654,7 +654,7 @@ Existing administrator customization must never be silently overwritten.
 
 # 19. Authentication
 
-Lens should use Gitea as the identity provider.
+GitSeer should use Gitea as the identity provider.
 
 Gitea can operate as an OAuth2/OIDC provider, and current versions support granular scopes.
 
@@ -663,12 +663,12 @@ Users should experience:
 ```
 Login to Gitea
       ↓
-Open Lens
+Open GitSeer
       ↓
 Already authenticated or redirected through Gitea authorization
 ```
 
-Lens must not store user passwords.
+GitSeer must not store user passwords.
 
 OAuth Authorization Code flow with PKCE should be preferred.
 
@@ -678,16 +678,16 @@ The service account used for synchronization and the individual user session mus
 
 # 20. Authorization
 
-Lens must not assume that because its synchronization account can see a repository, every logged-in user can see that repository.
+GitSeer must not assume that because its synchronization account can see a repository, every logged-in user can see that repository.
 
-For each user Lens must determine accessible repository scope.
+For each user GitSeer must determine accessible repository scope.
 
 User-visible data must be filtered accordingly.
 
 At minimum:
 
 ```
-Lens User
+GitSeer User
    │
    ├── permitted repository A
    ├── permitted repository B
@@ -707,7 +707,7 @@ No side-channel counts may reveal hidden repository activity.
 The intended installation experience is:
 
 ```
-Install Lens
+Install GitSeer
     ↓
 Open setup wizard
     ↓
@@ -715,7 +715,7 @@ Enter Gitea URL
     ↓
 Authenticate / provide service credential
     ↓
-Lens tests capabilities
+GitSeer tests capabilities
     ↓
 Configure OAuth
     ↓
@@ -730,13 +730,13 @@ Dashboard
 
 Target:
 
-> A competent Gitea administrator should be able to install Lens without modifying source code or individual repositories.
+> A competent Gitea administrator should be able to install GitSeer without modifying source code or individual repositories.
 
 ---
 
 # 22. Deployment Modes
 
-Lens should ship in three primary forms.
+GitSeer should ship in three primary forms.
 
 
 | Method            | Purpose                              |
@@ -753,9 +753,9 @@ Example:
 ```
 services:
   lens:
-    image: ghcr.io/ncdlabs/gitea-lens:latest
+    image: ghcr.io/ncdlabs/gitseer:latest
     environment:
-      LENS_GITEA_URL: https://git.example.com
+      GITSEER_GITEA_URL: https://git.example.com
     volumes:
       - lens-data:/data
     ports:
@@ -783,7 +783,7 @@ Recommended architecture:
                   API + Webhooks
                          │
                ┌─────────▼─────────┐
-               │    Gitea Lens     │
+               │    GitSeer     │
                │                   │
                │ Gitea Adapter     │
                │ Synchronizer      │
@@ -848,7 +848,7 @@ Production/large-instance option:
 
 **PostgreSQL**
 
-Lens should use a database abstraction that allows both.
+GitSeer should use a database abstraction that allows both.
 
 SQLite should be fully supported, not treated as a demo-only database.
 
@@ -894,7 +894,7 @@ This creates future flexibility for Forgejo or other providers without committin
 
 # 26. Synchronization Model
 
-Lens should combine two mechanisms:
+GitSeer should combine two mechanisms:
 
 ```
 Webhooks
@@ -914,7 +914,7 @@ Neither mechanism is sufficient alone.
 
 Gitea currently exposes workflow events including `workflow_run` and `workflow_job`, with status transitions including queued, waiting, in-progress, and completed. Pull-request webhook events are also available.
 
-Lens should process these events immediately.
+GitSeer should process these events immediately.
 
 ## Reconciliation
 
@@ -922,7 +922,7 @@ Periodic reconciliation protects against:
 
 missed webhooks,
 
-Lens downtime,
+GitSeer downtime,
 
 Gitea downtime,
 
@@ -948,7 +948,7 @@ Large installations should support incremental reconciliation.
 
 # 27. Initial Synchronization
 
-When a Gitea instance is first connected, Lens should:
+When a Gitea instance is first connected, GitSeer should:
 
 1. identify the Gitea version;
 2. query instance capabilities;
@@ -1078,13 +1078,13 @@ WebhookEvent
   └ error
 ```
 
-Gitea numeric identifiers should be stored separately from Lens primary keys.
+Gitea numeric identifiers should be stored separately from GitSeer primary keys.
 
 ---
 
 # 30. Workflow Graph Parsing
 
-Lens should retrieve workflow YAML from the repository and derive the job DAG.
+GitSeer should retrieve workflow YAML from the repository and derive the job DAG.
 
 For example:
 
@@ -1101,7 +1101,7 @@ jobs:
       - build
 ```
 
-Lens normalizes this into:
+GitSeer normalizes this into:
 
 ```
 test
@@ -1146,7 +1146,7 @@ action_required
 unknown
 ```
 
-Lens must retain original upstream values for diagnostics.
+GitSeer must retain original upstream values for diagnostics.
 
 Unknown new Gitea values must not cause deserialization failures.
 
@@ -1176,7 +1176,7 @@ display the operation target;
 
 report upstream success/failure;
 
-never silently fall back to the Lens service account.
+never silently fall back to the GitSeer service account.
 
 ---
 
@@ -1202,7 +1202,7 @@ job,
 
 author.
 
-Search must operate against the Lens index/database and not issue broad Gitea API queries on every keystroke.
+Search must operate against the GitSeer index/database and not issue broad Gitea API queries on every keystroke.
 
 ---
 
@@ -1238,7 +1238,7 @@ URLs should be stable and bookmarkable.
 
 # 35. API
 
-Lens should expose its own versioned REST API.
+GitSeer should expose its own versioned REST API.
 
 Base:
 
@@ -1270,7 +1270,7 @@ GET /api/v1/activity
 GET /api/v1/system/status
 ```
 
-Internal API responses must expose Lens normalized models rather than raw Gitea payloads.
+Internal API responses must expose GitSeer normalized models rather than raw Gitea payloads.
 
 OpenAPI documentation should be generated.
 
@@ -1305,7 +1305,7 @@ GET /api/v1/system/status
 
 # 37. Resilience
 
-Lens must tolerate:
+GitSeer must tolerate:
 
 Gitea unavailable,
 
@@ -1379,13 +1379,13 @@ Crash reporting: NONE
 
 If anonymous usage telemetry is ever introduced, it must be explicitly opt-in.
 
-Lens should be usable in disconnected/internal environments.
+GitSeer should be usable in disconnected/internal environments.
 
 ---
 
 # 40. Logging
 
-Lens itself should emit structured logs.
+GitSeer itself should emit structured logs.
 
 Recommended format:
 
@@ -1428,17 +1428,17 @@ Optional Prometheus endpoint:
 Suggested metrics:
 
 ```
-lens_repositories_total
-lens_open_pull_requests_total
-lens_workflow_runs_total
-lens_workflow_failures_total
-lens_workflow_runs_active
-lens_webhooks_received_total
-lens_webhook_processing_errors_total
-lens_sync_duration_seconds
-lens_sync_errors_total
-lens_gitea_api_requests_total
-lens_gitea_api_errors_total
+gitseer_repositories_total
+gitseer_open_pull_requests_total
+gitseer_workflow_runs_total
+gitseer_workflow_failures_total
+gitseer_workflow_runs_active
+gitseer_webhooks_received_total
+gitseer_webhook_processing_errors_total
+gitseer_sync_duration_seconds
+gitseer_sync_errors_total
+gitseer_gitea_api_requests_total
+gitseer_gitea_api_errors_total
 ```
 
 Metrics must not leak private repository names unless explicitly enabled.
@@ -1491,7 +1491,7 @@ The first-run wizard should contain:
 
 ## Welcome
 
-Explain what Lens will access.
+Explain what GitSeer will access.
 
 ## Connect to Gitea
 
@@ -1530,8 +1530,8 @@ Configure the highest supported scope.
 Offer:
 
 ```
-[ ] Add Lens to Gitea global navigation
-[ ] Add Lens tab to repository pages
+[ ] Add GitSeer to Gitea global navigation
+[ ] Add GitSeer tab to repository pages
 ```
 
 ## Initial Import
@@ -1553,7 +1553,7 @@ Redirect to Overview.
 
 # 45. Configuration
 
-Lens configuration should use environment variables and an optional configuration file.
+GitSeer configuration should use environment variables and an optional configuration file.
 
 Example:
 
@@ -1578,7 +1578,7 @@ auth:
   provider: gitea
 
 ui:
-  instance_name: Gitea Lens
+  instance_name: GitSeer
 ```
 
 Environment variables should override configuration-file values.
@@ -1587,10 +1587,10 @@ Environment variables should override configuration-file values.
 
 # 46. Reverse Proxy Support
 
-Lens must support operation under:
+GitSeer must support operation under:
 
 ```
-https://lens.example.com
+https://gitseer.example.com
 ```
 
 and:
@@ -1615,7 +1615,7 @@ must be handled safely.
 
 # 47. Dark Mode
 
-Lens should support:
+GitSeer should support:
 
 light,
 
@@ -1623,7 +1623,7 @@ dark,
 
 system preference.
 
-When accessed through Gitea, Lens should visually complement Gitea without depending on Gitea internal CSS.
+When accessed through Gitea, GitSeer should visually complement Gitea without depending on Gitea internal CSS.
 
 Avoid copying Gitea's entire frontend stylesheet.
 
@@ -1735,13 +1735,13 @@ Short alternative:
 
 README introduction:
 
-> Gitea Lens is an open-source operations console for Gitea. It automatically discovers repositories, pull requests, Actions workflows, runs, and jobs and brings them together into one real-time view.
+> GitSeer is an open-source operations console for Gitea. It automatically discovers repositories, pull requests, Actions workflows, runs, and jobs and brings them together into one real-time view.
 
 ---
 
 # 52. MVP
 
-The MVP is complete when a user can install Lens, connect it to a stock supported Gitea instance, and obtain a useful cross-repository dashboard without changing any repository.
+The MVP is complete when a user can install GitSeer, connect it to a stock supported Gitea instance, and obtain a useful cross-repository dashboard without changing any repository.
 
 MVP features:
 
@@ -1769,7 +1769,7 @@ Filtering
 Search
 Dark mode
 Gitea navigation integration
-Repository Lens tab
+Repository GitSeer tab
 SQLite
 Docker image
 Standalone binary
@@ -1848,19 +1848,21 @@ public/read-only wallboard mode,
 
 Forgejo support,
 
-GitHub support,
+~~GitHub support,~~ *(superseded: GitHub is in-scope dual-forge — ADR-029 in [implementation-plan.md](implementation-plan.md))*
 
-GitLab support.
+GitLab support *(Coming Soon — ask before implementing)*,
 
-These should not contaminate the MVP architecture.
+Bitbucket support *(Coming Soon — ask before implementing)*.
 
-The abstraction may anticipate multiple forge providers, but Gitea must remain the sole implementation target until the core experience is excellent.
+These should not contaminate the original MVP architecture.
+
+The forge abstraction supports multiple providers. **In scope now:** Gitea + GitHub. **Coming Soon:** GitLab, Bitbucket.
 
 ---
 
 # 55. Explicit Architectural Decisions
 
-**ADR-001:** Lens is an external companion application, not a Gitea fork.
+**ADR-001:** GitSeer is an external companion application, not a Gitea fork.
 
 **ADR-002:** Gitea remains the source of truth.
 
@@ -1870,7 +1872,7 @@ The abstraction may anticipate multiple forge providers, but Gitea must remain t
 
 **ADR-005:** Gitea OAuth provides user identity.
 
-**ADR-006:** Lens independently enforces repository authorization.
+**ADR-006:** GitSeer independently enforces repository authorization.
 
 **ADR-007:** Go is the backend/runtime language.
 
@@ -1884,11 +1886,13 @@ The abstraction may anticipate multiple forge providers, but Gitea must remain t
 
 **ADR-012:** Workflow topology is derived from the workflow definition when upstream runtime data is insufficient.
 
-**ADR-013:** The frontend consumes Lens models, never raw Gitea API models.
+**ADR-013:** The frontend consumes GitSeer models, never raw Gitea API models.
 
 **ADR-014:** Native Gitea integration uses supported customization files rather than overwritten core templates.
 
 **ADR-015:** All externally visible functionality must remain usable without an ncdLabs-hosted service.
+
+**ADR-029 (amendment):** Dual-forge Gitea + GitHub is in scope for product GitSeer; GitLab/Bitbucket remain Coming Soon. See [implementation-plan.md](implementation-plan.md) §4. Product branding is GitSeer; technical IDs are `gitseer` / `GITSEER_*`.
 
 ---
 
@@ -1932,11 +1936,11 @@ failed runs,
 
 cancelled runs.
 
-Lens should then verify normalized state.
+GitSeer should then verify normalized state.
 
 ## Compatibility Tests
 
-CI matrix against each officially supported Lens/Gitea version.
+CI matrix against each officially supported GitSeer/Gitea version.
 
 ## Security Tests
 
@@ -1974,13 +1978,13 @@ pipeline navigation,
 
 job-log viewing,
 
-repository-scoped Lens.
+repository-scoped GitSeer.
 
 ---
 
-# 57. CI/CD for Lens
+# 57. CI/CD for GitSeer
 
-The Lens project itself should demonstrate the practices it visualizes.
+The GitSeer project itself should demonstrate the practices it visualizes.
 
 CI should include:
 
@@ -2129,7 +2133,7 @@ permission filtering,
 
 global navigation,
 
-repository Lens tabs,
+repository GitSeer tabs,
 
 subpath/reverse-proxy support.
 
@@ -2169,13 +2173,13 @@ The product succeeds if an administrator can:
 docker compose up -d
 ```
 
-connect Lens to Gitea,
+connect GitSeer to Gitea,
 
 complete initial setup,
 
 and immediately see useful status for all accessible repositories.
 
-A developer should be able to open Lens and determine within seconds:
+A developer should be able to open GitSeer and determine within seconds:
 
 > What is broken?
 
@@ -2185,17 +2189,17 @@ A developer should be able to open Lens and determine within seconds:
 
 > What can be merged?
 
-A Gitea administrator should not need to edit dozens of repositories to make Lens work.
+A Gitea administrator should not need to edit dozens of repositories to make GitSeer work.
 
-A Gitea upgrade should not normally require a Lens-specific Gitea build.
+A Gitea upgrade should not normally require a GitSeer-specific Gitea build.
 
-A Lens upgrade should not change repository contents.
+A GitSeer upgrade should not change repository contents.
 
 ---
 
 # 61. Product Boundary
 
-Lens should resist becoming another DevOps platform.
+GitSeer should resist becoming another DevOps platform.
 
 The product boundary is:
 
@@ -2213,7 +2217,7 @@ There are already enough platforms attempting to become the operating system for
 
 # 62. Final Product Statement
 
-**Gitea Lens is an open-source operational dashboard for Gitea that automatically aggregates pull requests, CI/CD pipelines, workflow jobs, failures, approvals, and repository health across an entire Gitea instance.**
+**GitSeer is an open-source operational dashboard for Gitea that automatically aggregates pull requests, CI/CD pipelines, workflow jobs, failures, approvals, and repository health across an entire Gitea instance.**
 
 It installs alongside Gitea, integrates into the Gitea user experience, authenticates through Gitea, discovers repositories automatically, and requires no repository-specific configuration.
 

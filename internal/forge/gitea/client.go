@@ -14,13 +14,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncdlabs/gitea-lens/internal/forge"
-	lensmetrics "github.com/ncdlabs/gitea-lens/internal/metrics"
-	"github.com/ncdlabs/gitea-lens/internal/models"
-	"github.com/ncdlabs/gitea-lens/internal/workflows"
+	"github.com/ncdlabs/gitseer/internal/forge"
+	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
+	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/workflows"
 )
 
 const defaultPageSize = 50
+
+func init() {
+	forge.Register(models.ForgeTypeGitea, func(baseURL, token string, allowPrivateNetwork bool) (forge.Forge, error) {
+		return New(baseURL, token, allowPrivateNetwork)
+	})
+}
 
 // Client talks to a Gitea instance. Raw Gitea types never leave this package.
 type Client struct {
@@ -363,13 +369,13 @@ func (c *Client) doBody(ctx context.Context, method, path string, query url.Valu
 
 		resp, err = c.http.Do(req)
 		if err != nil {
-			lensmetrics.GiteaAPIErrorsTotal.Inc()
+			gitseermetrics.GiteaAPIErrorsTotal.Inc()
 			return nil, err
 		}
 		status := strconv.Itoa(resp.StatusCode/100) + "xx"
-		lensmetrics.GiteaAPIRequestsTotal.WithLabelValues(status).Inc()
+		gitseermetrics.GiteaAPIRequestsTotal.WithLabelValues(status).Inc()
 		if resp.StatusCode >= 500 {
-			lensmetrics.GiteaAPIErrorsTotal.Inc()
+			gitseermetrics.GiteaAPIErrorsTotal.Inc()
 		}
 		if resp.StatusCode != http.StatusTooManyRequests {
 			return resp, nil

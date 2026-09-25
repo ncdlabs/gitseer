@@ -1,6 +1,6 @@
 # API Reference
 
-Base path: `/api/v1` unless noted. JSON request/response. Session cookie auth unless noted. State-changing routes need `X-CSRF-Token` matching `lens_csrf`.
+Base path: `/api/v1` unless noted. JSON request/response. Session cookie auth unless noted. State-changing routes need `X-CSRF-Token` matching `gitseer_csrf`.
 
 ## Auth
 
@@ -68,4 +68,4 @@ Series include repository/PR/run gauges, webhook counters, sync histograms, and 
 
 ## UI config
 
-The SPA also loads `/api/v1/ui-config` for CSRF issuance and client bootstrap (see `web/src/api/client.ts`). Fields: `base_path`, `oauth_enabled`, `bootstrap_enabled`, `allow_skip_setup` (true only when `dev.allow_skip_setup` / `LENS_ALLOW_SKIP_SETUP` is set — local `npm run start`), `dev_bootstrap_password` (only when `allow_skip_setup` is true — login prefill), `csrf_token`.
+The SPA also loads `/api/v1/ui-config` for CSRF issuance and client bootstrap (see `web/src/api/client.ts`). Fields: `base_path`, `oauth_enabled`, `bootstrap_enabled`, `allow_skip_setup` (true only when `dev.allow_skip_setup` / `GITSEER_ALLOW_SKIP_SETUP` is set — local `npm run start`), `dev_bootstrap_password` (only when `allow_skip_setup` is true — login prefill), `csrf_token`.

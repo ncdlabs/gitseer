@@ -2,11 +2,11 @@
 # Runtime image for a prebuilt static binary (avoids QEMU go toolchain crashes).
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget \
-  && adduser -D -H -u 10001 lens
-USER lens
+  && adduser -D -H -u 10001 gitseer
+USER gitseer
 WORKDIR /data
-COPY lens /usr/local/bin/lens
+COPY gitseer /usr/local/bin/gitseer
 EXPOSE 8090
 VOLUME ["/data"]
-ENTRYPOINT ["/usr/local/bin/lens"]
+ENTRYPOINT ["/usr/local/bin/gitseer"]
 CMD ["serve"]

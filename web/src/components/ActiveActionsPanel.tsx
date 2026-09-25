@@ -37,7 +37,7 @@ function runningJobWithSteps(jobs: Job[]): { job: Job; steps: ReturnType<typeof 
 }
 
 function openInOpener(path: string) {
-  const base = window.__LENS_BASE__ || "";
+  const base = window.__GITSEER_BASE__ || "";
   const url = `${base}${path}`;
   if (window.opener && !window.opener.closed) {
     try {
@@ -157,11 +157,11 @@ export function useActiveActionsCount(): number {
   return q.data?.total ?? 0;
 }
 
-const POPOUT_NAME = "lens-actions-popout";
+const POPOUT_NAME = "gitseer-actions-popout";
 let popoutRef: Window | null = null;
 
 export function openActionsPopout(): Window | null {
-  const base = window.__LENS_BASE__ || "";
+  const base = window.__GITSEER_BASE__ || "";
   const url = `${window.location.origin}${base}/actions-popout`;
   if (popoutRef && !popoutRef.closed) {
     popoutRef.focus();

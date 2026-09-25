@@ -25,7 +25,7 @@ export function LoginPage({ onLoggedIn }: Props) {
         setConfigState("ready");
       })
       .catch(() => {
-        setUI({ base_path: window.__LENS_BASE__ || "" });
+        setUI({ base_path: window.__GITSEER_BASE__ || "" });
         setConfigState("error");
       });
   }, []);
@@ -44,7 +44,7 @@ export function LoginPage({ onLoggedIn }: Props) {
     }
   }
 
-  const basePath = window.__LENS_BASE__ || ui.base_path || "";
+  const basePath = window.__GITSEER_BASE__ || ui.base_path || "";
   const oauthHref = `${basePath}/api/v1/auth/login`;
   const showOAuth = configState === "ready" && ui.oauth_enabled === true;
   const showBootstrap = configState === "ready" && ui.bootstrap_enabled === true;
@@ -54,7 +54,7 @@ export function LoginPage({ onLoggedIn }: Props) {
       <div className="login__compose">
         <div className="login__brand">
           <Brand variant="logo" className="login__logo" />
-          <p className="muted">CI/CD and PR operations for your Gitea instance.</p>
+          <p className="muted">Pipelines, repository status, and real-time activity across your Git platforms.</p>
         </div>
 
         <div className="login__actions">

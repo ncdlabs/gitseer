@@ -1,14 +1,14 @@
-# Gitea Lens
+# GitSeer
 
-Self-hosted CI/CD and pull-request operations console for Gitea.
+Self-hosted CI/CD and pull-request operations console for **Gitea** and **GitHub** (dual-forge). Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `gitseer`, env `GITSEER_*`.
 
-Lens aggregates repositories, open pull requests, Gitea Actions runs, and attention items into one ops console so you can answer **what needs attention right now** without hopping repo to repo. Gitea stays the system of record; Lens syncs via API + webhooks and authenticates through Gitea OAuth (PKCE) or an optional bootstrap password.
+GitSeer aggregates repositories, open pull requests, Actions/workflow runs, and attention items into one ops console so you can answer **what needs attention right now** without hopping repo to repo. Each forge stays the system of record; GitSeer syncs via API + webhooks. Login is bootstrap password and/or Gitea OAuth (PKCE); GitHub inventory uses a service PAT (GitHub OAuth login is not in this slice). GitLab and Bitbucket are Coming Soon.
 
 Built and maintained by **[ncdLabs](https://ncdlabs.com)**.
 
-**Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitea-lens/wiki](https://github.com/ncdlabs/gitea-lens/wiki) · **Spec:** [docs/prd-spec.md](docs/prd-spec.md)
+**Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki) · **Spec:** [docs/prd-spec.md](docs/prd-spec.md)
 
-![Gitea Lens dashboard](docs/screenshots/dashboard.png)
+![GitSeer dashboard](docs/screenshots/dashboard.png)
 
 ---
 
@@ -59,8 +59,8 @@ Lens ships five theme options. System follows the OS preference (shown here reso
 - **Dashboard** — time-scoped summary and trends (Now / 1 / 7 / 30 / 90 days)
 - **Attention** — discrete rules for CI failures, review waits, long-running runs, merge conflicts, and more
 - **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
-- **Setup wizard** — Connect → Validate → Finish (webhook + OAuth app helpers)
-- **Settings** — runtime preferences and Gitea integration (DB-backed secrets are write-only)
+- **Setup wizard** — forge picker (Gitea / GitHub; GitLab & Bitbucket Coming Soon) → Connect → Validate → Finish
+- **Settings** — runtime preferences and dual Gitea + GitHub integration (DB-backed secrets are write-only)
 - **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
 - **Ops** — Prometheus `/metrics` (session or Bearer token), retention purge, SQLite by default (Postgres experimental)
 
@@ -84,19 +84,19 @@ Lens ships five theme options. System follows the OS preference (shown here reso
 Paste this prompt into your coding agent (Cursor, Codex, Claude Code, etc.). Fill in the bracketed values first, or leave them blank and let the agent ask.
 
 ```text
-Install Gitea Lens from https://github.com/ncdlabs/gitea-lens on this machine.
+Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer on this machine.
 
 Goals:
 1. Clone the repo if needed, then run the guided installer (./scripts/install.sh or make install). Prefer Compose via Podman (`podman compose`); fall back to Docker Compose or `--method binary` if Compose is unavailable.
 2. Collect or confirm: Gitea base URL, Gitea API token (repo/PR/Actions read), Lens public URL (server.external_url), and a bootstrap admin password. OAuth client id/secret are optional — the in-app Setup wizard can create or paste them later.
-3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). Set LENS_WEBHOOK_SECRET whenever Gitea URL is set (required at startup). Use LENS_GITEA_ALLOW_PRIVATE_NETWORK=true only for private/lab Gitea URLs.
+3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set (required at startup). Use GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true only for private/lab Gitea URLs.
 4. Start Lens, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Connect → Validate → Finish), sign in, and click Sync now.
-5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (Gitea system webhook, OAuth redirect URI, optional `lens install-ui`).
+5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (Gitea system webhook, OAuth redirect URI, optional `gitseer install-ui`).
 
 Constraints:
 - Do not commit secrets, .env, config.yaml, or install.yaml.
 - Prefer .yaml over .yml for new config files.
-- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or multi-forge setup.
+- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or GitLab/Bitbucket clients (Coming Soon).
 - Ask before destructive changes or removing existing services.
 
 My values (replace or leave blank to prompt me):
@@ -137,25 +137,25 @@ npm run start          # API :8090 + Vite :5173; prints URLs + bootstrap creds
 make test
 ```
 
-Default bootstrap user/password when unset: `bootstrap` / `lens-local` (prefer `config.yaml` over `config.example.yaml`; override with `LENS_CONFIG`).
+Default bootstrap user/password when unset: `bootstrap` / `gitseer-local` (prefer `config.yaml` over `config.example.yaml`; override with `GITSEER_CONFIG`).
 
 Production-shaped binary:
 
 ```bash
 make frontend && make build-go
-./bin/lens serve --config config.yaml
+./bin/gitseer serve --config config.yaml
 ```
 
 ### Manual Compose
 
 ```bash
-export LENS_GITEA_URL='https://git.example.com'
-export LENS_GITEA_TOKEN='your-gitea-api-token'
-export LENS_WEBHOOK_SECRET='replace-me'          # required when URL is set
-export LENS_SERVER_EXTERNAL_URL='http://127.0.0.1:8090'
-export LENS_AUTH_OAUTH_CLIENT_ID='your-oauth-client-id'
-export LENS_AUTH_BOOTSTRAP_PASSWORD='change-me'  # optional first-run / lab
-# export LENS_GITEA_ALLOW_PRIVATE_NETWORK=true   # private/lab Gitea URLs
+export GITSEER_GITEA_URL='https://git.example.com'
+export GITSEER_GITEA_TOKEN='your-gitea-api-token'
+export GITSEER_WEBHOOK_SECRET='replace-me'          # required when URL is set
+export GITSEER_SERVER_EXTERNAL_URL='http://127.0.0.1:8090'
+export GITSEER_AUTH_OAUTH_CLIENT_ID='your-oauth-client-id'
+export GITSEER_AUTH_BOOTSTRAP_PASSWORD='change-me'  # optional first-run / lab
+# export GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true   # private/lab Gitea URLs
 
 podman compose -f compose.yaml up --build
 ```
@@ -163,8 +163,8 @@ podman compose -f compose.yaml up --build
 ### Optional: Gitea UI links
 
 ```bash
-./bin/lens install-ui --custom-path /var/lib/gitea/custom --lens-url https://lens.example.com
-# remove: ./bin/lens uninstall-ui --custom-path /var/lib/gitea/custom
+./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com
+# remove: ./bin/gitseer uninstall-ui --custom-path /var/lib/gitea/custom
 ```
 
 More detail: [docs/install.md](docs/install.md) · [docs/getting-started.md](docs/getting-started.md).
@@ -173,16 +173,16 @@ More detail: [docs/install.md](docs/install.md) · [docs/getting-started.md](doc
 
 ## Configuration
 
-Defaults live in `config.example.yaml`. Environment overrides use the `LENS_*` prefix — see [docs/configuration.md](docs/configuration.md).
+Defaults live in `config.example.yaml`. Environment overrides use the `GITSEER_*` prefix — see [docs/configuration.md](docs/configuration.md).
 
 Important:
 
 - Set `server.external_url` to the public URL (including subpath). Lens strips only that configured prefix — not client `X-Forwarded-Prefix`.
-- When `gitea.url` is set, `LENS_WEBHOOK_SECRET` is required unless `LENS_WEBHOOK_ALLOW_UNSIGNED=true` (lab only).
+- When `gitea.url` is set, `GITSEER_WEBHOOK_SECRET` is required unless `GITSEER_WEBHOOK_ALLOW_UNSIGNED=true` (lab only).
 - OAuth redirect: `{external_url}/api/v1/auth/callback`. Prefer a public Gitea OAuth client (PKCE).
-- Optional `LENS_ENCRYPTION_KEY` (min 16 chars) encrypts OAuth tokens at rest.
+- Optional `GITSEER_ENCRYPTION_KEY` (min 16 chars) encrypts OAuth tokens at rest.
 
-Runtime settings and Gitea integration can also be managed in the UI (`/settings`) after bootstrap login.
+Runtime settings and Gitea/GitHub integration can also be managed in the UI (`/settings`) after bootstrap login.
 
 ---
 
@@ -195,7 +195,7 @@ Runtime settings and Gitea integration can also be managed in the UI (`/settings
 | [docs/prd-spec.md](docs/prd-spec.md) | Product requirements |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Implementation direction |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow and guidelines |
-| [Wiki](https://github.com/ncdlabs/gitea-lens/wiki) | Same guides (publish after first wiki page exists) |
+| [Wiki](https://github.com/ncdlabs/gitseer/wiki) | Same guides (publish after first wiki page exists) |
 
 ---
 
@@ -203,7 +203,7 @@ Runtime settings and Gitea integration can also be managed in the UI (`/settings
 
 1. Fork and branch.
 2. `make deps && make test && npm run start`
-3. Keep forge types in `internal/forge/gitea`; enforce authz server-side.
+3. Keep forge wire types in `internal/forge/gitea` / `internal/forge/github`; enforce authz server-side.
 4. Open a PR with a short summary and test notes.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/development.md).
@@ -212,9 +212,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ## Attribution
 
-**Gitea Lens** is an [ncdLabs](https://ncdlabs.com) open-source project.
+**GitSeer** is an [ncdLabs](https://ncdlabs.com) open-source project (repository / module path `gitseer`).
 
-Gitea® is a trademark of its respective owners. This project is not affiliated with or endorsed by the Gitea project.
+Gitea® and GitHub® are trademarks of their respective owners. This project is not affiliated with or endorsed by the Gitea or GitHub projects.
 
 ## License
 

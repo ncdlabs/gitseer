@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg"  viewBox="-12 -52 224 224" fill="none" aria-hidden="true" focusable="false">
+        <rect x="-12" y="-52" width="224" height="224" rx="36" fill="#181C21"/><g fill="#D0D5DA">
+          <path fill-rule="evenodd" d="M0 60C32 22 65 0 100 0s68 22 100 60c-32 38-65 60-100 60S32 98 0 60Zm20 0c28 30 54 46 80 46s52-16 80-46c-28-30-54-46-80-46S48 30 20 60Z" />
+          <path fill-rule="evenodd" d="M100 0a60 60 0 1 1 0 120 60 60 0 0 1 0-120Zm0 14a46 46 0 1 0 0 92 46 46 0 0 0 0-92Z" />
+        </g>
+        <g fill="#4183C4" stroke="#4183C4" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M100 35v13c0 10-12 23-22 31m22-31c0 10 12 23 22 31" fill="none" />
+          <circle cx="100" cy="35" r="12" stroke="none" />
+          <circle cx="78" cy="79" r="12" stroke="none" />
+          <circle cx="122" cy="79" r="12" stroke="none" />
+        </g>
+      </svg>
