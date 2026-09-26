@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,20 @@ func likePattern(q string) string {
 	return "%" + q + "%"
 }
 
+// looksLikeCommitSHA reports whether q is a plausible hex commit prefix (7–40 chars).
+func looksLikeCommitSHA(q string) bool {
+	if len(q) < 7 || len(q) > 40 {
+		return false
+	}
+	for i := 0; i < len(q); i++ {
+		c := q[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Store) UpsertPullRequest(ctx context.Context, repoID int64, pr models.PullRequest) (*models.PullRequest, error) {
 	if existing, err := s.GetPullRequestByNumber(ctx, repoID, pr.Number); err == nil {
 		if !shouldApplyPR(*existing, pr) {
@@ -60,7 +75,10 @@ ON CONFLICT(repo_id, number) DO UPDATE SET
   source_branch=excluded.source_branch, target_branch=excluded.target_branch,
   head_sha=excluded.head_sha, base_sha=excluded.base_sha, state=excluded.state, draft=excluded.draft,
   mergeable=excluded.mergeable, mergeable_state=excluded.mergeable_state,
-  review_state=excluded.review_state,
+  review_state=CASE
+    WHEN excluded.review_state != '' THEN excluded.review_state
+    ELSE pull_requests.review_state
+  END,
   ci_state=CASE
     WHEN excluded.ci_state != '' THEN excluded.ci_state
     WHEN excluded.head_sha != pull_requests.head_sha THEN ''
@@ -175,6 +193,8 @@ func scanPRList(row scanner, withForge bool) (*models.PullRequest, error) {
 	var mergeable sql.NullInt64
 	var created, updated, closed, merged sql.NullString
 	var forgeType string
+	var instanceID int64
+	var instanceName string
 	dest := []any{
 		&pr.ID, &pr.RepoID, &pr.ExternalID, &pr.Number, &pr.Title, &pr.BodyExcerpt, &pr.AuthorLogin, &authorID,
 		&pr.SourceBranch, &pr.TargetBranch, &pr.HeadSHA, &pr.BaseSHA, &pr.State, &draft, &mergeable, &pr.MergeableState,
@@ -182,7 +202,7 @@ func scanPRList(row scanner, withForge bool) (*models.PullRequest, error) {
 		&pr.RepoOwner, &pr.RepoName, &pr.RepoFull,
 	}
 	if withForge {
-		dest = append(dest, &forgeType)
+		dest = append(dest, &forgeType, &instanceID, &instanceName)
 	}
 	if err := row.Scan(dest...); err != nil {
 		return nil, err
@@ -201,6 +221,8 @@ func scanPRList(row scanner, withForge bool) (*models.PullRequest, error) {
 		if pr.ForgeType == "" {
 			pr.ForgeType = models.ForgeTypeGitea
 		}
+		pr.InstanceID = instanceID
+		pr.InstanceName = strings.TrimSpace(instanceName)
 	}
 	pr.CreatedAt = nullTime(created)
 	pr.UpdatedAt = nullTime(updated)
@@ -213,6 +235,8 @@ type ListPRsOpts struct {
 	UserID       int64
 	BootstrapAll bool
 	RepoID       int64
+	InstanceID   int64
+	ForgeType    string // gitea | github; empty = all
 	State        string
 	Query        string
 	Limit        int
@@ -235,29 +259,54 @@ func (s *Store) ListPullRequests(ctx context.Context, opts ListPRsOpts) ([]model
 		where = append(where, "pr.repo_id = ?")
 		args = append(args, opts.RepoID)
 	}
+	if opts.InstanceID > 0 {
+		where = append(where, "r.instance_id = ?")
+		args = append(args, opts.InstanceID)
+	}
+	forgeType := parseListForgeType(opts.ForgeType)
+	if forgeType != "" {
+		where = append(where, "COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea') = ?")
+		args = append(args, forgeType)
+	}
 	if opts.State != "" && opts.State != "all" {
 		where = append(where, "pr.state = ?")
 		args = append(args, opts.State)
 	}
 	if q := strings.TrimSpace(opts.Query); q != "" {
+		parts := []string{}
 		if like := likePattern(q); like != "" {
-			where = append(where, "(pr.title LIKE ? OR r.full_name LIKE ?)")
-			args = append(args, like, like)
+			parts = append(parts,
+				"pr.title LIKE ?",
+				"r.full_name LIKE ?",
+				"pr.author_login LIKE ?",
+				"pr.source_branch LIKE ?",
+				"pr.target_branch LIKE ?",
+			)
+			args = append(args, like, like, like, like, like)
+		}
+		numStr := strings.TrimPrefix(strings.TrimSpace(q), "#")
+		if n, err := strconv.ParseInt(numStr, 10, 64); err == nil && n > 0 {
+			parts = append(parts, "pr.number = ?")
+			args = append(args, n)
+		}
+		if len(parts) > 0 {
+			where = append(where, "("+strings.Join(parts, " OR ")+")")
 		}
 	}
 	clause := strings.Join(where, " AND ")
+	instJoin := " LEFT JOIN instances i ON i.id = r.instance_id"
 	var total int
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM pull_requests pr `+join+` WHERE `+clause, args...).Scan(&total); err != nil {
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM pull_requests pr `+join+instJoin+` WHERE `+clause, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, opts.Limit, opts.Offset)
-	listJoin := join + " LEFT JOIN instances i ON i.id = r.instance_id"
+	listJoin := join + instJoin
 	rows, err := s.query(ctx, `
 SELECT pr.id, pr.repo_id, pr.external_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
        pr.source_branch, pr.target_branch, pr.head_sha, pr.base_sha, pr.state, pr.draft, pr.mergeable, pr.mergeable_state,
        pr.review_state, pr.ci_state, pr.html_url, pr.created_at, pr.updated_at, pr.closed_at, pr.merged_at,
        r.owner, r.name, r.full_name,
-       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), r.instance_id, COALESCE(i.name, '')
 FROM pull_requests pr `+listJoin+`
 WHERE `+clause+`
 ORDER BY COALESCE(pr.updated_at, pr.created_at) DESC
@@ -382,12 +431,64 @@ func (s *Store) GetWorkflowRunByID(ctx context.Context, id int64) (*models.Workf
 SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name,
-       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), r.instance_id, COALESCE(i.name, '')
 FROM workflow_runs wr
 JOIN repositories r ON r.id = wr.repo_id
 LEFT JOIN instances i ON i.id = r.instance_id
 WHERE wr.id=?`, id)
 	return scanRunWithForge(row)
+}
+
+// ListInFlightWorkflowRunsByRepo returns queued/waiting/running runs for a repository.
+func (s *Store) ListInFlightWorkflowRunsByRepo(ctx context.Context, repoID int64) ([]models.WorkflowRun, error) {
+	rows, err := s.query(ctx, `
+SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
+       wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
+       wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name
+FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id
+WHERE wr.repo_id=? AND wr.status IN ('queued', 'waiting', 'running')
+ORDER BY wr.id`, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.WorkflowRun
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *run)
+	}
+	return out, rows.Err()
+}
+
+// CompleteOrphanedWorkflowRun marks a missing forge run (and its incomplete jobs) as cancelled.
+func (s *Store) CompleteOrphanedWorkflowRun(ctx context.Context, runID int64) (*models.WorkflowRun, error) {
+	now := formatTime(time.Now().UTC())
+	_, err := s.exec(ctx, `
+UPDATE workflow_runs
+SET status='completed',
+    conclusion='cancelled',
+    upstream_status='completed',
+    upstream_conclusion='cancelled',
+    completed_at=COALESCE(completed_at, ?)
+WHERE id=? AND status IN ('queued', 'waiting', 'running')`, now, runID)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.exec(ctx, `
+UPDATE jobs
+SET status='completed',
+    conclusion='cancelled',
+    upstream_status='completed',
+    upstream_conclusion='cancelled',
+    completed_at=COALESCE(completed_at, ?)
+WHERE run_id=? AND status IN ('queued', 'waiting', 'running')`, now, runID)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetWorkflowRunByID(ctx, runID)
 }
 
 func scanRun(row scanner) (*models.WorkflowRun, error) {
@@ -403,13 +504,15 @@ func scanRunList(row scanner, withForge bool) (*models.WorkflowRun, error) {
 	var wfID sql.NullInt64
 	var started, completed sql.NullString
 	var forgeType string
+	var instanceID int64
+	var instanceName string
 	dest := []any{
 		&run.ID, &run.RepoID, &wfID, &run.ExternalID, &run.Name, &run.Event, &run.Branch, &run.CommitSHA,
 		&run.Status, &run.Conclusion, &run.UpstreamStatus, &run.UpstreamConclusion, &run.ActorLogin, &run.HTMLURL,
 		&run.WorkflowPath, &started, &completed, &run.RunAttempt, &run.RepoOwner, &run.RepoName, &run.RepoFull,
 	}
 	if withForge {
-		dest = append(dest, &forgeType)
+		dest = append(dest, &forgeType, &instanceID, &instanceName)
 	}
 	if err := row.Scan(dest...); err != nil {
 		return nil, err
@@ -423,6 +526,8 @@ func scanRunList(row scanner, withForge bool) (*models.WorkflowRun, error) {
 		if run.ForgeType == "" {
 			run.ForgeType = models.ForgeTypeGitea
 		}
+		run.InstanceID = instanceID
+		run.InstanceName = strings.TrimSpace(instanceName)
 	}
 	run.StartedAt = nullTime(started)
 	run.CompletedAt = nullTime(completed)
@@ -432,6 +537,8 @@ func scanRunList(row scanner, withForge bool) (*models.WorkflowRun, error) {
 type ListRunsOpts struct {
 	UserID       int64
 	BootstrapAll bool
+	InstanceID   int64
+	ForgeType    string   // gitea | github; empty = all
 	Status       string   // single status; ignored when Statuses is non-empty
 	Statuses     []string // multi-status IN (...); preferred over Status when set
 	Conclusion   string
@@ -452,6 +559,15 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, opts ListRunsOpts) ([]mode
 		join += " INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
 		args = append(args, opts.UserID)
 	}
+	if opts.InstanceID > 0 {
+		where = append(where, "r.instance_id = ?")
+		args = append(args, opts.InstanceID)
+	}
+	forgeType := parseListForgeType(opts.ForgeType)
+	if forgeType != "" {
+		where = append(where, "COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea') = ?")
+		args = append(args, forgeType)
+	}
 	if len(opts.Statuses) > 0 {
 		ph := make([]string, len(opts.Statuses))
 		for i, st := range opts.Statuses {
@@ -468,23 +584,43 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, opts ListRunsOpts) ([]mode
 		args = append(args, opts.Conclusion)
 	}
 	if q := strings.TrimSpace(opts.Query); q != "" {
+		parts := []string{}
 		if like := likePattern(q); like != "" {
-			where = append(where, "(wr.name LIKE ? OR r.full_name LIKE ? OR wr.branch LIKE ?)")
-			args = append(args, like, like, like)
+			parts = append(parts,
+				"wr.name LIKE ?",
+				"r.full_name LIKE ?",
+				"wr.branch LIKE ?",
+				"wr.actor_login LIKE ?",
+				"wr.workflow_path LIKE ?",
+				"EXISTS (SELECT 1 FROM jobs j WHERE j.run_id = wr.id AND j.name LIKE ?)",
+			)
+			args = append(args, like, like, like, like, like, like)
+		}
+		sha := strings.TrimSpace(q)
+		if looksLikeCommitSHA(sha) {
+			parts = append(parts, "wr.commit_sha LIKE ?")
+			args = append(args, sha+"%")
+		} else if like := likePattern(q); like != "" {
+			parts = append(parts, "wr.commit_sha LIKE ?")
+			args = append(args, like)
+		}
+		if len(parts) > 0 {
+			where = append(where, "("+strings.Join(parts, " OR ")+")")
 		}
 	}
 	clause := strings.Join(where, " AND ")
+	instJoin := " LEFT JOIN instances i ON i.id = r.instance_id"
 	var total int
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM workflow_runs wr `+join+` WHERE `+clause, args...).Scan(&total); err != nil {
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM workflow_runs wr `+join+instJoin+` WHERE `+clause, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, opts.Limit, opts.Offset)
-	listJoin := join + " LEFT JOIN instances i ON i.id = r.instance_id"
+	listJoin := join + instJoin
 	rows, err := s.query(ctx, `
 SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name,
-       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), r.instance_id, COALESCE(i.name, '')
 FROM workflow_runs wr `+listJoin+`
 WHERE `+clause+`
 ORDER BY wr.id DESC
@@ -711,9 +847,11 @@ ON CONFLICT(fingerprint) DO UPDATE SET
 	row := s.queryRow(ctx, `
 SELECT a.id, a.instance_id, a.repo_id, a.type, a.severity, a.entity_type, a.entity_id, a.title, a.metadata_json,
        a.fingerprint, a.opened_at, a.resolved_at, a.updated_at, r.owner, r.name, r.full_name,
-       `+attentionHTMLURLExpr+`
+       `+attentionHTMLURLExpr+`,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), COALESCE(i.name, '')
 FROM attention_items a
 JOIN repositories r ON r.id = a.repo_id
+LEFT JOIN instances i ON i.id = a.instance_id
 `+attentionEntityJoins+`
 WHERE a.fingerprint=?`, item.Fingerprint)
 	return scanAttention(row)
@@ -742,9 +880,11 @@ func scanAttention(row scanner) (*models.AttentionItem, error) {
 	var a models.AttentionItem
 	var opened, resolved, updated sql.NullString
 	var htmlURL sql.NullString
+	var forgeType, instanceName sql.NullString
 	if err := row.Scan(
 		&a.ID, &a.InstanceID, &a.RepoID, &a.Type, &a.Severity, &a.EntityType, &a.EntityID, &a.Title, &a.MetadataJSON,
 		&a.Fingerprint, &opened, &resolved, &updated, &a.RepoOwner, &a.RepoName, &a.RepoFull, &htmlURL,
+		&forgeType, &instanceName,
 	); err != nil {
 		return nil, err
 	}
@@ -758,12 +898,19 @@ func scanAttention(row scanner) (*models.AttentionItem, error) {
 	if htmlURL.Valid {
 		a.HTMLURL = htmlURL.String
 	}
+	a.ForgeType = forgeType.String
+	if a.ForgeType == "" {
+		a.ForgeType = models.ForgeTypeGitea
+	}
+	a.InstanceName = strings.TrimSpace(instanceName.String)
 	return &a, nil
 }
 
 type ListAttentionOpts struct {
 	UserID       int64
 	BootstrapAll bool
+	InstanceID   int64
+	ForgeType    string // gitea | github; empty = all
 	Severity     string
 	Type         string
 	Query        string
@@ -779,13 +926,22 @@ func (s *Store) ListAttention(ctx context.Context, opts ListAttentionOpts) ([]mo
 	opts.Limit = clampLimit(opts.Limit, 50, 200)
 	where := []string{"r.deleted_at IS NULL"}
 	args := []any{}
-	join := "JOIN repositories r ON r.id = a.repo_id"
+	join := "JOIN repositories r ON r.id = a.repo_id LEFT JOIN instances i ON i.id = a.instance_id"
 	if opts.UserID > 0 && !opts.BootstrapAll {
 		join += " INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
 		args = append(args, opts.UserID)
 	}
 	if opts.OpenOnly {
 		where = append(where, "a.resolved_at IS NULL")
+	}
+	if opts.InstanceID > 0 {
+		where = append(where, "a.instance_id = ?")
+		args = append(args, opts.InstanceID)
+	}
+	forgeType := parseListForgeType(opts.ForgeType)
+	if forgeType != "" {
+		where = append(where, "COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea') = ?")
+		args = append(args, forgeType)
 	}
 	if opts.Severity != "" {
 		where = append(where, "a.severity = ?")
@@ -810,7 +966,8 @@ func (s *Store) ListAttention(ctx context.Context, opts ListAttentionOpts) ([]mo
 	rows, err := s.query(ctx, `
 SELECT a.id, a.instance_id, a.repo_id, a.type, a.severity, a.entity_type, a.entity_id, a.title, a.metadata_json,
        a.fingerprint, a.opened_at, a.resolved_at, a.updated_at, r.owner, r.name, r.full_name,
-       `+attentionHTMLURLExpr+`
+       `+attentionHTMLURLExpr+`,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), COALESCE(i.name, '')
 FROM attention_items a `+join+attentionEntityJoins+`
 WHERE `+clause+`
 ORDER BY CASE a.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 WHEN 'waiting' THEN 2 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, a.opened_at DESC
@@ -1043,7 +1200,11 @@ func (s *Store) Search(ctx context.Context, userID int64, bootstrapAll bool, q s
 	if err != nil {
 		return nil, err
 	}
-	prs, _, err := s.ListPullRequests(ctx, ListPRsOpts{UserID: userID, BootstrapAll: bootstrapAll, Query: q, Limit: limit, State: "open"})
+	orgs, err := s.ListOrganizations(ctx, ListOrganizationsOpts{UserID: userID, BootstrapAll: bootstrapAll, Query: q, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	prs, _, err := s.ListPullRequests(ctx, ListPRsOpts{UserID: userID, BootstrapAll: bootstrapAll, Query: q, Limit: limit, State: "all"})
 	if err != nil {
 		return nil, err
 	}
@@ -1051,5 +1212,79 @@ func (s *Store) Search(ctx context.Context, userID int64, bootstrapAll bool, q s
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"repositories": repos, "pull_requests": prs, "workflow_runs": runs}, nil
+	attention, _, err := s.ListAttention(ctx, ListAttentionOpts{UserID: userID, BootstrapAll: bootstrapAll, Query: q, Limit: limit, OpenOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"repositories":  repos,
+		"organizations": orgs,
+		"pull_requests": prs,
+		"workflow_runs": runs,
+		"attention":     attention,
+	}, nil
+}
+
+type ListOrganizationsOpts struct {
+	UserID       int64
+	BootstrapAll bool
+	Query        string
+	Limit        int
+}
+
+// ListOrganizations returns orgs that own at least one accessible alive repository.
+func (s *Store) ListOrganizations(ctx context.Context, opts ListOrganizationsOpts) ([]models.Organization, error) {
+	if err := requireListScope(opts.UserID, opts.BootstrapAll); err != nil {
+		return nil, err
+	}
+	opts.Limit = clampLimit(opts.Limit, 20, 200)
+	where := []string{"r.deleted_at IS NULL", "r.org_id IS NOT NULL"}
+	args := []any{}
+	join := `
+FROM organizations o
+JOIN repositories r ON r.org_id = o.id
+LEFT JOIN instances i ON i.id = o.instance_id`
+	if opts.UserID > 0 && !opts.BootstrapAll {
+		join += " INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
+		args = append(args, opts.UserID)
+	}
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		if like := likePattern(q); like != "" {
+			where = append(where, "(o.name LIKE ? OR o.full_name LIKE ?)")
+			args = append(args, like, like)
+		}
+	}
+	clause := strings.Join(where, " AND ")
+	args = append(args, opts.Limit)
+	rows, err := s.query(ctx, `
+SELECT DISTINCT o.id, o.instance_id, o.external_id, o.name, o.full_name, o.avatar_url, o.synced_at,
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), COALESCE(i.name, '')
+`+join+`
+WHERE `+clause+`
+ORDER BY o.name ASC
+LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.Organization
+	for rows.Next() {
+		var o models.Organization
+		var synced sql.NullString
+		var forgeType, instanceName sql.NullString
+		if err := rows.Scan(
+			&o.ID, &o.InstanceID, &o.ExternalID, &o.Name, &o.FullName, &o.AvatarURL, &synced,
+			&forgeType, &instanceName,
+		); err != nil {
+			return nil, err
+		}
+		o.SyncedAt = nullTime(synced)
+		o.ForgeType = forgeType.String
+		if o.ForgeType == "" {
+			o.ForgeType = models.ForgeTypeGitea
+		}
+		o.InstanceName = strings.TrimSpace(instanceName.String)
+		out = append(out, o)
+	}
+	return out, rows.Err()
 }

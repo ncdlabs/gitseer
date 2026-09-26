@@ -12,7 +12,7 @@
 
 method: compose          # compose | binary
 start: true              # start after install
-install_ui: false        # run `lens install-ui` against Gitea custom templates
+install_ui: false        # run `gitseer install-ui` against Gitea custom templates
 # gitea_custom_path: /var/lib/gitea/custom
 
 gitea_url: https://git.example.com
@@ -31,7 +31,7 @@ database_driver: sqlite
 # database_path: data/gitseer.db          # binary default
 # database_path: /data/gitseer.db         # compose default
 # database_driver: postgres
-# database_dsn: postgres://lens:lens@localhost:5432/lens?sslmode=disable
+# database_dsn: postgres://gitseer:gitseer@localhost:5432/gitseer?sslmode=disable
 
-# You can also point --config at a lens config.yaml (server/gitea/auth shape);
+# You can also point --config at a gitseer config.yaml (server/gitea/auth shape);
 # secrets still come from this file, .env, or GITSEER_* environment variables.

@@ -27,10 +27,10 @@ func TestRandomPKCEVerifierLength(t *testing.T) {
 }
 
 func TestPathPrefixFromExternalURL(t *testing.T) {
-	if PathPrefixFromExternalURL("https://git.example.com/lens") != "/lens" {
-		t.Fatal("expected /lens")
+	if PathPrefixFromExternalURL("https://git.example.com/gitseer") != "/gitseer" {
+		t.Fatal("expected /gitseer")
 	}
-	if PathPrefixFromExternalURL("https://lens.example.com") != "/" {
+	if PathPrefixFromExternalURL("https://gitseer.example.com") != "/" {
 		t.Fatal("expected /")
 	}
 	_ = sha256.Size

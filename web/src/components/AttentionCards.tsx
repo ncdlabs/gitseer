@@ -1,8 +1,16 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { openOnForgeLabel, repoLabel, safeExternalHref, type AttentionItem } from "../api/client";
+import {
+  openOnForgeLabel,
+  repoLabel,
+  safeExternalHref,
+  type AttentionItem,
+  type ForgeStatusRow,
+} from "../api/client";
+import { resolveInstanceName } from "../hooks/useShowForgeUI";
 import type { ViewMode } from "../hooks/useViewMode";
 import { relativeAge } from "../lib/relativeAge";
+import { ForgeBadge } from "./ForgeBadge";
 
 function typeLabel(type: string) {
   return type.replaceAll("_", " ");
@@ -42,6 +50,10 @@ type Props = {
   empty?: string;
   limit?: number;
   mode?: ViewMode;
+  /** When true (2+ forges configured), show forge badges on rows. */
+  showForge?: boolean;
+  /** Configured forges — used to show instance name when a type has multiple. */
+  forges?: ForgeStatusRow[];
 };
 
 function ItemLink({
@@ -71,7 +83,25 @@ function ItemLink({
   );
 }
 
-export function AttentionCards({ items, empty = "Nothing needs attention.", limit, mode = "cards" }: Props) {
+function itemBadge(item: AttentionItem, forges: ForgeStatusRow[]) {
+  return {
+    forgeType: item.forge_type,
+    instanceName: resolveInstanceName(forges, {
+      forgeType: item.forge_type,
+      instanceId: item.instance_id,
+      instanceName: item.instance_name,
+    }),
+  };
+}
+
+export function AttentionCards({
+  items,
+  empty = "Nothing needs attention.",
+  limit,
+  mode = "cards",
+  showForge = false,
+  forges = [],
+}: Props) {
   const source = items ?? [];
   const list = typeof limit === "number" ? source.slice(0, limit) : source;
   if (list.length === 0) {
@@ -88,6 +118,7 @@ export function AttentionCards({ items, empty = "Nothing needs attention.", limi
               <th>Type</th>
               <th>Title</th>
               <th>Repository</th>
+              {showForge && <th>Forge</th>}
               <th>Age</th>
             </tr>
           </thead>
@@ -111,6 +142,11 @@ export function AttentionCards({ items, empty = "Nothing needs attention.", limi
                   <td className="mono">{typeLabel(item.type)}</td>
                   <td>{title}</td>
                   <td className="mono">{repoLabel(item) || "—"}</td>
+                  {showForge && (
+                    <td>
+                      <ForgeBadge {...itemBadge(item, forges)} />
+                    </td>
+                  )}
                   <td className="muted">{relativeAge(item.opened_at)}</td>
                 </tr>
               );
@@ -129,6 +165,7 @@ export function AttentionCards({ items, empty = "Nothing needs attention.", limi
           <ItemLink key={item.id} item={item} className="item-card">
             <div className="item-card__meta">
               <span className={`badge ${item.severity}`}>{item.severity}</span>
+              {showForge && <ForgeBadge {...itemBadge(item, forges)} />}
               <span className="item-card__type mono">{typeLabel(item.type)}</span>
               {item.opened_at && <span className="item-card__age muted">{relativeAge(item.opened_at)}</span>}
             </div>
@@ -136,7 +173,7 @@ export function AttentionCards({ items, empty = "Nothing needs attention.", limi
             <div className="item-card__repo mono">{repoLabel(item) || "—"}</div>
             {link && (
               <span className="item-card__cta muted">
-                {link.external ? openOnForgeLabel() : "Open in GitSeer →"}
+                {link.external ? openOnForgeLabel(item.forge_type) : "Open in GitSeer →"}
               </span>
             )}
           </ItemLink>

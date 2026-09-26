@@ -57,13 +57,13 @@ func TestValidateURLBlocksLoopback(t *testing.T) {
 func TestMapRepoNormalization(t *testing.T) {
 	raw := `{
 		"id": 99,
-		"name": "lens",
-		"full_name": "ncdlabs/lens",
+		"name": "gitseer",
+		"full_name": "ncdlabs/gitseer",
 		"private": true,
 		"fork": false,
 		"archived": false,
 		"size": 12,
-		"html_url": "https://github.com/ncdlabs/lens",
+		"html_url": "https://github.com/ncdlabs/gitseer",
 		"default_branch": "main",
 		"owner": {"id": 1, "login": "ncdlabs", "avatar_url": ""}
 	}`
@@ -72,7 +72,7 @@ func TestMapRepoNormalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := mapRepo(gr)
-	if m.ExternalID != 99 || m.Owner != "ncdlabs" || m.Name != "lens" {
+	if m.ExternalID != 99 || m.Owner != "ncdlabs" || m.Name != "gitseer" {
 		t.Fatalf("repo=%+v", m)
 	}
 	if m.Empty || !m.Private {
@@ -103,27 +103,27 @@ func TestClientHTTptest(t *testing.T) {
 		assertAuth(t, r)
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{
-				"id": 42, "name": "lens", "full_name": "acme/lens", "private": false,
+				"id": 42, "name": "gitseer", "full_name": "acme/gitseer", "private": false,
 				"fork": false, "archived": false, "size": 100,
-				"html_url": "https://ghe/acme/lens", "default_branch": "main",
+				"html_url": "https://ghe/acme/gitseer", "default_branch": "main",
 				"owner": map[string]any{"id": 1, "login": "acme"},
 			},
 		})
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": 42, "name": "lens", "full_name": "acme/lens", "private": false,
+			"id": 42, "name": "gitseer", "full_name": "acme/gitseer", "private": false,
 			"fork": false, "archived": false, "size": 100,
-			"html_url": "https://ghe/acme/lens", "default_branch": "main",
+			"html_url": "https://ghe/acme/gitseer", "default_branch": "main",
 			"owner": map[string]any{"id": 1, "login": "acme"},
 		})
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens/pulls", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/pulls", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{
 				"id": 10, "number": 3, "title": "Fix", "body": "details", "state": "open",
 				"draft": false, "mergeable": true, "mergeable_state": "clean",
-				"html_url": "https://ghe/acme/lens/pull/3",
+				"html_url": "https://ghe/acme/gitseer/pull/3",
 				"created_at": "2024-01-02T03:04:05Z", "updated_at": "2024-01-02T03:04:05Z",
 				"user": map[string]any{"id": 7, "login": "octocat"},
 				"head": map[string]any{"ref": "feature", "sha": "abc"},
@@ -131,16 +131,16 @@ func TestClientHTTptest(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens/commits/abc/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/commits/abc/status", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"state": "success", "total_count": 2})
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/actions/runs", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"total_count": 1,
 			"workflow_runs": []map[string]any{
 				{
 					"id": 55, "name": "CI", "event": "push", "status": "completed", "conclusion": "success",
-					"html_url": "https://ghe/acme/lens/actions/runs/55",
+					"html_url": "https://ghe/acme/gitseer/actions/runs/55",
 					"created_at": "2024-01-02T03:04:05Z", "updated_at": "2024-01-02T03:05:05Z",
 					"run_attempt": 1, "head_branch": "main", "head_sha": "abc",
 					"path": ".github/workflows/ci.yaml",
@@ -149,7 +149,7 @@ func TestClientHTTptest(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens/actions/runs/55/jobs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/actions/runs/55/jobs", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"total_count": 1,
 			"jobs": []map[string]any{
@@ -162,11 +162,11 @@ func TestClientHTTptest(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens/actions/jobs/77/logs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/actions/jobs/77/logs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("log line\n"))
 	})
-	mux.HandleFunc("/api/v3/repos/acme/lens/contents/.github/workflows/ci.yaml", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/contents/.github/workflows/ci.yaml", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Accept") != "application/vnd.github.raw" {
 			t.Fatalf("accept=%q", r.Header.Get("Accept"))
 		}
@@ -205,16 +205,16 @@ func TestClientHTTptest(t *testing.T) {
 	}
 
 	page, err := client.ListRepositories(ctx, forge.ListReposOpts{Page: 1, PageSize: 50})
-	if err != nil || len(page.Items) != 1 || page.Items[0].FullName != "acme/lens" {
+	if err != nil || len(page.Items) != 1 || page.Items[0].FullName != "acme/gitseer" {
 		t.Fatalf("repos=%v err=%v", page, err)
 	}
 
-	repo, err := client.GetRepository(ctx, "acme", "lens")
+	repo, err := client.GetRepository(ctx, "acme", "gitseer")
 	if err != nil || repo.ExternalID != 42 {
 		t.Fatalf("repo=%v err=%v", repo, err)
 	}
 
-	ref := models.RepoRef{Owner: "acme", Name: "lens"}
+	ref := models.RepoRef{Owner: "acme", Name: "gitseer"}
 	prs, err := client.ListPullRequests(ctx, ref, forge.PROpts{State: "open"})
 	if err != nil || len(prs.Items) != 1 || prs.Items[0].Number != 3 {
 		t.Fatalf("prs=%v err=%v", prs, err)

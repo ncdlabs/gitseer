@@ -17,7 +17,7 @@
 - **UI:** Vite/React SPA built into `internal/server/ui/dist` and served by the same process
 - **Module:** `github.com/ncdlabs/gitseer`
 - **HTTP:** chi router; migrations via goose (SQL in `migrations/`)
-- **Forges:** Gitea + GitHub via `internal/forge` (`forge_type` on `instances`). GitLab / Bitbucket are Coming Soon (no clients yet).
+- **Forges:** Gitea + GitHub via `internal/forge` (`forge_type` on `instances`). Multiple instances per type supported via `/api/v1/instances`. GitLab / Bitbucket are Coming Soon (no clients yet).
 
 ## Package boundaries
 
@@ -32,8 +32,7 @@
 | `internal/attention` | Attention rule engine |
 | `internal/workflows` | Run/job graph helpers |
 | `internal/realtime` | SSE hub (`/api/v1/events`) |
-| `internal/settings` | DB-backed runtime settings + dual integration |
-| `internal/setup` | Setup wizard backend |
+| `internal/settings` | DB-backed runtime settings, encryption key file, multi-instance forge CRUD |
 | `internal/metrics` | Prometheus series |
 | `internal/ratelimit` | In-process per-IP limits |
 | `internal/uiinstall` | Gitea custom template install |
@@ -43,11 +42,12 @@ Raw forge wire types stay in `internal/forge/gitea` and `internal/forge/github`.
 
 ## Data flow
 
-1. **Bootstrap / Settings** configure one or both forges (URL, token, webhook secret; Gitea OAuth when used).
-2. **Sync** iterates enabled instances — repositories, open PRs, recent workflow runs/jobs (history window configurable).
-3. **Webhooks** apply near-real-time updates (`POST /api/webhooks/gitea/{id}`, `POST /api/webhooks/github/{id}`).
+1. **Bootstrap / Settings** configure one or more forge instances (URL, token, webhook secret; Gitea OAuth when used). Additional instances via Settings → Integration or `/api/v1/instances`.
+2. **Sync** iterates enabled instances under per-`instance_id` leases — repositories, open PRs, recent workflow runs/jobs (history window configurable).
+3. **Webhooks** apply near-real-time updates (`POST /api/webhooks/gitea/{id}`, `POST /api/webhooks/github/{id}`; legacy unscoped Gitea uses the primary instance).
 4. **Attention** evaluates discrete rules on sync/webhook paths and a periodic sweep (~10m).
 5. **UI** reads ACL-scoped API; **SSE** pushes events filtered by `authz.CanAccessRepo`.
+6. **Setup wizard** handlers live under `internal/api` (`/api/v1/setup/*`) with encryption helpers in `internal/settings`.
 
 ## Integrity rules (high level)
 
@@ -62,11 +62,12 @@ Raw forge wire types stay in `internal/forge/gitea` and `internal/forge/github`.
 ## Realtime and metrics
 
 - **SSE** at `/api/v1/events` (not WebSockets; no Redis)
+- **Health** at `/health/live` (process) and `/health/ready` (DB)
 - **Prometheus** at `/metrics` — session cookie or optional Bearer `GITSEER_METRICS_TOKEN`; labels are status/event only (never repo names)
 
 ## Proxy / subpath
 
-Set `server.external_url` to the public URL **including** any path prefix. Lens strips only that configured `PathPrefix()`. Client `X-Forwarded-Prefix` is ignored.
+Set `server.external_url` to the public URL **including** any path prefix. GitSeer strips only that configured `PathPrefix()`. Client `X-Forwarded-Prefix` is ignored.
 
 ## Design constraints (current slice)
 

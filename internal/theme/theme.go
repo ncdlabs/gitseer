@@ -1,9 +1,9 @@
-// Package theme maps forge theme preferences onto Lens theme IDs.
+// Package theme maps forge theme preferences onto GitSeer theme IDs.
 package theme
 
 import "strings"
 
-// ID is a Lens UI theme identifier.
+// ID is a GitSeer UI theme identifier.
 type ID string
 
 const (
@@ -14,7 +14,7 @@ const (
 	Terminal ID = "terminal"
 )
 
-// MapGitea maps a Gitea user theme name to a Lens theme.
+// MapGitea maps a Gitea user theme name to a GitSeer theme.
 // Only the built-in defaults (gitea-light, gitea-dark, gitea-auto) are recognized.
 // Custom, colorblind, or unknown themes fail closed (ok=false).
 func MapGitea(name string) (ID, bool) {

@@ -10,13 +10,13 @@ import (
 func TestMapRepoNormalization(t *testing.T) {
 	raw := `{
 		"id": 42,
-		"name": "lens",
-		"full_name": "ncdlabs/lens",
+		"name": "gitseer",
+		"full_name": "ncdlabs/gitseer",
 		"private": true,
 		"fork": false,
 		"empty": false,
 		"archived": false,
-		"html_url": "https://git.example.com/ncdlabs/lens",
+		"html_url": "https://git.example.com/ncdlabs/gitseer",
 		"default_branch": "main",
 		"owner": {"id": 1, "login": "ncdlabs", "full_name": "ncdLabs", "avatar_url": ""}
 	}`
@@ -28,14 +28,14 @@ func TestMapRepoNormalization(t *testing.T) {
 	if m.ExternalID != 42 {
 		t.Fatalf("external_id=%d", m.ExternalID)
 	}
-	if m.Owner != "ncdlabs" || m.Name != "lens" || m.FullName != "ncdlabs/lens" {
+	if m.Owner != "ncdlabs" || m.Name != "gitseer" || m.FullName != "ncdlabs/gitseer" {
 		t.Fatalf("identity=%s/%s (%s)", m.Owner, m.Name, m.FullName)
 	}
 	if !m.Private || m.DefaultBranch != "main" {
 		t.Fatalf("flags private=%v branch=%s", m.Private, m.DefaultBranch)
 	}
 	if m.ID != 0 {
-		t.Fatal("Lens ID must not come from Gitea id")
+		t.Fatal("GitSeer ID must not come from Gitea id")
 	}
 }
 
@@ -51,7 +51,7 @@ func TestValidateURLBlocksLoopback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected block")
 	}
-	want := `This Gitea URL points to a private network address (127.0.0.1). Check "Allow Private Network Addresses" to allow Lens to connect.`
+	want := `This Gitea URL points to a private network address (127.0.0.1). Check "Allow Private Network Addresses" to allow GitSeer to connect.`
 	if err.Error() != want {
 		t.Fatalf("error=%q want=%q", err.Error(), want)
 	}

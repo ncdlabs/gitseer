@@ -132,7 +132,7 @@ Repositories should appear automatically.
 
 There should be no required:
 
-`lens.yml`
+`gitseer.yml`
 
 repository plugin,
 
@@ -572,7 +572,7 @@ recent workflow failures.
 
 ---
 
-# 17. Repository GitSeer
+# 17. Repository Page
 
 GitSeer should support contextual entry from a Gitea repository.
 
@@ -587,12 +587,12 @@ Code | Issues | Pull Requests | Actions | Projects | GitSeer
 The GitSeer tab should link to a repository-scoped view such as:
 
 ```
-/lens/repositories/{owner}/{repo}
+/gitseer/repositories/{owner}/{repo}
 ```
 
 or equivalent.
 
-Repository GitSeer displays:
+The repository page displays:
 
 CI status,
 
@@ -752,12 +752,12 @@ Example:
 
 ```
 services:
-  lens:
+  gitseer:
     image: ghcr.io/ncdlabs/gitseer:latest
     environment:
       GITSEER_GITEA_URL: https://git.example.com
     volumes:
-      - lens-data:/data
+      - gitseer-data:/data
     ports:
       - "8090:8090"
 ```
@@ -1560,11 +1560,11 @@ Example:
 ```
 server:
   listen: 0.0.0.0:8090
-  external_url: https://git.example.com/lens
+  external_url: https://git.example.com/gitseer
 
 database:
   driver: sqlite
-  path: /data/lens.db
+  path: /data/gitseer.db
 
 gitea:
   url: https://git.example.com
@@ -1596,7 +1596,7 @@ https://gitseer.example.com
 and:
 
 ```
-https://git.example.com/lens
+https://git.example.com/gitseer
 ```
 
 Subpath operation must be tested as a first-class deployment mode because it produces the most native integration experience.
@@ -1662,7 +1662,7 @@ Recommended structure:
 ```
 /
 ├── cmd/
-│   └── lens/
+│   └── gitseer/
 ├── internal/
 │   ├── api/
 │   ├── auth/
@@ -1769,7 +1769,7 @@ Filtering
 Search
 Dark mode
 Gitea navigation integration
-Repository GitSeer tab
+Repository page tab
 SQLite
 Docker image
 Standalone binary
@@ -2223,5 +2223,5 @@ It installs alongside Gitea, integrates into the Gitea user experience, authenti
 
 Its central promise is simple:
 
-> **One Gitea instance. One lens. Everything that needs your attention.**
+> **One Gitea instance. One GitSeer. Everything that needs your attention.**
 

@@ -21,7 +21,7 @@ function writeOpen(open: boolean) {
   }
 }
 
-export function ActionsStatusFlyout() {
+export function ActionsStatusFlyout({ openTick = 0 }: { openTick?: number }) {
   const [open, setOpen] = useState(readOpen);
   const panelId = useId();
   const total = useActiveActionsCount();
@@ -29,6 +29,10 @@ export function ActionsStatusFlyout() {
   useEffect(() => {
     writeOpen(open);
   }, [open]);
+
+  useEffect(() => {
+    if (openTick > 0) setOpen(true);
+  }, [openTick]);
 
   useEffect(() => {
     if (!open) return;

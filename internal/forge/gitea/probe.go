@@ -53,7 +53,7 @@ func (c *Client) displayBaseURL() string {
 	return strings.TrimRight(c.baseURL.String(), "/")
 }
 
-// ProbeConnection verifies reachability, auth, and permissions Lens needs now and for setup.
+// ProbeConnection verifies reachability, auth, and permissions GitSeer needs now and for setup.
 func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL, oauthRedirectURI string) (*ProbeResult, error) {
 	out := &ProbeResult{Checks: make([]ProbeCheck, 0, 12)}
 	reachLabel := fmt.Sprintf("Can reach %s", c.displayBaseURL())
@@ -94,7 +94,7 @@ func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL, oauthR
 	} else {
 		out.Checks = append(out.Checks, ProbeCheck{
 			ID: "admin", Group: GroupPermissions, Label: "Site administrator", Status: ProbeFail,
-			Detail: "Token user is not a site admin; required for system webhooks and full Lens setup",
+			Detail: "Token user is not a site admin; required for system webhooks and full GitSeer setup",
 		})
 	}
 

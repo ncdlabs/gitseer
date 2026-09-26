@@ -9,6 +9,7 @@ import { StatCallout } from "../components/charts/StatCallout";
 import { ListControls } from "../components/ListControls";
 import { RangeToggle } from "../components/RangeToggle";
 import { useDashboardRange } from "../hooks/useDashboardRange";
+import { useForgeInventory } from "../hooks/useShowForgeUI";
 import { useViewMode } from "../hooks/useViewMode";
 
 const RUN_SERIES = [
@@ -53,6 +54,7 @@ function bucketColor(key: string): string {
 
 export function DashboardPage() {
   const { mode, setMode } = useViewMode();
+  const { showForge, forges } = useForgeInventory();
   const { days, setDays } = useDashboardRange();
   const [filter, setFilter] = useState("");
   const isNow = days === 0;
@@ -227,6 +229,8 @@ export function DashboardPage() {
             limit={12}
             empty={filter ? "No attention items match this filter." : "No open attention items."}
             mode={mode}
+            showForge={showForge}
+            forges={forges}
           />
         )}
       </section>

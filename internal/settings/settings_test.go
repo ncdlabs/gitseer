@@ -16,7 +16,7 @@ import (
 
 func TestManagerLoadUpdate(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	dbPath := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", dbPath, "")
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestValidateRejectsBadDuration(t *testing.T) {
 
 func TestIntegrationMergeLeaveBlankAndSetup(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	dbPath := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", dbPath, "")
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestIntegrationMergeLeaveBlankAndSetup(t *testing.T) {
 	cfg.Gitea.AllowPrivateNetwork = true
 	cfg.Auth.OAuthClientID = "env-oauth"
 	cfg.Auth.OAuthClientSecret = "env-oauth-secret"
-	cfg.Auth.EncryptionKey = "sixteen-chars-key!!"
+	cfg.Auth.EncryptionKey = "twenty-four-char-key-ok!!"
 
 	mgr := settings.New(cfg, st)
 	if err := mgr.Load(ctx); err != nil {
@@ -197,7 +197,7 @@ func TestIntegrationPublicNeverExposesSecrets(t *testing.T) {
 
 func TestUpdateIntegrationRequiresEncryptionKey(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	dbPath := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", dbPath, "")
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestUpdateIntegrationRequiresEncryptionKey(t *testing.T) {
 
 func TestOpenFailsClosedOnCiphertextWithoutKey(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	dbPath := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", dbPath, "")
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestOpenFailsClosedOnCiphertextWithoutKey(t *testing.T) {
 	st := store.New(db)
 
 	cfg := config.Default()
-	cfg.Auth.EncryptionKey = "sixteen-chars-min"
+	cfg.Auth.EncryptionKey = "twenty-four-chars-min-ok"
 	mgr := settings.New(cfg, st)
 	if err := mgr.Load(ctx); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestLoadSeedsGiteaInstanceFromSettings(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.UI.InstanceName = "Ops"
-	cfg.Auth.EncryptionKey = "sixteen-chars-key!!"
+	cfg.Auth.EncryptionKey = "twenty-four-char-key-ok!!"
 	mgr := settings.New(cfg, st)
 	if err := mgr.Load(ctx); err != nil {
 		t.Fatal(err)
@@ -350,7 +350,7 @@ func TestUpdateIntegrationGitHubApplyFlag(t *testing.T) {
 	st := store.New(db)
 
 	cfg := config.Default()
-	cfg.Auth.EncryptionKey = "sixteen-chars-key!!"
+	cfg.Auth.EncryptionKey = "twenty-four-char-key-ok!!"
 	mgr := settings.New(cfg, st)
 	if err := mgr.Load(ctx); err != nil {
 		t.Fatal(err)
@@ -410,3 +410,156 @@ func TestUpdateIntegrationGitHubApplyFlag(t *testing.T) {
 		t.Fatalf("reloaded github = %+v", mgr2.GitHub())
 	}
 }
+
+func TestInstanceCRUDAndPrimarySnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "inst-crud.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	cfg.Auth.EncryptionKey = "twenty-four-char-key-ok!!"
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	gitea, err := mgr.CreateInstance(ctx, settings.InstancePatch{
+		ForgeType:             "gitea",
+		Name:                  "Lab",
+		BaseURL:               "https://git.lab.example",
+		Token:                 "tok",
+		WebhookSecret:         "hook",
+		OAuthClientID:         "cid",
+		OAuthClientSecret:     "csec",
+		AllowPrivateNetwork:   boolPtr(true),
+		AllowUnsignedWebhooks: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gitea.ID == 0 || !gitea.TokenConfigured || !gitea.OAuthClientSecretConfigured {
+		t.Fatalf("create gitea = %+v", gitea)
+	}
+
+	gh, err := mgr.CreateInstance(ctx, settings.InstancePatch{
+		ForgeType:             "github",
+		Name:                  "GH",
+		BaseURL:               "https://github.com",
+		Token:                 "gh-tok",
+		WebhookSecret:         "gh-hook",
+		AllowUnsignedWebhooks: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.BaseURL != "https://api.github.com" {
+		t.Fatalf("github url normalized = %q", gh.BaseURL)
+	}
+
+	list, err := mgr.ListInstancesPublic(ctx)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list=%v err=%v", list, err)
+	}
+
+	integ := mgr.Integration()
+	if integ.URL != "https://git.lab.example" || integ.Token != "tok" {
+		t.Fatalf("first gitea snapshot = %+v", integ)
+	}
+	if mgr.GitHub().URL != "https://api.github.com" || mgr.GitHub().Token != "gh-tok" {
+		t.Fatalf("first github snapshot = %+v", mgr.GitHub())
+	}
+	authInteg := mgr.AuthGiteaIntegration(ctx)
+	if authInteg.OAuthClientID != "cid" || authInteg.OAuthClientSecret != "csec" {
+		t.Fatalf("auth gitea = %+v", authInteg)
+	}
+
+	updated, err := mgr.UpdateInstance(ctx, gitea.ID, settings.InstancePatch{
+		Name:                  "Lab2",
+		BaseURL:               "https://git.lab.example",
+		AllowPrivateNetwork:   boolPtr(false),
+		AllowUnsignedWebhooks: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Lab2" || !updated.TokenConfigured {
+		t.Fatalf("update = %+v", updated)
+	}
+
+	if err := mgr.DeleteInstance(ctx, gh.ID); err != nil {
+		t.Fatal(err)
+	}
+	list2, err := mgr.ListInstancesPublic(ctx)
+	if err != nil || len(list2) != 1 {
+		t.Fatalf("after delete list=%v err=%v", list2, err)
+	}
+	if mgr.GitHub().URL != "" && mgr.GitHub().Token != "" {
+		// may fall back to config defaults with empty token — ensure no leftover token
+		if mgr.GitHub().Token == "gh-tok" {
+			t.Fatal("github token should be cleared after delete")
+		}
+	}
+}
+
+func TestGenerateEncryptionKeyPersistsAndEnablesSeal(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "gitseer.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	cfg.Database.Path = dbPath
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mgr.EncryptionConfigured() {
+		t.Fatal("expected no encryption key")
+	}
+
+	pass, err := mgr.GenerateEncryptionKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pass) < 16 {
+		t.Fatalf("short passphrase %q", pass)
+	}
+	if !mgr.EncryptionConfigured() || mgr.EncryptionSource() != settings.EncryptionSourceFile {
+		t.Fatalf("configured=%v source=%q", mgr.EncryptionConfigured(), mgr.EncryptionSource())
+	}
+	if _, err := mgr.GenerateEncryptionKey(); err == nil {
+		t.Fatal("expected second generate to fail")
+	}
+
+	_, err = mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:           "https://git.example",
+		GiteaToken:         "tok",
+		GiteaWebhookSecret: "hook",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mgr2 := settings.New(cfg, st)
+	if err := mgr2.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !mgr2.EncryptionConfigured() {
+		t.Fatal("expected key reloaded from file")
+	}
+	if mgr2.Integration().Token != "tok" {
+		t.Fatalf("token = %q", mgr2.Integration().Token)
+	}
+}
+
+
+func boolPtr(v bool) *bool { return &v }

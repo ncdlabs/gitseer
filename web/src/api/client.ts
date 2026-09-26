@@ -1,4 +1,4 @@
-export type LensTheme = "light" | "dark" | "system" | "gruvbox" | "terminal";
+export type GitSeerTheme = "light" | "dark" | "system" | "gruvbox" | "terminal";
 
 export type User = {
   id: number;
@@ -8,7 +8,7 @@ export type User = {
   authz?: string;
   csrf_token?: string;
   /** Mapped from Gitea defaults only; omitted for custom/unknown themes. */
-  theme?: LensTheme | null;
+  theme?: GitSeerTheme | null;
   gitea_theme?: string | null;
 };
 
@@ -25,6 +25,8 @@ export type Repository = {
   archived: boolean;
   html_url: string;
   forge_type?: ForgeType | string;
+  instance_id?: number;
+  instance_name?: string;
 };
 
 export type PullRequest = {
@@ -35,11 +37,14 @@ export type PullRequest = {
   draft: boolean;
   author_login: string;
   ci_state?: string;
+  review_state?: string;
   repo_owner?: string;
   repo_name?: string;
   repo_full?: string;
   html_url: string;
   forge_type?: ForgeType | string;
+  instance_id?: number;
+  instance_name?: string;
 };
 
 export type WorkflowRun = {
@@ -56,6 +61,8 @@ export type WorkflowRun = {
   completed_at?: string;
   html_url: string;
   forge_type?: ForgeType | string;
+  instance_id?: number;
+  instance_name?: string;
 };
 
 export type Job = {
@@ -85,6 +92,9 @@ export type AttentionItem = {
   opened_at?: string;
   html_url?: string;
   repo_full?: string;
+  forge_type?: ForgeType | string;
+  instance_id?: number;
+  instance_name?: string;
 };
 
 export type Summary = {
@@ -237,7 +247,7 @@ export type UIConfig = {
   csrf_token?: string;
 };
 
-export type LensSettings = {
+export type GitSeerSettings = {
   instance_name: string;
   sync_history_days: number;
   attention_long_running_after: string;
@@ -283,13 +293,14 @@ export type IntegrationPatch = {
   github_allow_unsigned_webhooks?: boolean;
 };
 
-export type UpdateSettingsBody = Partial<LensSettings> & {
+export type UpdateSettingsBody = Partial<GitSeerSettings> & {
   integration?: IntegrationPatch;
   setup_completed?: boolean;
 };
 
 export type ForgeStatusRow = {
   forge_type: string;
+  name?: string;
   url?: string;
   configured?: boolean;
   connected?: boolean;
@@ -299,7 +310,40 @@ export type ForgeStatusRow = {
   allow_unsigned?: boolean;
   version?: string;
   instance_id?: number;
+  token_configured?: boolean;
+  webhook_secret_configured?: boolean;
   capabilities?: unknown;
+};
+
+export type InstancePublic = {
+  id: number;
+  name: string;
+  forge_type: string;
+  base_url: string;
+  version?: string;
+  token_configured: boolean;
+  webhook_secret_configured: boolean;
+  oauth_client_id?: string;
+  oauth_client_secret_configured?: boolean;
+  allow_private_network: boolean;
+  allow_unsigned_webhooks: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type InstancePatch = {
+  forge_type?: string;
+  name?: string;
+  base_url?: string;
+  token?: string;
+  webhook_secret?: string;
+  clear_token?: boolean;
+  clear_webhook_secret?: boolean;
+  oauth_client_id?: string;
+  oauth_client_secret?: string;
+  clear_oauth_client_secret?: boolean;
+  allow_private_network?: boolean;
+  allow_unsigned_webhooks?: boolean;
 };
 
 export type SystemStatus = {
@@ -314,6 +358,7 @@ export type SystemStatus = {
   webhook_hmac?: boolean;
   github_webhook_hmac?: boolean;
   setup_completed?: boolean;
+  encryption_configured?: boolean;
   oauth_redirect_uri?: string;
   server_external_url?: string;
   gitea_version?: string;
@@ -324,10 +369,25 @@ export type SystemStatus = {
 
 export type SettingsResponse = {
   editable: boolean;
-  settings: LensSettings;
+  settings: GitSeerSettings;
   integration: IntegrationPublic;
   setup_completed: boolean;
+  encryption_configured?: boolean;
+  encryption_source?: string;
   status: SystemStatus;
+};
+
+export type EncryptionStatus = {
+  configured: boolean;
+  source?: string;
+};
+
+export type SetEncryptionResponse = {
+  configured: boolean;
+  source?: string;
+  generated?: boolean;
+  /** Present only when generate=true — copy and store securely; never returned again. */
+  encryption_key?: string;
 };
 
 export type CompleteSetupResponse = {
@@ -440,11 +500,36 @@ export type CreateOAuthResponse = {
   integration: IntegrationPublic;
 };
 
+export type Organization = {
+  id: number;
+  instance_id: number;
+  external_id: number;
+  name: string;
+  full_name: string;
+  avatar_url?: string;
+  forge_type?: string;
+  instance_name?: string;
+};
+
 export type SearchResult = {
   repositories: Repository[];
+  organizations: Organization[];
   pull_requests: PullRequest[];
   workflow_runs: WorkflowRun[];
+  attention: AttentionItem[];
 };
+
+/** Encode inventory filter: "all" | forge type | "instance:{id}". */
+export function forgeListParam(filter?: string): string {
+  const raw = (filter || "").trim();
+  if (!raw || raw === "all") return "";
+  if (raw.startsWith("instance:")) {
+    const id = raw.slice("instance:".length);
+    if (!id || Number(id) <= 0) return "";
+    return `&instance_id=${encodeURIComponent(id)}`;
+  }
+  return `&forge_type=${encodeURIComponent(raw.toLowerCase())}`;
+}
 
 export const api = {
   uiConfig: async () => {
@@ -483,33 +568,61 @@ export const api = {
   logout: () => request<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
   summary: (days = 0) => request<Summary>(`/api/v1/summary?days=${days}`),
   stats: (days = 0) => request<StatsReport>(`/api/v1/stats?days=${days}`),
-  repositories: (q = "") =>
-    request<{ items: Repository[]; total: number }>(`/api/v1/repositories?limit=100&q=${encodeURIComponent(q)}`),
-  pullRequests: (q = "") =>
-    request<{ items: PullRequest[]; total: number }>(
-      `/api/v1/pull-requests?state=open&limit=100&q=${encodeURIComponent(q)}`,
+  systemStatus: () => request<SystemStatus>("/api/v1/system/status"),
+  repositories: (q = "", forgeType: string = "all") =>
+    request<{ items: Repository[]; total: number }>(
+      `/api/v1/repositories?limit=100&q=${encodeURIComponent(q)}${forgeListParam(forgeType)}`,
     ),
-  workflowRuns: (q = "") =>
+  repository: (owner: string, repo: string, instanceId?: number) => {
+    const q = instanceId && instanceId > 0 ? `?instance_id=${instanceId}` : "";
+    return request<Repository>(
+      `/api/v1/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${q}`,
+    );
+  },
+  pullRequests: (q = "", forgeType: string = "all") =>
+    request<{ items: PullRequest[]; total: number }>(
+      `/api/v1/pull-requests?state=open&limit=100&q=${encodeURIComponent(q)}${forgeListParam(forgeType)}`,
+    ),
+  workflowRuns: (q = "", forgeType: string = "all") =>
     request<{ items: WorkflowRun[]; total: number }>(
-      `/api/v1/workflow-runs?limit=100&q=${encodeURIComponent(q)}`,
+      `/api/v1/workflow-runs?limit=100&q=${encodeURIComponent(q)}${forgeListParam(forgeType)}`,
     ),
   activeWorkflowRuns: () =>
     request<{ items: ActiveRunItem[]; total: number }>("/api/v1/workflow-runs/active"),
   workflowRun: (id: number) =>
     request<{ run: WorkflowRun; jobs: Job[]; graph: WorkflowNode[] | null }>(`/api/v1/workflow-runs/${id}`),
-  attention: (q = "") =>
+  attention: (q = "", forgeType: string = "all") =>
     request<{ items: AttentionItem[]; total: number }>(
-      `/api/v1/attention?limit=100&q=${encodeURIComponent(q)}`,
+      `/api/v1/attention?limit=100&q=${encodeURIComponent(q)}${forgeListParam(forgeType)}`,
     ),
   search: (q: string) =>
     request<SearchResult>(`/api/v1/search?q=${encodeURIComponent(q)}`),
   syncRepos: () => request<unknown>("/api/v1/setup/sync-repos", { method: "POST" }),
+  encryptionStatus: () => request<EncryptionStatus>("/api/v1/setup/encryption"),
+  setEncryptionKey: (body: { generate?: boolean; encryption_key?: string }) =>
+    request<SetEncryptionResponse>("/api/v1/setup/encryption", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   settings: () => request<SettingsResponse>("/api/v1/settings"),
   updateSettings: (body: UpdateSettingsBody) =>
     request<SettingsResponse>("/api/v1/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  instances: () => request<{ items: InstancePublic[] }>("/api/v1/instances"),
+  createInstance: (body: InstancePatch) =>
+    request<InstancePublic>("/api/v1/instances", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateInstance: (id: number, body: InstancePatch) =>
+    request<InstancePublic>(`/api/v1/instances/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteInstance: (id: number) =>
+    request<void>(`/api/v1/instances/${id}`, { method: "DELETE" }),
   testConnection: (body?: TestConnectionBody) =>
     request<TestConnectionResponse>("/api/v1/setup/test-connection", {
       method: "POST",
@@ -617,6 +730,30 @@ export function ciBadgeClass(state?: string) {
     case "cancelled":
     case "canceled":
       return "cancelled";
+    default:
+      return "";
+  }
+}
+
+export function reviewLabel(state?: string) {
+  switch ((state || "").toLowerCase()) {
+    case "approved":
+      return "approved";
+    case "changes_requested":
+      return "changes requested";
+    case "":
+      return "";
+    default:
+      return state || "";
+  }
+}
+
+export function reviewBadgeClass(state?: string) {
+  switch ((state || "").toLowerCase()) {
+    case "approved":
+      return "success";
+    case "changes_requested":
+      return "failure";
     default:
       return "";
   }

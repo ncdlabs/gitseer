@@ -11,9 +11,10 @@ import {
 } from "../api/client";
 import { ExpandCollapseControls } from "../components/ExpandCollapseControls";
 import { ForgeBadge } from "../components/ForgeBadge";
-import { ForgeFilterChips, matchesForgeFilter, type ForgeFilterValue } from "../components/ForgeFilterChips";
+import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
 import { WorkflowDAG } from "../components/WorkflowDAG";
+import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 import { useViewMode } from "../hooks/useViewMode";
 import { relativeAge } from "../lib/relativeAge";
 
@@ -23,6 +24,8 @@ type ActionGroup = {
   workflowPath: string;
   repoFull: string;
   forgeType?: string;
+  instanceId?: number;
+  instanceName?: string;
   latest: WorkflowRun;
   runs: WorkflowRun[];
 };
@@ -66,6 +69,8 @@ function groupByAction(runs: WorkflowRun[]): ActionGroup[] {
       workflowPath,
       repoFull: latest.repo_full || repoLabel(latest) || "—",
       forgeType: latest.forge_type,
+      instanceId: latest.instance_id,
+      instanceName: latest.instance_name,
       latest,
       runs: sorted,
     });
@@ -100,19 +105,18 @@ function RunList({ runs }: { runs: WorkflowRun[] }) {
 
 export function PipelinesPage() {
   const { mode, setMode } = useViewMode();
+  const { showForge, forges, chipOptions } = useForgeInventory();
   const [filter, setFilter] = useState("");
   const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
+  const effectiveForge = showForge ? forgeFilter : "all";
   const q = useQuery({
-    queryKey: ["runs", filter],
-    queryFn: () => api.workflowRuns(filter),
+    queryKey: ["runs", filter, effectiveForge],
+    queryFn: () => api.workflowRuns(filter, effectiveForge),
     placeholderData: keepPreviousData,
   });
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
-  const groups = useMemo(() => {
-    const items = (q.data?.items ?? []).filter((run) => matchesForgeFilter(run.forge_type, forgeFilter));
-    return groupByAction(items);
-  }, [q.data?.items, forgeFilter]);
+  const groups = useMemo(() => groupByAction(q.data?.items ?? []), [q.data?.items]);
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pipelines…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
@@ -130,7 +134,18 @@ export function PipelinesPage() {
   const expandAll = () => setOpenKeys(new Set(groups.map((group) => group.key)));
   const collapseAll = () => setOpenKeys(new Set());
   const empty =
-    filter || forgeFilter !== "all" ? "No pipelines match this filter." : "No workflow runs indexed yet.";
+    filter || effectiveForge !== "all" ? "No pipelines match this filter." : "No workflow runs indexed yet.";
+
+  function groupBadge(group: ActionGroup) {
+    return {
+      forgeType: group.forgeType,
+      instanceName: resolveInstanceName(forges, {
+        forgeType: group.forgeType,
+        instanceId: group.instanceId,
+        instanceName: group.instanceName,
+      }),
+    };
+  }
 
   return (
     <>
@@ -149,7 +164,9 @@ export function PipelinesPage() {
           filterPlaceholder="Filter pipelines…"
           filterLabel="Filter pipelines"
         >
-          <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} />
+          {showForge && (
+            <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} options={chipOptions} />
+          )}
           {groups.length > 0 && (
             <ExpandCollapseControls
               onExpandAll={expandAll}
@@ -178,7 +195,7 @@ export function PipelinesPage() {
                   onClick={() => toggle(group.key)}
                 >
                   <div className="item-card__meta">
-                    <ForgeBadge forgeType={group.forgeType} />
+                    {showForge && <ForgeBadge {...groupBadge(group)} />}
                     {statusBadge(group.latest)}
                     <span className="item-card__age muted">
                       {group.runs.length} run{group.runs.length === 1 ? "" : "s"}
@@ -205,7 +222,7 @@ export function PipelinesPage() {
               <tr>
                 <th>Action</th>
                 <th>Repository</th>
-                <th>Forge</th>
+                {showForge && <th>Forge</th>}
                 <th>Latest</th>
                 <th>Runs</th>
               </tr>
@@ -233,15 +250,17 @@ export function PipelinesPage() {
                         </button>
                       </td>
                       <td className="mono">{group.repoFull}</td>
-                      <td>
-                        <ForgeBadge forgeType={group.forgeType} />
-                      </td>
+                      {showForge && (
+                        <td>
+                          <ForgeBadge {...groupBadge(group)} />
+                        </td>
+                      )}
                       <td>{statusBadge(group.latest)}</td>
                       <td>{group.runs.length}</td>
                     </tr>
                     {open && (
                       <tr className="action-table__detail">
-                        <td colSpan={5}>
+                        <td colSpan={showForge ? 5 : 4}>
                           <RunList runs={group.runs} />
                         </td>
                       </tr>
@@ -259,6 +278,7 @@ export function PipelinesPage() {
 
 export function PipelineDetailPage() {
   const { id } = useParams();
+  const { showForge, forges } = useForgeInventory();
   const runId = Number(id);
   const validId = Number.isFinite(runId) && runId > 0;
   const q = useQuery({
@@ -297,8 +317,21 @@ export function PipelineDetailPage() {
           </p>
           <h1>{run.name}</h1>
           <p className="muted">
-            {repoLabel(run)} · {run.branch} · <ForgeBadge forgeType={run.forge_type} /> ·{" "}
-            <span className={`badge ${run.conclusion || run.status}`}>{run.conclusion || run.status}</span>
+            {repoLabel(run)} · {run.branch}
+            {showForge && (
+              <>
+                {" · "}
+                <ForgeBadge
+                  forgeType={run.forge_type}
+                  instanceName={resolveInstanceName(forges, {
+                    forgeType: run.forge_type,
+                    instanceId: run.instance_id,
+                    instanceName: run.instance_name,
+                  })}
+                />
+              </>
+            )}{" "}
+            · <span className={`badge ${run.conclusion || run.status}`}>{run.conclusion || run.status}</span>
           </p>
         </div>
         {forgeHref && (

@@ -28,7 +28,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/webhooks"
 )
 
-// Server is the Lens HTTP process.
+// Server is the GitSeer HTTP process.
 type Server struct {
 	cfg     config.Config
 	log     *slog.Logger
@@ -83,7 +83,11 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 	}
 	settingsMgr.SetOnIntegrationChange(applyIntegration)
 	settingsMgr.SetOnExternalURLChange(authsvc.UpdateExternalURL)
-	applyIntegration(settingsMgr.Integration())
+	settingsMgr.SetOnEncryptionChange(authsvc.SetEncryptionKey)
+	if k := settingsMgr.EncryptionKeyBytes(); len(k) == 32 {
+		authsvc.SetEncryptionKey(k)
+	}
+	applyIntegration(settingsMgr.AuthGiteaIntegration(context.Background()))
 	authsvc.UpdateExternalURL(settingsMgr.ExternalURL())
 	if integ := settingsMgr.Integration(); integ.WebhookSecret == "" && integ.AllowUnsignedWebhooks {
 		log.Warn("gitea webhook HMAC secret not set; unsigned payloads allowed")
@@ -129,8 +133,9 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 			"allow_skip_setup":  cfg.Dev.AllowSkipSetup,
 			"csrf_token":        csrf,
 		}
-		// Local npm start only (GITSEER_ALLOW_SKIP_SETUP): prefill login with the bootstrap password.
-		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" {
+		// Local npm start only: prefill login with the bootstrap password on loopback hosts.
+		// Do not expose the password for .local / LAN hostnames even when skip-setup is allowed.
+		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" && config.IsLoopbackExternalURL(cfg.Server.ExternalURL) {
 			payload["dev_bootstrap_password"] = cfg.Auth.BootstrapPassword
 		}
 		_ = json.NewEncoder(w).Encode(payload)

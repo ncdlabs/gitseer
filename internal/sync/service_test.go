@@ -17,7 +17,10 @@ import (
 )
 
 type mockForge struct {
-	repos []models.Repository
+	repos          []models.Repository
+	getRun         map[int64]*models.WorkflowRun
+	getRunErr      map[int64]error
+	actionsEnabled bool
 }
 
 func (m *mockForge) GetInstance(context.Context) (*models.InstanceInfo, error) {
@@ -25,7 +28,7 @@ func (m *mockForge) GetInstance(context.Context) (*models.InstanceInfo, error) {
 }
 
 func (m *mockForge) DetectCapabilities(context.Context) (*models.Capabilities, error) {
-	return &models.Capabilities{Version: "1.25.5", ActionsAPI: false}, nil
+	return &models.Capabilities{Version: "1.25.5", ActionsAPI: m.actionsEnabled}, nil
 }
 
 func (m *mockForge) ListOrganizations(context.Context) ([]models.Organization, error) {
@@ -47,12 +50,30 @@ func (m *mockForge) ListPullRequests(context.Context, models.RepoRef, forge.PROp
 	return forge.Page[models.PullRequest]{}, nil
 }
 
+func (m *mockForge) GetPullRequestReviewState(context.Context, models.RepoRef, int64) (string, error) {
+	return "", nil
+}
+
 func (m *mockForge) GetCombinedCommitStatus(context.Context, models.RepoRef, string) (string, error) {
 	return "", nil
 }
 
 func (m *mockForge) ListWorkflowRuns(context.Context, models.RepoRef, forge.RunOpts) (forge.Page[models.WorkflowRun], error) {
 	return forge.Page[models.WorkflowRun]{}, nil
+}
+
+func (m *mockForge) GetWorkflowRun(_ context.Context, _ models.RepoRef, runExternalID int64) (*models.WorkflowRun, error) {
+	if m.getRunErr != nil {
+		if err, ok := m.getRunErr[runExternalID]; ok {
+			return nil, err
+		}
+	}
+	if m.getRun != nil {
+		if run, ok := m.getRun[runExternalID]; ok {
+			return run, nil
+		}
+	}
+	return nil, forge.ErrNotFound
 }
 
 func (m *mockForge) ListJobs(context.Context, models.RepoRef, int64) ([]models.Job, error) {
@@ -202,5 +223,60 @@ func TestFullSyncPreservesForgeType(t *testing.T) {
 	}
 	if inst.ForgeType != models.ForgeTypeGitHub {
 		t.Fatalf("forge_type=%q want github", inst.ForgeType)
+	}
+}
+
+func TestFullSyncClosesOrphanedInFlightRuns(t *testing.T) {
+	ctx := context.Background()
+	svc, st := setupSync(t)
+
+	f := &mockForge{
+		actionsEnabled: true,
+		repos: []models.Repository{
+			{ExternalID: 1, Owner: "coThink", Name: "api", FullName: "coThink/api", DefaultBranch: "main"},
+		},
+		getRunErr: map[int64]error{12550: forge.ErrNotFound},
+	}
+	if _, err := svc.FullSync(ctx, f, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.GetPrimaryInstance(ctx)
+	if err != nil || inst == nil {
+		t.Fatalf("instance: %v", err)
+	}
+	repos, err := st.ListAllAliveRepos(ctx, inst.ID)
+	if err != nil || len(repos) != 1 {
+		t.Fatalf("repos: %v len=%d", err, len(repos))
+	}
+	run, err := st.UpsertWorkflowRun(ctx, repos[0].ID, models.WorkflowRun{
+		ExternalID: 12550, Name: "ci.yaml", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertJob(ctx, repos[0].ID, run.ID, models.Job{
+		ExternalID: 99, Name: "Cursor autofix failed CI job", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.FullSync(ctx, f, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.GetWorkflowRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.StatusCompleted || got.Conclusion != models.ConclusionCancelled {
+		t.Fatalf("status=%s conclusion=%s", got.Status, got.Conclusion)
+	}
+	jobs, err := st.ListJobsByRunID(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Status != models.StatusCompleted || jobs[0].Conclusion != models.ConclusionCancelled {
+		t.Fatalf("jobs=%+v", jobs)
 	}
 }

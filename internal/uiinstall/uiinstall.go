@@ -22,12 +22,13 @@ func InstallCmd(args []string) {
 	fs := flag.NewFlagSet("install-ui", flag.ExitOnError)
 	customPath := fs.String("custom-path", "", "path to Gitea custom/ directory")
 	gitseerURL := fs.String("gitseer-url", "", "public GitSeer base URL (e.g. https://git.example.com/gitseer)")
+	instanceID := fs.Int64("instance-id", 0, "GitSeer forge instance id for deep links (optional)")
 	_ = fs.Parse(args)
 	if *customPath == "" || *gitseerURL == "" {
-		fmt.Fprintln(os.Stderr, "usage: gitseer install-ui --custom-path DIR --gitseer-url URL")
+		fmt.Fprintln(os.Stderr, "usage: gitseer install-ui --custom-path DIR --gitseer-url URL [--instance-id N]")
 		os.Exit(2)
 	}
-	if err := Install(*customPath, strings.TrimRight(*gitseerURL, "/")); err != nil {
+	if err := Install(*customPath, strings.TrimRight(*gitseerURL, "/"), *instanceID); err != nil {
 		fmt.Fprintf(os.Stderr, "install-ui: %v\n", err)
 		os.Exit(1)
 	}
@@ -49,7 +50,7 @@ func UninstallCmd(args []string) {
 	fmt.Println("GitSeer UI snippets removed.")
 }
 
-func Install(customPath, gitseerURL string) error {
+func Install(customPath, gitseerURL string, instanceID int64) error {
 	safeURL, err := sanitizeGitSeerURL(gitseerURL)
 	if err != nil {
 		return err
@@ -59,14 +60,18 @@ func Install(customPath, gitseerURL string) error {
 		return err
 	}
 	href := html.EscapeString(safeURL)
+	repoPath := fmt.Sprintf("%s/repositories/{{.Owner.Name}}/{{.Repository.Name}}", href)
+	if instanceID > 0 {
+		repoPath = fmt.Sprintf("%s?instance_id=%d", repoPath, instanceID)
+	}
 	linksSnippet := fmt.Sprintf(`%s
 <a class="item" href="%s" target="_blank" rel="noopener noreferrer">GitSeer</a>
 %s
 `, beginLinks, href, endLinks)
 	tabsSnippet := fmt.Sprintf(`%s
-<a class="item" href="%s/repositories/{{.Owner.Name}}/{{.Repository.Name}}" target="_blank" rel="noopener noreferrer">GitSeer</a>
+<a class="item" href="%s" target="_blank" rel="noopener noreferrer">GitSeer</a>
 %s
-`, beginTabs, href, endTabs)
+`, beginTabs, repoPath, endTabs)
 
 	if err := upsertMarkedFile(filepath.Join(templates, "extra_links.tmpl"), beginLinks, endLinks, linksSnippet); err != nil {
 		return err

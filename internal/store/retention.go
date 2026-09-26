@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// MapExternalIDsToRepoIDs returns lens repo IDs for the given forge external IDs.
+// MapExternalIDsToRepoIDs returns gitseer repo IDs for the given forge external IDs.
 func (s *Store) MapExternalIDsToRepoIDs(ctx context.Context, instanceID int64, externalIDs []int64) ([]int64, error) {
 	if len(externalIDs) == 0 {
 		return nil, nil

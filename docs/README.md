@@ -9,7 +9,7 @@ Operator and developer reference for GitSeer (dual-forge Gitea + GitHub; technic
 | [Features](features.md) | UI routes and capabilities |
 | [Configuration](configuration.md) | YAML, env, settings layers |
 | [Authentication and ACL](authentication-and-acl.md) | OAuth, bootstrap, CSRF, ACL |
-| [Setup wizard](setup-wizard.md) | Connect → Validate → Finish |
+| [Setup wizard](setup-wizard.md) | Prepare (encryption) → Choose Forge → Connect → Validate → Finish |
 | [Attention engine](attention-engine.md) | Rule matrix and severities |
 | [API reference](api-reference.md) | `/api/v1` and webhooks |
 | [Webhooks and sync](webhooks-and-sync.md) | Near-realtime + reconcile |

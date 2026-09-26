@@ -29,6 +29,7 @@ const navigation: Array<{ to: string; label: string; icon: ShellIconName; end?: 
 export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, children }: PropsWithChildren<Props>) {
   const [isRailCollapsed, setRailCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [actionsOpenTick, setActionsOpenTick] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const userMenuId = useId();
   const initials = user.login.slice(0, 2).toUpperCase();
@@ -75,7 +76,7 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
           ))}
         </nav>
         <div className="sidebar__footer">
-          <ActionsStatusFlyout />
+          <ActionsStatusFlyout openTick={actionsOpenTick} />
           <div className={`user-menu${userMenuOpen ? " is-open" : ""}`} ref={userMenuRef}>
             {userMenuOpen && (
               <div className="user-menu__flyout" id={userMenuId} role="menu" aria-label="Account menu">
@@ -115,10 +116,16 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
           </div>
         </div>
       </aside>
-      <main className="content">
+      <main className={`content${syncing ? " content--syncing" : ""}`}>
         <header className="app-header">
           <div className="app-header__actions">
-            <HeaderSearch />
+            <HeaderSearch
+              canSync={!!user.is_bootstrap_admin && !!onSync}
+              onSync={onSync}
+              onTheme={onTheme}
+              onLogout={onLogout}
+              onOpenActions={() => setActionsOpenTick((n) => n + 1)}
+            />
             {user.is_bootstrap_admin && onSync && (
               <button
                 className={`app-header__sync${syncing ? " is-syncing" : ""}`}
@@ -138,6 +145,12 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
           </div>
         </header>
         <div className="page-content">{children}</div>
+        {syncing && (
+          <div className="sync-status-bar" role="status" aria-live="polite">
+            <Glyph name="sync" />
+            <span>Syncing repositories, pull requests, and workflow runs…</span>
+          </div>
+        )}
       </main>
     </div>
   );

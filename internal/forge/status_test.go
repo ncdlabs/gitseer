@@ -69,3 +69,27 @@ func TestAggregateCIState(t *testing.T) {
 		t.Fatalf("empty=%q", got)
 	}
 }
+
+func TestAggregateReviewState(t *testing.T) {
+	if got := AggregateReviewState([]string{"APPROVED", "COMMENTED"}); got != "approved" {
+		t.Fatalf("approved=%q", got)
+	}
+	if got := AggregateReviewState([]string{"approved", "changes_requested"}); got != "changes_requested" {
+		t.Fatalf("changes win=%q", got)
+	}
+	if got := AggregateReviewState([]string{"commented", "pending"}); got != "" {
+		t.Fatalf("empty=%q", got)
+	}
+}
+
+func TestMergeCIState(t *testing.T) {
+	if got := MergeCIState("success", "failure"); got != "failure" {
+		t.Fatalf("got %q", got)
+	}
+	if got := MergeCIState("pending", "success"); got != "pending" {
+		t.Fatalf("got %q", got)
+	}
+	if got := MergeCIState("", "success"); got != "success" {
+		t.Fatalf("got %q", got)
+	}
+}

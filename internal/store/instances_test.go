@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -102,5 +103,165 @@ func TestUpsertInstanceByURLDefaultsForgeTypeGitea(t *testing.T) {
 	}
 	if store.InstanceHasSecrets(inst) {
 		t.Fatal("meta upsert should not invent secrets")
+	}
+}
+
+func TestGetPrimaryGiteaInstancePrefersOAuth(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "primary.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	first, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "First Gitea", ForgeType: models.ForgeTypeGitea, BaseURL: "https://git-a.example.com",
+		SyncTokenCiphertext: "tok-a", WebhookSecretCiphertext: "hook-a",
+		AllowUnsignedWebhooks: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oauth, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "OAuth Gitea", ForgeType: models.ForgeTypeGitea, BaseURL: "https://git-b.example.com",
+		SyncTokenCiphertext: "tok-b", WebhookSecretCiphertext: "hook-b",
+		OAuthClientID: "cid", OAuthClientSecretCipher: "csec",
+		AllowUnsignedWebhooks: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "GitHub", ForgeType: models.ForgeTypeGitHub, BaseURL: "https://api.github.com",
+		SyncTokenCiphertext: "gh", WebhookSecretCiphertext: "gh-hook",
+		AllowUnsignedWebhooks: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prim, err := st.GetPrimaryGiteaInstance(ctx)
+	if err != nil || prim == nil {
+		t.Fatalf("primary: %+v err=%v", prim, err)
+	}
+	if prim.ID != oauth.ID {
+		t.Fatalf("expected oauth instance %d, got %d (first=%d)", oauth.ID, prim.ID, first.ID)
+	}
+
+	if err := st.DeleteInstance(ctx, oauth.ID); err != nil {
+		t.Fatal(err)
+	}
+	prim2, err := st.GetPrimaryGiteaInstance(ctx)
+	if err != nil || prim2 == nil || prim2.ID != first.ID {
+		t.Fatalf("fallback primary: %+v err=%v", prim2, err)
+	}
+}
+
+func TestUpdateInstanceSecretsByIDAndDelete(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "upd.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "Lab", ForgeType: models.ForgeTypeGitea, BaseURL: "https://git.example.com",
+		SyncTokenCiphertext: "tok", WebhookSecretCiphertext: "hook",
+		AllowUnsignedWebhooks: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.UpdateInstanceSecretsByID(ctx, inst.ID, store.InstanceSecrets{
+		Name: "Lab Renamed", BaseURL: "https://git2.example.com",
+		AllowUnsignedWebhooks: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Lab Renamed" || updated.BaseURL != "https://git2.example.com" {
+		t.Fatalf("updated=%+v", updated)
+	}
+	if updated.SyncTokenCiphertext != "tok" {
+		t.Fatal("token should be preserved")
+	}
+	if err := st.DeleteInstance(ctx, inst.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetInstanceByID(ctx, inst.ID); err != sql.ErrNoRows {
+		t.Fatalf("expected gone, got %v", err)
+	}
+}
+
+func TestUpsertInstanceSecretsRejectsForgeTypeClobber(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "clobber.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	_, err = st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "Gitea", ForgeType: models.ForgeTypeGitea, BaseURL: "https://git.example.com",
+		WebhookSecretCiphertext: "hook", AllowUnsignedWebhooks: true, SetFlags: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "GitHub", ForgeType: models.ForgeTypeGitHub, BaseURL: "https://git.example.com",
+		WebhookSecretCiphertext: "gh-hook", AllowUnsignedWebhooks: true, SetFlags: true,
+	})
+	if err == nil {
+		t.Fatal("expected forge type conflict")
+	}
+}
+
+func TestGetRepositoryByOwnerNameAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "ambig.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	gitea, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "Gitea", ForgeType: models.ForgeTypeGitea, BaseURL: "https://git.example.com",
+		WebhookSecretCiphertext: "h", AllowUnsignedWebhooks: true, SetFlags: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name: "GitHub", ForgeType: models.ForgeTypeGitHub, BaseURL: "https://api.github.com",
+		WebhookSecretCiphertext: "h", AllowUnsignedWebhooks: true, SetFlags: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertRepository(ctx, gitea.ID, models.Repository{
+		ExternalID: 1, Owner: "acme", Name: "widgets", FullName: "acme/widgets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertRepository(ctx, gh.ID, models.Repository{
+		ExternalID: 2, Owner: "acme", Name: "widgets", FullName: "acme/widgets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.GetRepositoryByOwnerName(ctx, "acme", "widgets")
+	if err == nil {
+		t.Fatal("expected ambiguous")
+	}
+	repo, err := st.GetRepositoryByOwnerNameInInstance(ctx, "acme", "widgets", gitea.ID)
+	if err != nil || repo.InstanceID != gitea.ID {
+		t.Fatalf("scoped = %+v err=%v", repo, err)
 	}
 }

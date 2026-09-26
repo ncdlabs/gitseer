@@ -1,21 +1,26 @@
-export type ForgeFilterValue = "all" | "gitea" | "github";
+import type { ForgeChipOption } from "../hooks/useShowForgeUI";
+
+/** Filter id: "all" | "gitea" | "github" | "instance:{id}" */
+export type ForgeFilterValue = string;
 
 type Props = {
   value: ForgeFilterValue;
   onChange: (value: ForgeFilterValue) => void;
+  options?: ForgeChipOption[];
 };
 
-const OPTIONS: { id: ForgeFilterValue; label: string }[] = [
+const FALLBACK: ForgeChipOption[] = [
   { id: "all", label: "All" },
-  { id: "gitea", label: "Gitea" },
-  { id: "github", label: "GitHub" },
+  { id: "gitea", label: "Gitea", forgeType: "gitea" },
+  { id: "github", label: "GitHub", forgeType: "github" },
 ];
 
-/** Optional All / Gitea / GitHub filter chips for shared inventory lists. */
-export function ForgeFilterChips({ value, onChange }: Props) {
+/** Optional All / forge-type / per-instance filter chips for shared inventory lists. */
+export function ForgeFilterChips({ value, onChange, options }: Props) {
+  const opts = options && options.length > 0 ? options : FALLBACK;
   return (
     <div className="forge-filter" role="radiogroup" aria-label="Filter by forge">
-      {OPTIONS.map((opt) => {
+      {opts.map((opt) => {
         const selected = value === opt.id;
         return (
           <button
@@ -37,8 +42,14 @@ export function ForgeFilterChips({ value, onChange }: Props) {
 export function matchesForgeFilter(
   forgeType: string | undefined | null,
   filter: ForgeFilterValue,
+  instanceId?: number | null,
 ): boolean {
-  if (filter === "all") return true;
+  if (!filter || filter === "all") return true;
+  if (filter.startsWith("instance:")) {
+    const id = Number(filter.slice("instance:".length));
+    if (!Number.isFinite(id) || id <= 0) return true;
+    return instanceId === id;
+  }
   const ft = (forgeType || "gitea").toLowerCase();
-  return ft === filter;
+  return ft === filter.toLowerCase();
 }

@@ -1,30 +1,61 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { api, ciBadgeClass, ciLabel, openOnForgeLabel, repoLabel, safeExternalHref } from "../api/client";
+import {
+  api,
+  ciBadgeClass,
+  ciLabel,
+  openOnForgeLabel,
+  repoLabel,
+  reviewBadgeClass,
+  reviewLabel,
+  safeExternalHref,
+} from "../api/client";
 import { ForgeBadge } from "../components/ForgeBadge";
-import { ForgeFilterChips, matchesForgeFilter, type ForgeFilterValue } from "../components/ForgeFilterChips";
+import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
+import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
+import { useURLQueryFilter } from "../hooks/useURLQueryFilter";
 import { useViewMode } from "../hooks/useViewMode";
+
+function repoDetailPath(repo: { owner?: string; name?: string; full_name?: string; instance_id?: number }) {
+  const owner = repo.owner || (repo.full_name || "").split("/")[0] || "";
+  const name = repo.name || (repo.full_name || "").split("/")[1] || "";
+  if (!owner || !name) return "/repositories";
+  const q = repo.instance_id && repo.instance_id > 0 ? `?instance_id=${repo.instance_id}` : "";
+  return `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${q}`;
+}
 
 export function RepositoriesPage() {
   const { mode, setMode } = useViewMode();
-  const [filter, setFilter] = useState("");
+  const { showForge, forges, chipOptions } = useForgeInventory();
+  const [filter, setFilter] = useURLQueryFilter();
   const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
+  const effectiveForge = showForge ? forgeFilter : "all";
   const q = useQuery({
-    queryKey: ["repositories", filter],
-    queryFn: () => api.repositories(filter),
+    queryKey: ["repositories", filter, effectiveForge],
+    queryFn: () => api.repositories(filter, effectiveForge),
     placeholderData: keepPreviousData,
   });
-  const items = useMemo(() => {
-    const all = q.data?.items ?? [];
-    return all.filter((repo) => matchesForgeFilter(repo.forge_type, forgeFilter));
-  }, [q.data?.items, forgeFilter]);
+  const items = q.data?.items ?? [];
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading repositories…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
-  const empty = filter || forgeFilter !== "all"
+  const empty = filter || effectiveForge !== "all"
     ? "No repositories match this filter."
     : "No repositories yet. Use Sync in the header (bootstrap admin).";
+
+  function badgeProps(repo: (typeof items)[number]) {
+    return {
+      forgeType: repo.forge_type,
+      instanceName: resolveInstanceName(forges, {
+        forgeType: repo.forge_type,
+        instanceId: repo.instance_id,
+        instanceName: repo.instance_name,
+      }),
+    };
+  }
+
   return (
     <>
       <div className="topbar">
@@ -33,7 +64,7 @@ export function RepositoriesPage() {
           <p className="muted">
             {q.data?.total ?? 0} repositor{q.data?.total === 1 ? "y" : "ies"} visible to you
             {filter ? ` matching “${filter}”` : ""}
-            {forgeFilter !== "all" ? ` · ${forgeFilter}` : ""}.
+            {effectiveForge !== "all" ? ` · ${effectiveForge}` : ""}.
           </p>
         </div>
         <ListControls
@@ -44,7 +75,9 @@ export function RepositoriesPage() {
           filterPlaceholder="Filter repositories…"
           filterLabel="Filter repositories"
         >
-          <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} />
+          {showForge && (
+            <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} options={chipOptions} />
+          )}
         </ListControls>
       </div>
       {mode === "cards" ? (
@@ -53,27 +86,25 @@ export function RepositoriesPage() {
         ) : (
           <div className="item-grid">
             {items.map((repo) => {
-              const href = safeExternalHref(repo.html_url);
-              return href ? (
-                <a key={repo.id} className="item-card" href={href} target="_blank" rel="noreferrer">
-                  <div className="item-card__title">{repo.full_name}</div>
-                  <div className="item-card__meta">
-                    <ForgeBadge forgeType={repo.forge_type} />
-                    <span className="badge">{repo.private ? "private" : "public"}</span>
-                    {repo.archived && <span className="badge">archived</span>}
-                  </div>
-                  <div className="item-card__repo mono">{repo.default_branch || "—"}</div>
-                  <span className="item-card__cta muted">{openOnForgeLabel(repo.forge_type)}</span>
-                </a>
-              ) : (
+              const forgeHref = safeExternalHref(repo.html_url);
+              const detail = repoDetailPath(repo);
+              const badge = badgeProps(repo);
+              return (
                 <div key={repo.id} className="item-card item-card--static">
-                  <div className="item-card__title">{repo.full_name}</div>
+                  <Link className="item-card__title" to={detail}>
+                    {repo.full_name}
+                  </Link>
                   <div className="item-card__meta">
-                    <ForgeBadge forgeType={repo.forge_type} />
+                    {showForge && <ForgeBadge {...badge} />}
                     <span className="badge">{repo.private ? "private" : "public"}</span>
                     {repo.archived && <span className="badge">archived</span>}
                   </div>
                   <div className="item-card__repo mono">{repo.default_branch || "—"}</div>
+                  {forgeHref && (
+                    <a className="item-card__cta muted" href={forgeHref} target="_blank" rel="noreferrer">
+                      {openOnForgeLabel(repo.forge_type)}
+                    </a>
+                  )}
                 </div>
               );
             })}
@@ -85,28 +116,33 @@ export function RepositoriesPage() {
             <thead>
               <tr>
                 <th>Repository</th>
-                <th>Forge</th>
+                {showForge && <th>Forge</th>}
                 <th>Default branch</th>
                 <th>Visibility</th>
               </tr>
             </thead>
             <tbody>
               {items.map((repo) => {
-                const href = safeExternalHref(repo.html_url);
+                const forgeHref = safeExternalHref(repo.html_url);
+                const detail = repoDetailPath(repo);
                 return (
                   <tr key={repo.id}>
                     <td>
-                      {href ? (
-                        <a href={href} target="_blank" rel="noreferrer">
-                          {repo.full_name}
-                        </a>
-                      ) : (
-                        repo.full_name
+                      <Link to={detail}>{repo.full_name}</Link>
+                      {forgeHref && (
+                        <>
+                          {" "}
+                          <a className="muted" href={forgeHref} target="_blank" rel="noreferrer">
+                            {openOnForgeLabel(repo.forge_type)}
+                          </a>
+                        </>
                       )}
                     </td>
-                    <td>
-                      <ForgeBadge forgeType={repo.forge_type} />
-                    </td>
+                    {showForge && (
+                      <td>
+                        <ForgeBadge {...badgeProps(repo)} />
+                      </td>
+                    )}
                     <td className="mono">{repo.default_branch || "—"}</td>
                     <td>
                       {repo.private ? "Private" : "Public"}
@@ -117,7 +153,7 @@ export function RepositoriesPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="empty">
+                  <td colSpan={showForge ? 4 : 3} className="empty">
                     {empty}
                   </td>
                 </tr>
@@ -132,22 +168,33 @@ export function RepositoriesPage() {
 
 export function PullRequestsPage() {
   const { mode, setMode } = useViewMode();
-  const [filter, setFilter] = useState("");
+  const { showForge, forges, chipOptions } = useForgeInventory();
+  const [filter, setFilter] = useURLQueryFilter();
   const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
+  const effectiveForge = showForge ? forgeFilter : "all";
   const q = useQuery({
-    queryKey: ["prs", filter],
-    queryFn: () => api.pullRequests(filter),
+    queryKey: ["prs", filter, effectiveForge],
+    queryFn: () => api.pullRequests(filter, effectiveForge),
     placeholderData: keepPreviousData,
   });
-  const items = useMemo(() => {
-    const all = q.data?.items ?? [];
-    return all.filter((pr) => matchesForgeFilter(pr.forge_type, forgeFilter));
-  }, [q.data?.items, forgeFilter]);
+  const items = q.data?.items ?? [];
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pull requests…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
   const empty =
-    filter || forgeFilter !== "all" ? "No pull requests match this filter." : "No open pull requests.";
+    filter || effectiveForge !== "all" ? "No pull requests match this filter." : "No open pull requests.";
+
+  function badgeProps(pr: (typeof items)[number]) {
+    return {
+      forgeType: pr.forge_type,
+      instanceName: resolveInstanceName(forges, {
+        forgeType: pr.forge_type,
+        instanceId: pr.instance_id,
+        instanceName: pr.instance_name,
+      }),
+    };
+  }
+
   return (
     <>
       <div className="topbar">
@@ -163,7 +210,9 @@ export function PullRequestsPage() {
           filterPlaceholder="Filter pull requests…"
           filterLabel="Filter pull requests"
         >
-          <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} />
+          {showForge && (
+            <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} options={chipOptions} />
+          )}
         </ListControls>
       </div>
       {mode === "cards" ? (
@@ -177,8 +226,13 @@ export function PullRequestsPage() {
                 <>
                   <div className="item-card__meta">
                     <span className="mono">#{pr.number}</span>
-                    <ForgeBadge forgeType={pr.forge_type} />
+                    {showForge && <ForgeBadge {...badgeProps(pr)} />}
                     <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{ciLabel(pr.ci_state)}</span>
+                    {reviewLabel(pr.review_state) && (
+                      <span className={`badge ${reviewBadgeClass(pr.review_state)}`}>
+                        {reviewLabel(pr.review_state)}
+                      </span>
+                    )}
                     {pr.draft && <span className="badge">draft</span>}
                   </div>
                   <div className="item-card__title">
@@ -209,9 +263,10 @@ export function PullRequestsPage() {
               <tr>
                 <th>PR</th>
                 <th>Repository</th>
-                <th>Forge</th>
+                {showForge && <th>Forge</th>}
                 <th>Author</th>
                 <th>CI</th>
+                <th>Review</th>
               </tr>
             </thead>
             <tbody>
@@ -233,19 +288,30 @@ export function PullRequestsPage() {
                       )}
                     </td>
                     <td className="mono">{repoLabel(pr)}</td>
-                    <td>
-                      <ForgeBadge forgeType={pr.forge_type} />
-                    </td>
+                    {showForge && (
+                      <td>
+                        <ForgeBadge {...badgeProps(pr)} />
+                      </td>
+                    )}
                     <td>{pr.author_login}</td>
                     <td>
                       <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{ciLabel(pr.ci_state)}</span>
+                    </td>
+                    <td>
+                      {reviewLabel(pr.review_state) ? (
+                        <span className={`badge ${reviewBadgeClass(pr.review_state)}`}>
+                          {reviewLabel(pr.review_state)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                   </tr>
                 );
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={showForge ? 6 : 5} className="empty">
                     {empty}
                   </td>
                 </tr>

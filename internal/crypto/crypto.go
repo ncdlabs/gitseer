@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Encrypt encrypts plaintext with a 32-byte key. Returns base64(nonce|ciphertext).
@@ -72,8 +73,22 @@ func LooksLikeCiphertext(stored string) bool {
 	return len(raw) >= minSealed
 }
 
+// LooksLikeBase64Blob reports whether stored looks like base64 material that might
+// be a sealed secret (or truncated ciphertext) rather than a human plaintext token.
+func LooksLikeBase64Blob(stored string) bool {
+	stored = strings.TrimSpace(stored)
+	if len(stored) < 16 {
+		return false
+	}
+	_, err := base64.StdEncoding.DecodeString(stored)
+	return err == nil
+}
+
 // KeyFromString derives a 32-byte AES key via SHA-256.
-// Rejects empty input; does not zero-pad short secrets.
+// Rejects empty or short input. This is not a password KDF (no salt/iterations):
+// operators should use a high-entropy key (wizard-generated or ≥24 random chars).
+// Changing the derivation would invalidate existing sealed rows.
+// Minimum length remains 16 for compatibility with existing installs; prefer ≥24 for new keys.
 func KeyFromString(s string) ([]byte, error) {
 	if s == "" {
 		return nil, fmt.Errorf("encryption key is empty")

@@ -16,7 +16,7 @@ jobs:
       - name: Placeholder UI for embed
         run: |
           mkdir -p internal/server/ui/dist
-          echo '<!doctype html><title>Lens</title>' > internal/server/ui/dist/index.html
+          echo '<!doctype html><title>GitSeer</title>' > internal/server/ui/dist/index.html
       - run: go mod tidy
       - run: go test ./...
       - run: go build -o bin/gitseer ./cmd/gitseer

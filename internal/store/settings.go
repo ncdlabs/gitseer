@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// AppSettings is the single-row persisted Lens settings override.
+// AppSettings is the single-row persisted GitSeer settings override.
 type AppSettings struct {
 	InstanceName              string
 	SyncHistoryDays           int

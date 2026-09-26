@@ -43,7 +43,7 @@ type Config struct {
 	GiteaBaseURL      string
 	OAuthClientID     string
 	OAuthClientSecret string
-	ExternalURL       string // public Lens URL (used for redirect_uri)
+	ExternalURL       string // public GitSeer URL (used for redirect_uri)
 	AllowPrivateNet   bool
 	EncryptionKey     string
 }
@@ -113,11 +113,21 @@ func (s *Service) UpdateGiteaAuth(baseURL, clientID, clientSecret string, allowP
 	s.client = gitea.NewHTTPClient(allowPrivateNet, 30*time.Second)
 }
 
-// UpdateExternalURL refreshes the public Lens URL used for OAuth redirect_uri.
+// UpdateExternalURL refreshes the public GitSeer URL used for OAuth redirect_uri.
 func (s *Service) UpdateExternalURL(externalURL string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cfg.ExternalURL = strings.TrimRight(strings.TrimSpace(externalURL), "/")
+}
+
+// SetEncryptionKey applies a 32-byte AES key at runtime (setup wizard).
+func (s *Service) SetEncryptionKey(key []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(key) != 32 {
+		return
+	}
+	s.encKey = append([]byte(nil), key...)
 }
 
 // SafeRedirectPath allows only same-app relative paths (no scheme, no //).
@@ -223,7 +233,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state, ip, ua string)
 	if err != nil {
 		return nil, "", "", "", err
 	}
-	inst, err := s.store.GetPrimaryInstance(ctx)
+	inst, err := s.store.GetPrimaryGiteaInstance(ctx)
 	var instanceID *int64
 	if err == nil && inst != nil {
 		id := inst.ID
@@ -232,7 +242,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state, ip, ua string)
 	user, err := s.store.UpsertGiteaUser(ctx, instanceID, *gu)
 	if err != nil {
 		if errors.Is(err, store.ErrReservedLogin) || errors.Is(err, store.ErrBootstrapClash) {
-			return nil, "", "", "", fmt.Errorf("oauth login %q is reserved for the Lens bootstrap admin", gu.Login)
+			return nil, "", "", "", fmt.Errorf("oauth login %q is reserved for the GitSeer bootstrap admin", gu.Login)
 		}
 		if errors.Is(err, store.ErrLoginConflict) {
 			return nil, "", "", "", fmt.Errorf("oauth login %q is already linked to another account", gu.Login)
@@ -623,7 +633,7 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// PathPrefixFromExternalURL returns the URL path (e.g. "/lens") or "/".
+// PathPrefixFromExternalURL returns the URL path (e.g. "/gitseer") or "/".
 func PathPrefixFromExternalURL(external string) string {
 	if external == "" {
 		return "/"

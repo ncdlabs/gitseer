@@ -40,11 +40,16 @@ type WebhookPreview struct {
 	Config map[string]string `json:"config"`
 }
 
-// DefaultWebhookEvents are the GitHub events Lens applies for immediacy.
+// DefaultWebhookEvents are the GitHub events GitSeer applies for immediacy.
 var DefaultWebhookEvents = []string{
 	"pull_request",
+	"pull_request_review",
 	"workflow_run",
 	"workflow_job",
+	"repository",
+	"check_run",
+	"check_suite",
+	"status",
 }
 
 // NewWebhookPreview builds a manual webhook preview (no auto-create on GitHub).

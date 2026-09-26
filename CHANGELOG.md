@@ -4,8 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Dual-forge feature completeness: PR `review_state` from forge review APIs + `pull_request_review` webhooks; GitHub Checks/status merge into `ci_state`; status/check webhook apply; OAuth ACL refresh also grants GitHub repos visible to each instance PAT.
+- Repository detail route `/repositories/:owner/:repo` (optional `instance_id`) for install-ui deep links; `gitseer install-ui --instance-id`.
+- Prometheus `gitseer_github_api_requests_total` / `gitseer_github_api_errors_total` (parity with Gitea).
+- Review badges on the Pull Requests list; repository inventory links to the in-app detail page.
+- Setup create-webhook prefers per-instance Gitea delivery URLs; Gitea webhook event set includes `status` and `pull_request_review`.
+
 ### Fixed
 
+- Full sync closes in-flight workflow runs that 404 on the forge (missed webhook / purged history ghosts in Active Actions), including incomplete jobs.
+
+- Per-instance webhook routes no longer inherit the legacy global Gitea HMAC secret or global allow-unsigned (closes fail-open for GitHub/secondary forges).
+- Instance upsert by `base_url` refuses to change `forge_type`; creates use insert-only (no race clobber).
+- OAuth ACL refresh is scoped to the user’s Gitea `instance_id`; orphaned users re-bind after instance delete.
+- `GET /repositories/{owner}/{repo}` returns 409 when owner/name is ambiguous across instances unless `instance_id` is set.
+- Job logs and workflow YAML use the repository’s forge instance client (not always primary Gitea).
+- Manual Sync acquires the same per-instance sync leases as background reconcile.
+- Instance `forge_type` is immutable after create; SSRF/unsigned flags use optional JSON booleans.
+- `GET /instances` is bootstrap-admin only; non-admin settings redact OAuth client id / allow flags.
+- Bootstrap password is only prefilled in ui-config on loopback hosts (not `*.local`).
+- Wizard/API new encryption keys require ≥24 characters (env load still accepts ≥16); ambiguous base64 blobs fail closed without a key.
 - Webhook processing reaper ages from `processing_started_at` (claim time), not `received_at`, so backlogged events are not double-applied.
 - Sync soft-delete clears repository ACL; `CanAccessRepo` rejects soft-deleted repos (including bootstrap).
 - Workflow/job re-runs clear stale `completed_at` when attempt increases or status returns to in-flight; SQL `ON CONFLICT … WHERE` guards regressing updates.
@@ -19,13 +39,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Setup wizard first-step label **Secure** → **Prepare** (internal step id remains `secure`); wizard step/modal copy tightened for what+why clarity.
 - Attention sweep paginates through all open PRs and queued/waiting/running runs.
 - Sync always fetches jobs for in-flight runs; completed-run job fetch cap raised to 50/repo.
 - Postgres webhook claim uses `FOR UPDATE SKIP LOCKED`.
 - Removed unused `GITSEER_AUTH_PROVIDER` from k3s values; dead store/API helpers cleaned up.
 
-### Added
+### Added (setup / metrics)
 
+- Setup wizard **Prepare** step (first): public GitSeer URL plus generate/paste encryption key; key persists beside the DB when env/config unset (`GET`/`POST /api/v1/setup/encryption`).
 - Optional Prometheus Bearer scrape via `server.metrics_token` / `GITSEER_METRICS_TOKEN` (session cookie still works).
 - Sync package tests for empty-catalog soft-delete skip, missing-repo soft-delete, and sync lease gating.
 - Crypto unit tests and fail-closed decrypt when sealed secrets exist without `GITSEER_ENCRYPTION_KEY`.

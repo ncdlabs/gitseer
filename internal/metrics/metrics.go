@@ -62,6 +62,14 @@ var (
 		Name: "gitseer_gitea_api_errors_total",
 		Help: "Outbound Gitea API errors",
 	})
+	GitHubAPIRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "gitseer_github_api_requests_total",
+		Help: "Outbound GitHub API requests",
+	}, []string{"status"})
+	GitHubAPIErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "gitseer_github_api_errors_total",
+		Help: "Outbound GitHub API errors",
+	})
 )
 
 // Register registers all GitSeer metrics with the default Prometheus registry once.
@@ -80,6 +88,8 @@ func Register() {
 			SyncErrorsTotal,
 			GiteaAPIRequestsTotal,
 			GiteaAPIErrorsTotal,
+			GitHubAPIRequestsTotal,
+			GitHubAPIErrorsTotal,
 		)
 	})
 }

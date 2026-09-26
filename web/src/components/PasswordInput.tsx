@@ -9,6 +9,7 @@ type Props = {
   autoComplete?: string;
   disabled?: boolean;
   required?: boolean;
+  readOnly?: boolean;
   "aria-label"?: string;
   "aria-invalid"?: InputHTMLAttributes<HTMLInputElement>["aria-invalid"];
   "aria-describedby"?: string;
@@ -22,6 +23,7 @@ export function PasswordInput({
   autoComplete,
   disabled,
   required,
+  readOnly,
   "aria-label": ariaLabel,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
@@ -39,6 +41,7 @@ export function PasswordInput({
         autoComplete={autoComplete}
         disabled={disabled}
         required={required}
+        readOnly={readOnly}
         aria-label={ariaLabel}
         aria-invalid={ariaInvalid}
         aria-describedby={ariaDescribedBy}

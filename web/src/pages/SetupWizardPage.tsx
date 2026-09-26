@@ -10,6 +10,8 @@ import {
   type WebhookPreview,
 } from "../api/client";
 import { Brand } from "../components/Brand";
+import { GiteaPATHelp } from "../components/GiteaPATHelp";
+import { GitHubPATHelp } from "../components/GitHubPATHelp";
 import { InfoTip } from "../components/InfoTip";
 import { PasswordInput } from "../components/PasswordInput";
 import {
@@ -59,9 +61,15 @@ function isPrivateNetworkMessage(msg: string): boolean {
   );
 }
 
-type Step = "pick" | "connect" | "validate" | "finish";
+type Step = "secure" | "pick" | "connect" | "validate" | "finish";
 
 const STEPS: { id: Step; label: string; description: string }[] = [
+  {
+    id: "secure",
+    label: "Prepare",
+    description:
+      "Set GitSeer's public URL so forges can reach it, and an encryption key for tokens and webhook secrets at rest.",
+  },
   {
     id: "pick",
     label: "Choose Forge",
@@ -70,17 +78,18 @@ const STEPS: { id: Step; label: string; description: string }[] = [
   {
     id: "connect",
     label: "Connect",
-    description: "Point GitSeer at your forge and set the public URL used for webhooks (and Gitea OAuth).",
+    description: "Enter the forge base URL and a service token so GitSeer can read repos, PRs, and Actions.",
   },
   {
     id: "validate",
     label: "Validate",
-    description: "GitSeer checks connectivity and token permissions, then walks you through webhook setup.",
+    description:
+      "Confirm connectivity and token permissions, then install the webhook (and Gitea OAuth when available).",
   },
   {
     id: "finish",
     label: "Finish",
-    description: "Complete setup and optionally sync repositories so GitSeer can start indexing forge data.",
+    description: "Mark setup complete. Optionally sync repositories so the catalog starts filling in.",
   },
 ];
 
@@ -95,12 +104,12 @@ const FORGE_OPTIONS: ForgePickerOption[] = [
   {
     id: "gitea",
     label: "Gitea",
-    description: "Self-hosted or cloud Gitea. Sync, system webhooks, and OAuth login.",
+    description: "Self-hosted or cloud. Sync, system webhooks, and OAuth login.",
   },
   {
     id: "github",
     label: "GitHub",
-    description: "github.com or GitHub Enterprise. Service PAT sync and manual webhooks.",
+    description: "github.com or Enterprise. PAT sync and manual webhooks.",
   },
   {
     id: "gitlab",
@@ -197,14 +206,14 @@ function validateConnectFields(
   }
   const publicURL = draft.server_external_url.trim();
   if (!publicURL) {
-    errors.server_external_url = "Lens public URL is required.";
+    errors.server_external_url = "GitSeer public URL is required (set it in the Prepare step).";
   } else if (!isValidHTTPURL(publicURL)) {
     errors.server_external_url = "Enter a valid http:// or https:// URL.";
   }
   const order: FieldKey[] =
     forge === "gitea"
-      ? ["gitea_url", "gitea_token", "server_external_url", "gitea_allow_private_network"]
-      : ["github_url", "github_token", "server_external_url", "github_allow_private_network"];
+      ? ["gitea_url", "gitea_token", "gitea_allow_private_network", "server_external_url"]
+      : ["github_url", "github_token", "github_allow_private_network", "server_external_url"];
   const firstInvalid = order.find((k) => errors[k]);
   return { ok: !firstInvalid, errors, firstInvalid };
 }
@@ -252,16 +261,22 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const uiConfigQuery = useQuery({ queryKey: ["ui-config"], queryFn: api.uiConfig });
   const allowSkipSetup = uiConfigQuery.data?.allow_skip_setup === true;
-  const [step, setStep] = useState<Step>("pick");
+  const [step, setStep] = useState<Step>("secure");
   const [forge, setForge] = useState<WizardForge | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [hydrated, setHydrated] = useState(false);
-  const [busy, setBusy] = useState<"save" | "test" | "webhook" | "oauth" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "webhook" | "oauth" | "encryption" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [syncAfter, setSyncAfter] = useState(true);
   const [finishing, setFinishing] = useState(false);
+  const [encryptionConfigured, setEncryptionConfigured] = useState(false);
+  const [encryptionSource, setEncryptionSource] = useState<string>("");
+  const [encryptionDraft, setEncryptionDraft] = useState("");
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [keyCopied, setKeyCopied] = useState(false);
+  const [acknowledgedKey, setAcknowledgedKey] = useState(false);
 
   const [checkOpen, setCheckOpen] = useState(false);
   const [checkRunning, setCheckRunning] = useState(false);
@@ -283,10 +298,13 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
 
   useEffect(() => {
     if (!settingsQuery.data || hydrated) return;
-    const publicURL =
-      settingsQuery.data.settings?.server_external_url ||
-      String(settingsQuery.data.status?.server_external_url ?? "");
-    setDraft(draftFromIntegration(settingsQuery.data.integration, publicURL));
+    // Do not seed server_external_url from settings/status — Prepare must start empty.
+    setDraft(draftFromIntegration(settingsQuery.data.integration));
+    const encConfigured =
+      settingsQuery.data.encryption_configured === true ||
+      settingsQuery.data.status?.encryption_configured === true;
+    setEncryptionConfigured(encConfigured);
+    setEncryptionSource(settingsQuery.data.encryption_source || "");
     setHydrated(true);
   }, [settingsQuery.data, hydrated]);
 
@@ -353,6 +371,119 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     setFieldErrors({});
     setTestResult(null);
     setStep("connect");
+  }
+
+  function validateSecurePublicURL(): boolean {
+    const publicURL = draft.server_external_url.trim();
+    if (!publicURL) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        server_external_url: "GitSeer public URL is required.",
+      }));
+      focusField("server_external_url");
+      return false;
+    }
+    if (!isValidHTTPURL(publicURL)) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        server_external_url: "Enter a valid http:// or https:// URL.",
+      }));
+      focusField("server_external_url");
+      return false;
+    }
+    setFieldErrors((prev) => {
+      if (!prev.server_external_url) return prev;
+      const next = { ...prev };
+      delete next.server_external_url;
+      return next;
+    });
+    return true;
+  }
+
+  async function generateEncryptionKey() {
+    if (isBusy || encryptionConfigured) return;
+    if (!validateSecurePublicURL()) return;
+    setBusy("encryption");
+    setError(null);
+    setGeneratedKey(null);
+    setKeyCopied(false);
+    setAcknowledgedKey(false);
+    try {
+      await savePublicURL();
+      const res = await api.setEncryptionKey({ generate: true });
+      setEncryptionConfigured(true);
+      setEncryptionSource(res.source || "file");
+      if (res.encryption_key) {
+        setGeneratedKey(res.encryption_key);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to generate encryption key");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveEncryptionKey() {
+    if (isBusy || encryptionConfigured) return;
+    if (!validateSecurePublicURL()) return;
+    const key = encryptionDraft.trim();
+    if (key.length < 16) {
+      setError("Encryption key must be at least 16 characters.");
+      return;
+    }
+    setBusy("encryption");
+    setError(null);
+    try {
+      await savePublicURL();
+      const res = await api.setEncryptionKey({ encryption_key: key });
+      setEncryptionConfigured(true);
+      setEncryptionSource(res.source || "file");
+      setEncryptionDraft("");
+      setGeneratedKey(null);
+      setAcknowledgedKey(true);
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      setStep("pick");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to save encryption key");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyGeneratedKey() {
+    if (!generatedKey) return;
+    try {
+      await navigator.clipboard.writeText(generatedKey);
+      setKeyCopied(true);
+    } catch {
+      setKeyCopied(false);
+      setError("Could not copy to clipboard — select and copy the key manually.");
+    }
+  }
+
+  async function continueAfterEncryption() {
+    if (isBusy) return;
+    if (!validateSecurePublicURL()) return;
+    if (!encryptionConfigured) {
+      setError("Generate or save an encryption key before continuing.");
+      return;
+    }
+    if (generatedKey && !acknowledgedKey) {
+      setError("Confirm you have saved the encryption key before continuing.");
+      return;
+    }
+    setBusy("save");
+    setError(null);
+    try {
+      await savePublicURL();
+      setGeneratedKey(null);
+      setStep("pick");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to save public URL");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function onForgeURLBlur(which: WizardForge, allowPrivateOverride?: boolean) {
@@ -461,6 +592,12 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
       errors.github_allow_private_network = fieldErrors.github_allow_private_network;
     }
     setFieldErrors(errors);
+    if (result.firstInvalid === "server_external_url") {
+      setStep("secure");
+      // focus after paint on Prepare step
+      queueMicrotask(() => focusField("server_external_url"));
+      return false;
+    }
     if (result.firstInvalid) focusField(result.firstInvalid);
     return !Object.keys(errors).length;
   }
@@ -772,6 +909,10 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
       setStep("pick");
       return;
     }
+    if (step === "pick") {
+      setStep("secure");
+      return;
+    }
     const prev = STEPS[stepIndex - 1];
     if (prev) setStep(prev.id);
   }
@@ -861,6 +1002,153 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
         </ol>
 
         <div className="settings-form">
+          {step === "secure" && (
+            <div className="settings-form__section">
+              <fieldset disabled={isBusy}>
+                <legend>GitSeer Public URL</legend>
+                <div className="settings-form__field">
+                  <input
+                    id="wiz_server_external_url"
+                    type="text"
+                    inputMode="url"
+                    value={draft.server_external_url}
+                    onChange={(e) => setField("server_external_url", e.target.value)}
+                    placeholder="GitSeer public URL (https://gitseer.example.com)"
+                    aria-label="GitSeer Public URL"
+                    autoComplete="off"
+                    required
+                    aria-invalid={fieldErrors.server_external_url ? true : undefined}
+                    aria-describedby={
+                      fieldErrors.server_external_url
+                        ? "wiz_server_external_url_error"
+                        : "wiz_server_external_url_hint"
+                    }
+                  />
+                  {fieldErrors.server_external_url ? (
+                    <p id="wiz_server_external_url_error" className="settings-form__error" role="alert">
+                      {fieldErrors.server_external_url}
+                    </p>
+                  ) : (
+                    <p id="wiz_server_external_url_hint" className="settings-form__hint">
+                      Where forges send webhooks and OAuth callbacks.
+                    </p>
+                  )}
+                </div>
+              </fieldset>
+
+              <fieldset disabled={isBusy}>
+                <legend>Encryption Key</legend>
+                {encryptionConfigured && !generatedKey ? (
+                  <>
+                    <p className="settings-form__saved" role="status">
+                      ✓ Encryption key is configured
+                      {encryptionSource === "config"
+                        ? " from the environment or config file."
+                        : " and stored for this install."}
+                    </p>
+                    <p className="muted">
+                      Forge tokens and webhook secrets are encrypted before they are stored.
+                    </p>
+                  </>
+                ) : generatedKey ? (
+                  <>
+                    <p className="muted">
+                      Save this key somewhere safe. GitSeer wrote it to disk for this install; you need
+                      the same value to recover secrets on another host.
+                    </p>
+                    <div className="settings-form__field">
+                      <div className="settings-form__inline">
+                        <PasswordInput
+                          id="wiz_generated_encryption_key"
+                          value={generatedKey}
+                          onChange={() => undefined}
+                          readOnly
+                          aria-label="Generated Encryption Key"
+                          autoComplete="off"
+                        />
+                        <button className="btn" type="button" onClick={() => void copyGeneratedKey()}>
+                          {keyCopied ? "Copied" : "Copy Key"}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="muted">
+                      Generate or paste a key (min 16 characters). Required before storing forge
+                      credentials.
+                    </p>
+                    <div className="settings-form__field">
+                      <div className="settings-form__inline">
+                        <PasswordInput
+                          id="wiz_encryption_key"
+                          value={encryptionDraft}
+                          onChange={(v) => {
+                            setEncryptionDraft(v);
+                            setError(null);
+                          }}
+                          placeholder="Paste Encryption Key (optional)"
+                          aria-label="Encryption Key"
+                          autoComplete="off"
+                        />
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={() => void generateEncryptionKey()}
+                          disabled={isBusy}
+                        >
+                          {busy === "encryption" || busy === "save" ? "Working…" : "Generate Key"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="settings-form__actions">
+                      <button
+                        className="btn primary"
+                        type="button"
+                        onClick={() => void saveEncryptionKey()}
+                        disabled={isBusy || encryptionDraft.trim().length < 16}
+                      >
+                        {busy === "encryption" || busy === "save" ? "Saving…" : "Save Key"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </fieldset>
+
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+
+              {(encryptionConfigured || generatedKey) && (
+                <div className="settings-form__actions">
+                  {generatedKey && (
+                    <label className="settings-form__check settings-form__actions-back">
+                      <input
+                        type="checkbox"
+                        checked={acknowledgedKey}
+                        onChange={(e) => {
+                          setAcknowledgedKey(e.target.checked);
+                          setError(null);
+                        }}
+                      />
+                      I Have Saved This Encryption Key
+                    </label>
+                  )}
+                  <button
+                    className="btn primary"
+                    type="button"
+                    onClick={() => void continueAfterEncryption()}
+                    disabled={isBusy || (Boolean(generatedKey) && !acknowledgedKey)}
+                  >
+                    {busy === "save" ? "Saving…" : "Continue"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {step === "pick" && (
             <div className="settings-form__section">
               <div className="forge-picker" role="list">
@@ -962,50 +1250,25 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         required={!integ?.gitea_token_configured}
                         aria-invalid={fieldErrors.gitea_token ? true : undefined}
                         aria-describedby={
-                          fieldErrors.gitea_token ? "wiz_gitea_token_error" : "wiz_gitea_token_hint"
+                          fieldErrors.gitea_token
+                            ? "wiz_gitea_token_error"
+                            : integ?.gitea_token_configured
+                              ? "wiz_gitea_token_hint"
+                              : undefined
                         }
                       />
+                      <GiteaPATHelp baseURL={draft.gitea_url} />
                       {fieldErrors.gitea_token ? (
                         <p id="wiz_gitea_token_error" className="settings-form__error" role="alert">
                           {fieldErrors.gitea_token}
                         </p>
-                      ) : (
+                      ) : integ?.gitea_token_configured ? (
                         <p id="wiz_gitea_token_hint" className="settings-form__hint">
-                          {integ?.gitea_token_configured
-                            ? "Token is configured. Leave blank to keep it."
-                            : "Admin personal access token with repository and Actions read access."}
+                          Token is configured. Leave blank to keep it.
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   </div>
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="wiz_server_external_url"
-                    type="text"
-                    inputMode="url"
-                    value={draft.server_external_url}
-                    onChange={(e) => setField("server_external_url", e.target.value)}
-                    placeholder="Lens public URL (https://lens.example.com)"
-                    aria-label="Lens public URL"
-                    autoComplete="off"
-                    required
-                    aria-invalid={fieldErrors.server_external_url ? true : undefined}
-                    aria-describedby={
-                      fieldErrors.server_external_url
-                        ? "wiz_server_external_url_error"
-                        : "wiz_server_external_url_hint"
-                    }
-                  />
-                  {fieldErrors.server_external_url ? (
-                    <p id="wiz_server_external_url_error" className="settings-form__error" role="alert">
-                      {fieldErrors.server_external_url}
-                    </p>
-                  ) : (
-                    <p id="wiz_server_external_url_hint" className="settings-form__hint">
-                      Public URL where Gitea can reach GitSeer (webhooks and OAuth callback).
-                    </p>
-                  )}
                 </div>
               </fieldset>
 
@@ -1111,51 +1374,25 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         required={!integ?.github_token_configured}
                         aria-invalid={fieldErrors.github_token ? true : undefined}
                         aria-describedby={
-                          fieldErrors.github_token ? "wiz_github_token_error" : "wiz_github_token_hint"
+                          fieldErrors.github_token
+                            ? "wiz_github_token_error"
+                            : integ?.github_token_configured
+                              ? "wiz_github_token_hint"
+                              : undefined
                         }
                       />
+                      <GitHubPATHelp baseURL={draft.github_url} />
                       {fieldErrors.github_token ? (
                         <p id="wiz_github_token_error" className="settings-form__error" role="alert">
                           {fieldErrors.github_token}
                         </p>
-                      ) : (
+                      ) : integ?.github_token_configured ? (
                         <p id="wiz_github_token_hint" className="settings-form__hint">
-                          {integ?.github_token_configured
-                            ? "Token is configured. Leave blank to keep it."
-                            : "Fine-grained or classic PAT with repo and Actions read access. No GitHub OAuth login in this release."}
+                          Token is configured. Leave blank to keep it.
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   </div>
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="wiz_server_external_url"
-                    type="text"
-                    inputMode="url"
-                    value={draft.server_external_url}
-                    onChange={(e) => setField("server_external_url", e.target.value)}
-                    placeholder="Lens public URL (https://lens.example.com)"
-                    aria-label="Lens public URL"
-                    autoComplete="off"
-                    required
-                    aria-invalid={fieldErrors.server_external_url ? true : undefined}
-                    aria-describedby={
-                      fieldErrors.server_external_url
-                        ? "wiz_server_external_url_error"
-                        : "wiz_server_external_url_hint_gh"
-                    }
-                  />
-                  {fieldErrors.server_external_url ? (
-                    <p id="wiz_server_external_url_error" className="settings-form__error" role="alert">
-                      {fieldErrors.server_external_url}
-                    </p>
-                  ) : (
-                    <p id="wiz_server_external_url_hint_gh" className="settings-form__hint">
-                      Public URL where GitHub can reach GitSeer for webhooks (
-                      <code className="mono">/api/webhooks/github/&#123;instanceID&#125;</code>).
-                    </p>
-                  )}
                 </div>
               </fieldset>
 
@@ -1178,14 +1415,13 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
 
           {step === "validate" && (
             <div className="settings-form__section">
-              <h2 className="settings-status__title">Validate Connection</h2>
               <p className="muted">
                 {checkRunning || busy === "test"
                   ? "Running connectivity and permission checks…"
                   : checksPassed
                     ? forge === "github"
-                      ? "Required checks passed. Continue for manual webhook instructions."
-                      : "Required checks passed. Continue to install the webhook and set up OAuth."
+                      ? "Checks passed. Continue for manual webhook instructions."
+                      : "Checks passed. Continue to install the webhook and set up OAuth."
                     : "Fix any failed checks, then retry."}
               </p>
               {checksPassed && (
@@ -1231,9 +1467,9 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
 
           {step === "finish" && (
             <div className="settings-form__section">
-              <h2 className="settings-status__title">Finish Setup</h2>
               <p className="muted">
-                Mark setup complete. You can add another forge later under Settings → Integration.
+                Mark setup complete. Optionally sync repositories so the catalog starts filling in.
+                You can add another forge later under Settings → Integration.
               </p>
               <label className="settings-form__check">
                 <input

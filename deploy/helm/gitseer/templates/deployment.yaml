@@ -31,7 +31,7 @@ spec:
       securityContext:
         fsGroup: 10001
       containers:
-        - name: lens
+        - name: gitseer
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:

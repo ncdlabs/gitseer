@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -386,7 +387,7 @@ func TestSettingsGetAndPut(t *testing.T) {
 	}
 
 	body := settings.Values{
-		InstanceName:              "Lens Lab",
+		InstanceName:              "GitSeer Lab",
 		SyncHistoryDays:           21,
 		AttentionLongRunningAfter: "90m",
 		RetentionRunsDays:         45,
@@ -410,7 +411,7 @@ func TestSettingsGetAndPut(t *testing.T) {
 	if err := json.Unmarshal(putRec.Body.Bytes(), &putOut); err != nil {
 		t.Fatal(err)
 	}
-	if putOut.Settings.InstanceName != "Lens Lab" || putOut.Settings.SyncHistoryDays != 21 {
+	if putOut.Settings.InstanceName != "GitSeer Lab" || putOut.Settings.SyncHistoryDays != 21 {
 		t.Fatalf("put settings=%+v", putOut.Settings)
 	}
 	if putOut.Settings.AttentionLongRunningAfter != "90m" {
@@ -639,3 +640,149 @@ func TestMetricsRequiresAuthOrBearer(t *testing.T) {
 	}
 }
 
+
+func TestInstancesCRUDAndStatusForges(t *testing.T) {
+	h, st, authsvc := setupAPI(t)
+	// Encryption required to store secrets via instances API.
+	h.cfg.Auth.EncryptionKey = "twenty-four-char-key-ok!!"
+	settingsMgr := settings.New(h.cfg, st)
+	if err := settingsMgr.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.settings = settingsMgr
+
+	r := chi.NewRouter()
+	h.Routes(r)
+
+	loginBody, _ := json.Marshal(map[string]string{"password": "test-pass"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/bootstrap/login", bytes.NewReader(loginBody))
+	probe := httptest.NewRecorder()
+	csrf, err := authsvc.IssueCSRFToken(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range probe.Result().Cookies() {
+		loginReq.AddCookie(c)
+	}
+	loginReq.Header.Set(auth.CSRFHeaderName, csrf)
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginRec.Code, loginRec.Body.String())
+	}
+	cookies := loginRec.Result().Cookies()
+	var loginPayload struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	_ = json.Unmarshal(loginRec.Body.Bytes(), &loginPayload)
+	csrfToken := loginPayload.CSRFToken
+	if csrfToken == "" {
+		csrfToken = csrf
+	}
+
+	createBody, _ := json.Marshal(map[string]any{
+		"forge_type":              "gitea",
+		"name":                    "Lab",
+		"base_url":                "https://git.crud.example",
+		"token":                   "tok",
+		"webhook_secret":          "hook",
+		"allow_unsigned_webhooks": false,
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/instances", bytes.NewReader(createBody))
+	for _, c := range cookies {
+		createReq.AddCookie(c)
+	}
+	createReq.Header.Set(auth.CSRFHeaderName, csrfToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	r.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var created settings.InstancePublic
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == 0 || !created.TokenConfigured {
+		t.Fatalf("created=%+v", created)
+	}
+
+	ghBody, _ := json.Marshal(map[string]any{
+		"forge_type":              "github",
+		"name":                    "GitHub",
+		"base_url":                "https://github.com",
+		"token":                   "gh",
+		"webhook_secret":          "gh-hook",
+		"allow_unsigned_webhooks": false,
+	})
+	ghReq := httptest.NewRequest(http.MethodPost, "/api/v1/instances", bytes.NewReader(ghBody))
+	for _, c := range cookies {
+		ghReq.AddCookie(c)
+	}
+	ghReq.Header.Set(auth.CSRFHeaderName, csrfToken)
+	ghReq.Header.Set("Content-Type", "application/json")
+	ghRec := httptest.NewRecorder()
+	r.ServeHTTP(ghRec, ghReq)
+	if ghRec.Code != http.StatusCreated {
+		t.Fatalf("create github status=%d body=%s", ghRec.Code, ghRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/instances", nil)
+	for _, c := range cookies {
+		listReq.AddCookie(c)
+	}
+	listRec := httptest.NewRecorder()
+	r.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status=%d", listRec.Code)
+	}
+	var list struct {
+		Items []settings.InstancePublic `json:"items"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) < 2 {
+		t.Fatalf("items=%d", len(list.Items))
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/system/status", nil)
+	for _, c := range cookies {
+		statusReq.AddCookie(c)
+	}
+	statusRec := httptest.NewRecorder()
+	r.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var status map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	forges, ok := status["forges"].([]any)
+	if !ok || len(forges) != len(list.Items) {
+		t.Fatalf("forges len=%v list=%d raw=%v", len(forges), len(list.Items), status["forges"])
+	}
+	foundLab := false
+	for _, raw := range forges {
+		entry, _ := raw.(map[string]any)
+		if entry["name"] == "Lab" && entry["instance_id"] != nil {
+			foundLab = true
+			break
+		}
+	}
+	if !foundLab {
+		t.Fatalf("expected Lab forge entry in %v", forges)
+	}
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/instances/"+strconv.FormatInt(created.ID, 10), nil)
+	for _, c := range cookies {
+		delReq.AddCookie(c)
+	}
+	delReq.Header.Set(auth.CSRFHeaderName, csrfToken)
+	delRec := httptest.NewRecorder()
+	r.ServeHTTP(delRec, delReq)
+	if delRec.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", delRec.Code, delRec.Body.String())
+	}
+}

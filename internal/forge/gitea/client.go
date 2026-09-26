@@ -175,7 +175,7 @@ const PrivateNetworkOptionLabel = "Allow Private Network Addresses"
 
 func privateAddressError(_displayURL string, ip net.IP) error {
 	return fmt.Errorf(
-		"This Gitea URL points to a private network address (%s). Check %q to allow Lens to connect.",
+		"This Gitea URL points to a private network address (%s). Check %q to allow GitSeer to connect.",
 		ip,
 		PrivateNetworkOptionLabel,
 	)
@@ -610,7 +610,41 @@ func (c *Client) ListPullRequests(ctx context.Context, repo models.RepoRef, opts
 	return forge.Page[models.PullRequest]{Items: items, Page: page, HasMore: len(raw) >= limit}, nil
 }
 
-// GetCombinedCommitStatus returns the normalized Lens ci_state for a commit/ref.
+// GetPullRequestReviewState aggregates PR reviews into GitSeer review_state.
+func (c *Client) GetPullRequestReviewState(ctx context.Context, repo models.RepoRef, number int64) (string, error) {
+	if number <= 0 {
+		return "", nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), number)
+	resp, err := c.do(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return "", err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	resp.Body.Close()
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		return "", nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("gitea api %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	var raw []struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return "", fmt.Errorf("decode reviews: %w", err)
+	}
+	states := make([]string, 0, len(raw))
+	for _, r := range raw {
+		states = append(states, r.State)
+	}
+	return forge.AggregateReviewState(states), nil
+}
+
+// GetCombinedCommitStatus returns the normalized GitSeer ci_state for a commit/ref.
 // Empty string means no statuses were reported.
 func (c *Client) GetCombinedCommitStatus(ctx context.Context, repo models.RepoRef, ref string) (string, error) {
 	if ref == "" {
@@ -694,6 +728,34 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, repo models.RepoRef, opts
 		items = append(items, mapRun(r))
 	}
 	return forge.Page[models.WorkflowRun]{Items: items, Page: page, HasMore: len(wrapped.WorkflowRuns) >= limit}, nil
+}
+
+func (c *Client) GetWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) (*models.WorkflowRun, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), runExternalID)
+	resp, err := c.do(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		return nil, forge.ErrNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("gitea api %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	var raw giteaRun
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode workflow run: %w", err)
+	}
+	if raw.ID == 0 {
+		return nil, forge.ErrNotFound
+	}
+	mapped := mapRun(raw)
+	return &mapped, nil
 }
 
 func (c *Client) ListJobs(ctx context.Context, repo models.RepoRef, runExternalID int64) ([]models.Job, error) {
@@ -802,7 +864,7 @@ func (c *Client) GetAuthenticatedUser(ctx context.Context, userToken string) (*m
 	}, nil
 }
 
-// UserSettings is the subset of Gitea /user/settings used by Lens.
+// UserSettings is the subset of Gitea /user/settings used by GitSeer.
 type UserSettings struct {
 	Theme string `json:"theme"`
 }

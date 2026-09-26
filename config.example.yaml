@@ -11,7 +11,7 @@ database:
   driver: sqlite
   path: data/gitseer.db
   # driver: postgres
-  # dsn: postgres://lens:lens@localhost:5432/lens?sslmode=disable
+  # dsn: postgres://gitseer:gitseer@localhost:5432/gitseer?sslmode=disable
 
 gitea:
   url: ""
@@ -42,7 +42,7 @@ auth:
   # oauth_client_id: ""
   # oauth_client_secret: ""   # optional for public PKCE clients; required for confidential
   # bootstrap_password via GITSEER_AUTH_BOOTSTRAP_PASSWORD (dev / first-run fallback; leave empty to disable)
-  # encryption_key via GITSEER_ENCRYPTION_KEY (min 16 chars; required to store integration secrets + OAuth tokens in DB)
+  # encryption_key via GITSEER_ENCRYPTION_KEY (env/config min 16, prefer ≥24; setup wizard Save Key requires ≥24; SHA-256 → AES key; required to store secrets + OAuth tokens in DB)
   session_ttl: 24h
   acl_refresh_interval: 6h
 

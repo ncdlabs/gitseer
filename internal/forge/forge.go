@@ -3,10 +3,19 @@ package forge
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/ncdlabs/gitseer/internal/models"
 )
+
+// ErrNotFound indicates the forge resource no longer exists (HTTP 404).
+var ErrNotFound = errors.New("forge resource not found")
+
+// IsNotFound reports whether err is or wraps ErrNotFound.
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound)
+}
 
 type ListReposOpts struct {
 	Page     int
@@ -40,8 +49,12 @@ type Forge interface {
 	GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error)
 
 	ListPullRequests(ctx context.Context, repo models.RepoRef, opts PROpts) (Page[models.PullRequest], error)
+	// GetPullRequestReviewState returns GitSeer review_state (e.g. "approved", "changes_requested", "").
+	GetPullRequestReviewState(ctx context.Context, repo models.RepoRef, number int64) (string, error)
 	GetCombinedCommitStatus(ctx context.Context, repo models.RepoRef, ref string) (string, error)
 	ListWorkflowRuns(ctx context.Context, repo models.RepoRef, opts RunOpts) (Page[models.WorkflowRun], error)
+	// GetWorkflowRun returns a single run by forge external ID, or ErrNotFound when gone.
+	GetWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) (*models.WorkflowRun, error)
 	ListJobs(ctx context.Context, repo models.RepoRef, runExternalID int64) ([]models.Job, error)
 	GetJobLogs(ctx context.Context, repo models.RepoRef, jobExternalID int64) (io.ReadCloser, error)
 	GetWorkflowYAML(ctx context.Context, repo models.RepoRef, path, ref string) ([]byte, error)
@@ -50,7 +63,7 @@ type Forge interface {
 	GetAuthenticatedUser(ctx context.Context, userToken string) (*models.User, error)
 }
 
-// NormalizeStatus maps upstream execution status strings into Lens vocabulary.
+// NormalizeStatus maps upstream execution status strings into GitSeer vocabulary.
 func NormalizeStatus(upstream string) (status, conclusion string) {
 	u := lower(upstream)
 	switch u {
@@ -114,7 +127,7 @@ func NormalizeConclusion(upstream string) string {
 	return c
 }
 
-// NormalizeCIState maps a Gitea combined commit status into Lens PR ci_state.
+// NormalizeCIState maps a Gitea combined commit status into GitSeer PR ci_state.
 func NormalizeCIState(upstream string) string {
 	switch lower(upstream) {
 	case "success":
@@ -128,6 +141,49 @@ func NormalizeCIState(upstream string) string {
 	default:
 		return ""
 	}
+}
+
+// AggregateReviewState rolls up forge review conclusions into GitSeer review_state.
+// changes_requested wins over approved; empty when neither is present.
+func AggregateReviewState(states []string) string {
+	hasChanges, hasApproved := false, false
+	for _, raw := range states {
+		switch lower(raw) {
+		case "changes_requested", "request_changes", "rejected":
+			hasChanges = true
+		case "approved", "approve":
+			hasApproved = true
+		}
+	}
+	if hasChanges {
+		return "changes_requested"
+	}
+	if hasApproved {
+		return "approved"
+	}
+	return ""
+}
+
+// MergeCIState picks the worse of two ci_state values (failure > pending > success > cancelled > empty).
+func MergeCIState(a, b string) string {
+	rank := func(s string) int {
+		switch s {
+		case models.CIStateFailure:
+			return 4
+		case models.CIStatePending:
+			return 3
+		case models.CIStateSuccess:
+			return 2
+		case models.CIStateCancelled:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
 }
 
 // AggregateCIState rolls up workflow run status/conclusion into a single PR ci_state.

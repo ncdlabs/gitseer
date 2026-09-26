@@ -27,7 +27,7 @@ func TestUpsertRepositoryIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if inst.ID == 0 {
-		t.Fatal("expected lens instance id")
+		t.Fatal("expected gitseer instance id")
 	}
 
 	r1, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
@@ -37,7 +37,7 @@ func TestUpsertRepositoryIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r1.ID == 0 || r1.ExternalID != 100 {
-		t.Fatalf("ids lens=%d external=%d", r1.ID, r1.ExternalID)
+		t.Fatalf("ids gitseer=%d external=%d", r1.ID, r1.ExternalID)
 	}
 
 	r2, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
@@ -47,7 +47,7 @@ func TestUpsertRepositoryIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r2.ID != r1.ID {
-		t.Fatalf("lens id changed on upsert: %d vs %d", r1.ID, r2.ID)
+		t.Fatalf("gitseer id changed on upsert: %d vs %d", r1.ID, r2.ID)
 	}
 	if r2.Name != "repo-renamed" {
 		t.Fatalf("name=%s", r2.Name)
@@ -797,6 +797,75 @@ func TestStatsReportAuthzScope(t *testing.T) {
 	}
 }
 
+func TestCompleteOrphanedWorkflowRun(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "orphan-run.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceByURL(ctx, "lab", "https://git.example.com", "1.25.5", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 1, Owner: "coThink", Name: "api", FullName: "coThink/api",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 12550, Name: "ci.yaml", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 1, Name: "check", Status: models.StatusCompleted, Conclusion: models.ConclusionFailure,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 2, Name: "Cursor autofix failed CI job", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closed, err := st.CompleteOrphanedWorkflowRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Status != models.StatusCompleted || closed.Conclusion != models.ConclusionCancelled {
+		t.Fatalf("run status=%s conclusion=%s", closed.Status, closed.Conclusion)
+	}
+	jobs, err := st.ListJobsByRunID(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("jobs=%d", len(jobs))
+	}
+	for _, j := range jobs {
+		if j.Status != models.StatusCompleted {
+			t.Fatalf("job %s still %s", j.Name, j.Status)
+		}
+		if j.ExternalID == 2 && j.Conclusion != models.ConclusionCancelled {
+			t.Fatalf("autofix conclusion=%s", j.Conclusion)
+		}
+	}
+	inFlight, err := st.ListInFlightWorkflowRunsByRepo(ctx, repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inFlight) != 0 {
+		t.Fatalf("expected no in-flight runs, got %d", len(inFlight))
+	}
+}
+
 func TestListWorkflowRunsStatusesAndJobsByRunIDs(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "runs-active.db"), "")
@@ -902,7 +971,7 @@ func TestListWorkflowRunsStatusesAndJobsByRunIDs(t *testing.T) {
 
 func TestUpsertGiteaUserRejectsBootstrapLogin(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	dbPath := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", dbPath, "")
 	if err != nil {
 		t.Fatal(err)
@@ -921,7 +990,7 @@ func TestUpsertGiteaUserRejectsBootstrapLogin(t *testing.T) {
 
 func TestUpsertJobRejectsStatusRegression(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lens.db")
+	dbPath := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", dbPath, "")
 	if err != nil {
 		t.Fatal(err)
@@ -959,6 +1028,276 @@ func TestUpsertJobRejectsStatusRegression(t *testing.T) {
 	}
 	if regressed.Status != models.StatusCompleted || regressed.ID != job.ID {
 		t.Fatalf("expected completed retained, got %+v", regressed)
+	}
+}
+
+func TestListForgeTypeFilters(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "forge-filter.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	gitea, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeGitea, "Lab", "https://git.example.com", "1.0", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	github, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeGitHub, "GitHub", "https://api.github.com", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gRepo, err := st.UpsertRepository(ctx, gitea.ID, models.Repository{
+		ExternalID: 1, Owner: "org", Name: "gitea-repo", FullName: "org/gitea-repo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghRepo, err := st.UpsertRepository(ctx, github.ID, models.Repository{
+		ExternalID: 2, Owner: "org", Name: "gh-repo", FullName: "org/gh-repo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertPullRequest(ctx, gRepo.ID, models.PullRequest{
+		ExternalID: 1, Number: 1, Title: "gitea pr", State: "open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertPullRequest(ctx, ghRepo.ID, models.PullRequest{
+		ExternalID: 2, Number: 2, Title: "github pr", State: "open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertWorkflowRun(ctx, gRepo.ID, models.WorkflowRun{
+		ExternalID: 1, Name: "gitea-ci", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertWorkflowRun(ctx, ghRepo.ID, models.WorkflowRun{
+		ExternalID: 2, Name: "gh-ci", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	att, err := st.UpsertAttention(ctx, models.AttentionItem{
+		InstanceID: gitea.ID, RepoID: gRepo.ID, Type: "workflow_failure", Severity: "critical",
+		EntityType: "workflow_run", EntityID: 1, Title: "gitea fail", Fingerprint: "fp-gitea",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if att.ForgeType != models.ForgeTypeGitea || att.InstanceName != "Lab" {
+		t.Fatalf("attention forge fields = type=%q name=%q", att.ForgeType, att.InstanceName)
+	}
+	_, err = st.UpsertAttention(ctx, models.AttentionItem{
+		InstanceID: github.ID, RepoID: ghRepo.ID, Type: "workflow_failure", Severity: "critical",
+		EntityType: "workflow_run", EntityID: 2, Title: "gh fail", Fingerprint: "fp-gh",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repos, total, err := st.ListRepositories(ctx, store.ListRepositoriesOpts{
+		BootstrapAll: true, ForgeType: models.ForgeTypeGitHub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(repos) != 1 || repos[0].FullName != "org/gh-repo" {
+		t.Fatalf("repos forge filter: total=%d items=%v", total, repos)
+	}
+
+	prs, total, err := st.ListPullRequests(ctx, store.ListPRsOpts{
+		BootstrapAll: true, State: "open", ForgeType: models.ForgeTypeGitea,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(prs) != 1 || prs[0].Title != "gitea pr" {
+		t.Fatalf("prs forge filter: total=%d items=%v", total, prs)
+	}
+
+	runs, total, err := st.ListWorkflowRuns(ctx, store.ListRunsOpts{
+		BootstrapAll: true, ForgeType: models.ForgeTypeGitHub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(runs) != 1 || runs[0].Name != "gh-ci" {
+		t.Fatalf("runs forge filter: total=%d items=%v", total, runs)
+	}
+
+	items, total, err := st.ListAttention(ctx, store.ListAttentionOpts{
+		BootstrapAll: true, OpenOnly: true, ForgeType: models.ForgeTypeGitea,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Title != "gitea fail" {
+		t.Fatalf("attention forge filter: total=%d items=%v", total, items)
+	}
+	if items[0].ForgeType != models.ForgeTypeGitea || items[0].InstanceName != "Lab" {
+		t.Fatalf("list attention forge fields = %+v", items[0])
+	}
+
+	byInst, total, err := st.ListRepositories(ctx, store.ListRepositoriesOpts{
+		BootstrapAll: true, InstanceID: github.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(byInst) != 1 || byInst[0].FullName != "org/gh-repo" {
+		t.Fatalf("repos instance_id filter: total=%d items=%v", total, byInst)
+	}
+}
+
+func TestSearchMatchesFieldsAndACL(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "search.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceByURL(ctx, "lab", "https://git.example.com", "1.25.5", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	org, err := st.UpsertOrganization(ctx, inst.ID, models.Organization{
+		ExternalID: 7, Name: "acme-org", FullName: "Acme Org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 1, Owner: "acme-org", Name: "widget", FullName: "acme-org/widget",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 2, Owner: "other", Name: "secret", FullName: "other/secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE repositories SET org_id = ? WHERE id = ?`, org.ID, allowed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = st.UpsertPullRequest(ctx, allowed.ID, models.PullRequest{
+		ExternalID: 11, Number: 42, Title: "Fix widget crash", AuthorLogin: "alice",
+		SourceBranch: "fix/crash", TargetBranch: "main", State: "open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertPullRequest(ctx, hidden.ID, models.PullRequest{
+		ExternalID: 12, Number: 42, Title: "Hidden PR", AuthorLogin: "bob", State: "open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := st.UpsertWorkflowRun(ctx, allowed.ID, models.WorkflowRun{
+		ExternalID: 21, Name: "ci", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+		Branch: "main", CommitSHA: "abcdef0123456789", ActorLogin: "alice", WorkflowPath: ".gitea/workflows/ci.yaml",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertJob(ctx, allowed.ID, run.ID, models.Job{
+		ExternalID: 31, Name: "build-widget", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertAttention(ctx, models.AttentionItem{
+		InstanceID: inst.ID, RepoID: allowed.ID, Type: "workflow_failure", Severity: "critical",
+		EntityType: "workflow_run", EntityID: run.ID, Title: "Widget pipeline failed", Fingerprint: "fp-search-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertAttention(ctx, models.AttentionItem{
+		InstanceID: inst.ID, RepoID: hidden.ID, Type: "workflow_failure", Severity: "critical",
+		EntityType: "workflow_run", EntityID: 99, Title: "Secret pipeline failed", Fingerprint: "fp-search-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gid := int64(55)
+	user, err := st.UpsertGiteaUser(ctx, &inst.ID, models.User{GiteaUserID: &gid, Login: "searcher"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceUserRepoAccess(ctx, user.ID, []int64{allowed.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := st.Search(ctx, user.ID, false, "#42", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prs := res["pull_requests"].([]models.PullRequest)
+	if len(prs) != 1 || prs[0].Title != "Fix widget crash" {
+		t.Fatalf("PR number search: %+v", prs)
+	}
+
+	res, err = st.Search(ctx, user.ID, false, "alice", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prs = res["pull_requests"].([]models.PullRequest)
+	if len(prs) != 1 {
+		t.Fatalf("author search: %+v", prs)
+	}
+
+	res, err = st.Search(ctx, user.ID, false, "abcdef0", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := res["workflow_runs"].([]models.WorkflowRun)
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("SHA search: %+v", runs)
+	}
+
+	res, err = st.Search(ctx, user.ID, false, "build-widget", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs = res["workflow_runs"].([]models.WorkflowRun)
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("job name search: %+v", runs)
+	}
+
+	res, err = st.Search(ctx, user.ID, false, "Widget pipeline", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	atts := res["attention"].([]models.AttentionItem)
+	if len(atts) != 1 || atts[0].Title != "Widget pipeline failed" {
+		t.Fatalf("attention search: %+v", atts)
+	}
+
+	res, err = st.Search(ctx, user.ID, false, "acme", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgs := res["organizations"].([]models.Organization)
+	if len(orgs) != 1 || orgs[0].Name != "acme-org" {
+		t.Fatalf("org search: %+v", orgs)
+	}
+	repos := res["repositories"].([]models.Repository)
+	if len(repos) != 1 || repos[0].FullName != "acme-org/widget" {
+		t.Fatalf("repo ACL search: %+v", repos)
 	}
 }
 

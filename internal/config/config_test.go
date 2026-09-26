@@ -115,7 +115,7 @@ func TestValidateWebhookFailClosed(t *testing.T) {
 func TestValidateRejectsSkipSetupOnPublicURL(t *testing.T) {
 	cfg := Default()
 	cfg.Dev.AllowSkipSetup = true
-	cfg.Server.ExternalURL = "https://lens.example.com"
+	cfg.Server.ExternalURL = "https://gitseer.example.com"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected skip-setup rejected for public URL")
 	}

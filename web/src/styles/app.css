@@ -322,10 +322,31 @@ tbody tr:hover td {
   letter-spacing: 0.01em;
 }
 .badge--forge-gitea {
-  color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+  color: color-mix(in srgb, var(--accent) 90%, var(--fg));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
 }
 .badge--forge-github {
-  color: color-mix(in srgb, var(--fg) 80%, var(--muted));
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--fg) 28%, var(--line));
+  background: color-mix(in srgb, var(--fg) 8%, var(--bg-elevated));
+}
+.badge--forge-instance {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elevated));
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.forge-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
 }
 
 /* —— Buttons —— */
@@ -364,6 +385,16 @@ tbody tr:hover td {
   filter: brightness(1.06);
   background: var(--accent);
   color: var(--accent-ink);
+}
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+}
+.btn.danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+  background: var(--danger);
+  color: #fff;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -452,6 +483,96 @@ tbody tr:hover td {
 .forge-filter__chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* —— Settings forge instances —— */
+.instance-settings__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.instance-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.instance-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.instance-card__top {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+.instance-card__name {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+.instance-card__url {
+  font-size: var(--font-size-xs);
+  word-break: break-all;
+}
+.instance-card__meta {
+  font-size: var(--font-size-xs);
+}
+.instance-card__webhook {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: var(--font-size-xs);
+  margin-top: 0.25rem;
+}
+.instance-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+.forge-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+.forge-pick__btn {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.forge-pick__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.forge-pick__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.forge-pick__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .list-filter {
   display: flex;
@@ -763,6 +884,24 @@ tbody tr:hover td {
   gap: 0.35rem;
   max-width: 28rem;
 }
+.settings-form__field:has(.settings-form__inline) {
+  max-width: 36rem;
+}
+.settings-form__inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.settings-form__inline .password-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+.settings-form__inline > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .settings-form__field label {
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -836,6 +975,92 @@ tbody tr:hover td {
   margin: 0;
   font-size: var(--font-size-xs);
   color: var(--muted);
+}
+.settings-form__hint--stack {
+  display: grid;
+  gap: 0.35rem;
+}
+.settings-form__hint a.field-help-row__link {
+  font-size: inherit;
+}
+.field-help {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0;
+  padding-left: 0.85rem;
+}
+.field-help--two-col {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 1.25rem;
+  align-items: start;
+}
+@media (max-width: 40rem) {
+  .field-help--two-col {
+    grid-template-columns: 1fr;
+  }
+}
+.field-help-block {
+  display: grid;
+  gap: 0.3rem;
+}
+.field-help-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0;
+  padding-left: 0;
+}
+.field-help-row__link {
+  font-size: var(--font-size-xs);
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+.field-help-row__link:hover,
+.field-help-row__link:focus-visible {
+  color: var(--ink);
+}
+.field-help-row .info-tip {
+  cursor: pointer;
+}
+.field-help-row .info-tip__bubble {
+  display: none;
+}
+.field-help__perms {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.2rem;
+  list-style: disc;
+}
+.field-help__perms code,
+.field-help__perms strong {
+  font-size: 0.92em;
+}
+.pat-help__steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+.pat-help__steps ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.2rem;
+}
+.pat-help__steps code {
+  font-size: 0.92em;
+}
+.pat-help__note {
+  margin-top: var(--space-3);
+  padding-left: 0;
+}
+.modal-backdrop--stack {
+  z-index: 90;
 }
 .settings-form__error {
   margin: 0;
@@ -1228,6 +1453,9 @@ tbody tr:hover td {
   background: color-mix(in srgb, var(--ink) 35%, transparent);
   box-sizing: border-box;
 }
+.modal-backdrop--dialog {
+  z-index: 90;
+}
 .modal {
   width: min(28rem, 100%);
   max-height: min(90vh, 40rem);
@@ -1242,8 +1470,19 @@ tbody tr:hover td {
   gap: var(--space-4);
   box-sizing: border-box;
 }
+.modal--confirm {
+  width: min(24rem, 100%);
+}
 .modal--wide {
   width: min(36rem, 100%);
+}
+.modal--integration {
+  width: min(80vw, 100%);
+  max-height: min(90vh, 100%);
+}
+.modal--integration .settings-form__field,
+.modal--integration .password-input {
+  max-width: none;
 }
 .modal--probe {
   width: min(48rem, 100%);
@@ -1274,6 +1513,11 @@ tbody tr:hover td {
   padding-top: var(--space-3);
   border-top: 1px solid var(--line);
   flex-shrink: 0;
+}
+.modal__actions-note {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--font-size-xs);
 }
 .oauth-confirm-summary {
   margin: 0 0 var(--space-3);
@@ -2088,6 +2332,10 @@ td.empty {
     max-height: min(92vh, 100%);
     overflow: auto;
   }
+  .modal--integration {
+    width: 100%;
+    max-height: min(92vh, 100%);
+  }
   .probe-groups {
     grid-template-columns: 1fr;
     gap: var(--space-4);
@@ -2183,7 +2431,7 @@ td.empty {
   }
 }
 
-/* —— Lens application shell refresh ——
+/* —— GitSeer application shell refresh ——
    Do not bind these to :root — that stomps [data-theme="gruvbox"] /
    [data-theme="terminal"] (same specificity as :root on <html>).
    Light/dark only. */
@@ -2439,6 +2687,8 @@ td.empty {
 }
 .actions-popout {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   height: 100vh;
   padding: 12px;
@@ -2447,7 +2697,9 @@ td.empty {
 }
 .actions-popout__body {
   box-sizing: border-box;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -2506,6 +2758,9 @@ td.empty {
   white-space: nowrap;
 }
 .actions-flyout__run-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
@@ -2796,18 +3051,34 @@ td.empty {
   padding: 0;
 }
 .header-search__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin: 0;
   padding: 0.4rem 0.75rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--ink);
+  text-align: left;
   text-decoration: none;
+  font: inherit;
   font-size: 13px;
   line-height: 1.3;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.header-search__item > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .header-search__item:hover,
-.header-search__item:focus-visible {
+.header-search__item:focus-visible,
+.header-search__item.is-active {
   background: color-mix(in srgb, var(--ink) 6%, transparent);
   outline: none;
 }
@@ -2840,6 +3111,36 @@ td.empty {
   to { transform: rotate(360deg); }
 }
 [data-theme="terminal"] .app-header__sync.is-syncing .shell-icon { animation: none; }
+.sync-status-bar {
+  position: fixed;
+  z-index: 20;
+  bottom: 0;
+  left: 244px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 32px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent));
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.sync-status-bar .shell-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  animation: app-header-sync-spin 1s linear infinite;
+}
+[data-theme="terminal"] .sync-status-bar .shell-icon { animation: none; }
+.app-shell--rail-collapsed .sync-status-bar { left: 76px; }
+.content--syncing { padding-bottom: 68px; }
 .user-chip__avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 20%, var(--bg-elevated)); color: var(--accent); font-size: 10px; letter-spacing: .03em; flex: 0 0 auto; }
 .page-content { padding-top: 31px; }
 .topbar { align-items: center; margin-bottom: 26px; }
@@ -2906,6 +3207,12 @@ td.empty {
     max-height: min(50vh, calc(100vh - 11rem));
   }
   .content { padding: 0 18px 30px; }
+  .content--syncing { padding-bottom: 58px; }
+  .sync-status-bar,
+  .app-shell--rail-collapsed .sync-status-bar {
+    left: 0;
+    padding: 0 18px;
+  }
   .app-header { min-height: 58px; gap: 12px; }
   .header-search__flyout,
   .header-search__results { width: min(280px, calc(100vw - 9rem)); }

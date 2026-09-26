@@ -6,11 +6,11 @@ import (
 )
 
 func TestNewWebhookPreview(t *testing.T) {
-	p := NewWebhookPreview("https://lens.example.com/api/webhooks/gitea", "")
+	p := NewWebhookPreview("https://gitseer.example.com/api/webhooks/gitea", "")
 	if p.Type != "gitea" || !p.Active {
 		t.Fatalf("type/active = %s %v", p.Type, p.Active)
 	}
-	if p.Config["url"] != "https://lens.example.com/api/webhooks/gitea" {
+	if p.Config["url"] != "https://gitseer.example.com/api/webhooks/gitea" {
 		t.Fatalf("url = %q", p.Config["url"])
 	}
 	if p.Config["secret"] != "«generated on confirm»" {
@@ -19,7 +19,7 @@ func TestNewWebhookPreview(t *testing.T) {
 	if p.Config["is_system_webhook"] != "true" {
 		t.Fatal("expected system webhook")
 	}
-	for _, ev := range []string{"pull_request", "workflow_run", "workflow_job", "repository"} {
+	for _, ev := range []string{"pull_request", "pull_request_review", "workflow_run", "workflow_job", "repository", "status"} {
 		found := false
 		for _, e := range p.Events {
 			if e == ev {

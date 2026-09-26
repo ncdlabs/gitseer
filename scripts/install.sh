@@ -325,7 +325,7 @@ load_config_file() {
   set_if_empty DATABASE_PATH "$(yaml_get "$file" database_path)"
   set_if_empty DATABASE_DSN "$(yaml_get "$file" database_dsn)"
 
-  # Lens config.example.yaml shape
+  # GitSeer config.example.yaml shape
   set_if_empty GITEA_URL "$(yaml_get "$file" gitea url)"
   set_if_empty GITEA_TOKEN "$(yaml_get "$file" gitea token)"
   set_if_empty ALLOW_PRIVATE_NETWORK "$(yaml_get "$file" gitea allow_private_network)"
@@ -445,7 +445,7 @@ gather_interactive() {
   if [[ $NON_INTERACTIVE -eq 0 ]]; then
     prompt GITEA_URL "Gitea base URL (e.g. https://git.example.com)"
     prompt GITEA_TOKEN "Gitea API token" "" --secret
-    prompt SERVER_EXTERNAL_URL "Public Lens URL" "http://127.0.0.1:8090"
+    prompt SERVER_EXTERNAL_URL "Public GitSeer URL" "http://127.0.0.1:8090"
     prompt SERVER_LISTEN "Listen address" "0.0.0.0:8090"
     prompt OAUTH_CLIENT_ID "Gitea OAuth client ID (recommended)"
     prompt OAUTH_CLIENT_SECRET "Gitea OAuth client secret (optional for public PKCE)" "" --secret
@@ -477,7 +477,7 @@ gather_interactive() {
       fi
     fi
     if [[ -z "$START_AFTER" && $NO_START -eq 0 ]]; then
-      prompt START_AFTER "Start Lens after install (true|false)" "true"
+      prompt START_AFTER "Start GitSeer after install (true|false)" "true"
     fi
     if [[ -z "$INSTALL_UI" ]]; then
       prompt INSTALL_UI "Install Gitea UI nav links (true|false)" "false"

@@ -15,7 +15,7 @@ tolerations: []
 resources: {}
 env:
   GITSEER_SERVER_LISTEN: 0.0.0.0:8090
-  GITSEER_DATABASE_PATH: /data/lens.db
+  GITSEER_DATABASE_PATH: /data/gitseer.db
 secret:
   create: false
   existingSecret: ""

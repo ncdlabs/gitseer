@@ -1,4 +1,4 @@
-// Package models holds Lens domain types (no raw forge payloads).
+// Package models holds GitSeer domain types (no raw forge payloads).
 package models
 
 import "time"
@@ -43,13 +43,15 @@ type Capabilities struct {
 }
 
 type Organization struct {
-	ID         int64
-	InstanceID int64
-	ExternalID int64
-	Name       string
-	FullName   string
-	AvatarURL  string
-	SyncedAt   *time.Time
+	ID           int64      `json:"id"`
+	InstanceID   int64      `json:"instance_id"`
+	ExternalID   int64      `json:"external_id"`
+	Name         string     `json:"name"`
+	FullName     string     `json:"full_name"`
+	AvatarURL    string     `json:"avatar_url,omitempty"`
+	SyncedAt     *time.Time `json:"synced_at,omitempty"`
+	ForgeType    string     `json:"forge_type,omitempty"`
+	InstanceName string     `json:"instance_name,omitempty"`
 }
 
 type Repository struct {
@@ -67,6 +69,7 @@ type Repository struct {
 	Fork          bool       `json:"fork"`
 	HTMLURL       string     `json:"html_url"`
 	ForgeType     string     `json:"forge_type,omitempty"` // gitea | github; from instances join on list
+	InstanceName  string     `json:"instance_name,omitempty"`
 	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -106,6 +109,8 @@ type PullRequest struct {
 	RepoName         string     `json:"repo_name"`
 	RepoFull         string     `json:"repo_full"`
 	ForgeType        string     `json:"forge_type,omitempty"` // gitea | github; from instances join on list
+	InstanceID       int64      `json:"instance_id,omitempty"`
+	InstanceName     string     `json:"instance_name,omitempty"`
 }
 
 type Workflow struct {
@@ -156,6 +161,8 @@ type WorkflowRun struct {
 	RepoName           string     `json:"repo_name"`
 	RepoFull           string     `json:"repo_full"`
 	ForgeType          string     `json:"forge_type,omitempty"` // gitea | github; from instances join on list
+	InstanceID         int64      `json:"instance_id,omitempty"`
+	InstanceName       string     `json:"instance_name,omitempty"`
 }
 
 type AttentionItem struct {
@@ -176,6 +183,8 @@ type AttentionItem struct {
 	RepoName     string     `json:"repo_name"`
 	RepoFull     string     `json:"repo_full"`
 	HTMLURL      string     `json:"html_url,omitempty"`
+	ForgeType    string     `json:"forge_type,omitempty"`    // gitea | github; from instances join on list
+	InstanceName string     `json:"instance_name,omitempty"` // instances.name when joined
 }
 
 type Job struct {

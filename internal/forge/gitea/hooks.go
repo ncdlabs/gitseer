@@ -10,15 +10,17 @@ import (
 	"strings"
 )
 
-// DefaultWebhookEvents are the Gitea events Lens applies today.
+// DefaultWebhookEvents are the Gitea events GitSeer applies today.
 var DefaultWebhookEvents = []string{
 	"pull_request",
+	"pull_request_review",
 	"workflow_run",
 	"workflow_job",
 	"repository",
+	"status",
 }
 
-// WebhookPreview is the system hook Lens will create (or that the admin can paste).
+// WebhookPreview is the system hook GitSeer will create (or that the admin can paste).
 type WebhookPreview struct {
 	Type             string            `json:"type"`
 	Active           bool              `json:"active"`
@@ -73,7 +75,7 @@ func GenerateWebhookSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// EnsureSystemWebhook creates or updates a Lens system webhook at deliveryURL.
+// EnsureSystemWebhook creates or updates a GitSeer system webhook at deliveryURL.
 func (c *Client) EnsureSystemWebhook(ctx context.Context, deliveryURL, secret string) (*Hook, bool, error) {
 	deliveryURL = strings.TrimRight(strings.TrimSpace(deliveryURL), "/")
 	if deliveryURL == "" {

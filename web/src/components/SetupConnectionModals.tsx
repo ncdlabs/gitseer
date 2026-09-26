@@ -116,7 +116,7 @@ export function ConnectionCheckModal({
           <h2 id={titleId}>Connection Checks</h2>
           <p className="muted">
             {running
-              ? "Probing Gitea connectivity and token permissions…"
+              ? "Checking connectivity and token permissions…"
               : canContinue
                 ? "All required checks passed."
                 : "Fix failed checks, then try again."}
@@ -230,8 +230,8 @@ export function WebhookConfirmModal({
 
   const settingsHint =
     forgeLabel === "GitHub"
-      ? "Add this webhook in GitHub under Organization or Repository → Settings → Webhooks."
-      : "Create a system webhook in Gitea using the payload below (Site Administration → Webhooks).";
+      ? "Add it under Organization or Repository → Settings → Webhooks."
+      : "Create it under Site Administration → Webhooks using the payload below.";
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -240,8 +240,8 @@ export function WebhookConfirmModal({
           <h2 id={titleId}>{isManual ? `Add Webhook in ${forgeLabel}` : "Install System Webhook?"}</h2>
           <p className="muted">
             {isManual
-              ? `Lens generated and stored an HMAC secret. ${settingsHint}`
-              : `${forgeLabel} will POST live pull-request and Actions events to Lens. Without it, Lens relies on periodic sync only.`}
+              ? `GitSeer stored an HMAC secret. ${settingsHint}`
+              : `${forgeLabel} posts PR and Actions events to GitSeer. Without it, GitSeer relies on periodic sync.`}
           </p>
         </header>
         <pre className="webhook-preview mono" tabIndex={0} aria-label="Webhook payload">
@@ -249,7 +249,7 @@ export function WebhookConfirmModal({
         </pre>
         {!isManual && (
           <p className="settings-form__hint">
-            System hook on your {forgeLabel} instance. Secret is generated when you confirm.
+            Instance system hook. Secret is generated when you confirm.
           </p>
         )}
         {error && (
@@ -361,8 +361,8 @@ export function OAuthConfirmModal({
           <h2 id={titleId}>{isManual ? "Add OAuth App in Gitea" : "Set Up Gitea OAuth?"}</h2>
           <p className="muted">
             {isManual
-              ? "Create an OAuth2 application in Gitea, then paste the client ID and secret below. Bootstrap admin login still works without OAuth."
-              : "OAuth lets users sign in with their Gitea accounts. You can create the app automatically, configure it yourself, or skip and stay on bootstrap admin only."}
+              ? "Create an OAuth2 app in Gitea, then paste the client ID and secret. Bootstrap admin login works without OAuth."
+              : "Lets users sign in with Gitea. Create the app automatically, configure it yourself, or skip for bootstrap admin only."}
           </p>
         </header>
 

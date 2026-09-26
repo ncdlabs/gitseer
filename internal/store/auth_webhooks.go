@@ -113,6 +113,41 @@ WHERE id=?`, nullInt64(instanceID), login, u.Email, u.DisplayName, u.AvatarURL, 
 		return nil, err
 	}
 
+	// Re-bind orphaned users whose instance was deleted (instance_id SET NULL).
+	if instanceID != nil {
+		if orphan, err := s.getUserByGiteaUID(ctx, nil, *u.GiteaUserID); err == nil {
+			if orphan.Login != login {
+				if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != orphan.ID {
+					return nil, ErrLoginConflict
+				} else if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+					return nil, oerr
+				}
+			}
+			_, err := s.exec(ctx, `
+UPDATE users SET instance_id=?, login=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, nullInt64(instanceID), login, u.Email, u.DisplayName, u.AvatarURL, now, orphan.ID)
+			if err != nil {
+				return nil, err
+			}
+			return s.GetUserByID(ctx, orphan.ID)
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if existing, err := s.getUserByLogin(ctx, login); err == nil {
+			if existing.InstanceID == nil && existing.GiteaUserID != nil && *existing.GiteaUserID == *u.GiteaUserID && !existing.IsBootstrapAdmin {
+				_, err := s.exec(ctx, `
+UPDATE users SET instance_id=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, nullInt64(instanceID), u.Email, u.DisplayName, u.AvatarURL, now, existing.ID)
+				if err != nil {
+					return nil, err
+				}
+				return s.GetUserByID(ctx, existing.ID)
+			}
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+
 	if existing, err := s.getUserByLogin(ctx, login); err == nil {
 		// Login taken by a non-bootstrap row with a different Gitea id.
 		if existing.GiteaUserID != nil && *existing.GiteaUserID != *u.GiteaUserID {
@@ -236,7 +271,7 @@ ON CONFLICT(user_id) DO UPDATE SET
 	return err
 }
 
-// UserTokenRow is the encrypted OAuth token material for a Lens user.
+// UserTokenRow is the encrypted OAuth token material for a GitSeer user.
 type UserTokenRow struct {
 	AccessCipher  string
 	RefreshCipher string

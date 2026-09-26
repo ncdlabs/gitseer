@@ -40,7 +40,7 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 - Do not add Redis for V1 (PRD ADR-011).
 - Do not use WebSockets unless SSE is proven insufficient (PRD §24).
 - Do not fork or patch Gitea source.
-- Do not require per-repository Lens config files.
+- Do not require per-repository GitSeer config files.
 
 ---
 
@@ -56,16 +56,16 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 | --- | --- | --- |
 | N1 | External companion; no Gitea fork / no Gitea source edits | §18, ADR-001 |
 | N2 | Zero required repository configuration | §5, ADR-004 |
-| N3 | Gitea is system of record; Lens caches/indexes | §5, ADR-002 |
+| N3 | Gitea is system of record; GitSeer caches/indexes | §5, ADR-002 |
 | N4 | Webhooks + periodic reconciliation | §26, ADR-003 |
-| N5 | Gitea OAuth/OIDC identity; no Lens passwords | §19, ADR-005 |
+| N5 | Gitea OAuth/OIDC identity; no GitSeer passwords | §19, ADR-005 |
 | N6 | Server-side per-user repository authorization (not client filter) | §20, ADR-006 |
 | N7 | Aggregate counters/search must not leak hidden repos | §20 |
 | N8 | Go backend + React/TS frontend | §24, ADR-007/008 |
 | N9 | SQLite default; PostgreSQL supported | §24, ADR-009/010 |
 | N10 | No Redis requirement for V1 | ADR-011 |
 | N11 | Workflow topology from YAML when runtime data insufficient | ADR-012 |
-| N12 | API/UI consume Lens models, never raw Gitea payloads | §25, ADR-013 |
+| N12 | API/UI consume GitSeer models, never raw Gitea payloads | §25, ADR-013 |
 | N13 | Gitea UI via `extra_links.tmpl` / `extra_tabs.tmpl` only; preserve admin customizations | §18, ADR-014 |
 | N14 | No ncdLabs-hosted dependency; telemetry off by default | §39, ADR-015 |
 | N15 | Logs fetched on demand; not persisted by default | §43 |
@@ -91,7 +91,7 @@ Browser (React SPA, embedded in binary)
         │  REST /api/v1 + SSE /api/v1/events
         ▼
 ┌───────────────────────────────────────────┐
-│  GitSeer / lens (Go)                      │
+│  GitSeer / gitseer (Go)                      │
 │  HTTP API · Auth · Authz · Realtime SSE   │
 │  Sync · Webhooks · Attention · Workflows  │
 │  Forge adapter boundary                   │
@@ -112,7 +112,7 @@ Browser (React SPA, embedded in binary)
 | Component | Responsibility |
 | --- | --- |
 | `cmd/gitseer` | Process entry: config, DB, HTTP, workers |
-| Gitea adapter | Version/capability probe; translate Gitea ↔ Lens models |
+| Gitea adapter | Version/capability probe; translate Gitea ↔ GitSeer models |
 | Synchronizer | Initial import, incremental sync, reconciliation loop |
 | Webhook engine | Validate, dedupe, enqueue, idempotent apply |
 | Attention engine | Rule eval open/update/resolve |
@@ -145,7 +145,7 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 | ADR-019 | **Config:** YAML file + env overrides (`GITSEER_*`); secrets via `_FILE` suffix pattern | Foundation |
 | ADR-020 | **Frontend:** Vite + React 18/19 + TS; TanStack Query + TanStack Table; React Flow for DAGs; CSS variables + small primitives (no heavy UI kit) | Foundation |
 | ADR-021 | **Session store:** server-side sessions in DB (SQLite/PG); signed cookie session ID; no JWT-as-session for V1 | Auth phase |
-| ADR-022 | **Credential encryption:** AES-256-GCM with `GITSEER_ENCRYPTION_KEY` (32-byte); rotate via re-encrypt command later | Auth/sync |
+| ADR-022 | **Credential encryption:** AES-256-GCM; passphrase via `GITSEER_ENCRYPTION_KEY` (min 16 at config load; wizard paste min 24) hashed with SHA-256 to a 32-byte AES key; rotate via re-encrypt command later | Auth/sync |
 | ADR-023 | **User repo ACL cache:** table `user_repository_access` refreshed on login + periodic + webhook-driven invalidation; **every** list/aggregate query joins/filters by it | Authz — critical |
 | ADR-024 | **Webhook processing:** accept → persist raw envelope → `202`/`200` quickly → in-process worker pool (no Redis) | Sync |
 | ADR-025 | **SSE:** one stream per authenticated session; events are opaque entity refs (`type`, `id`, `repo_id`); clients refetch via Query | Realtime |
@@ -160,7 +160,7 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 
 ## 5. Data Model
 
-Normalized Lens models (PRD §29). Gitea IDs stored as `external_id` separately from Lens UUIDs/`INTEGER` PKs.
+Normalized GitSeer models (PRD §29). Gitea IDs stored as `external_id` separately from GitSeer UUIDs/`INTEGER` PKs.
 
 ### Core tables (proposed)
 
@@ -345,7 +345,7 @@ UI disables Runners / step views / etc. with explanation when false (PRD §5).
 1. Middleware loads `user_id` from session.
 2. Repository visibility = membership in `user_repository_access` for that user (refreshed on login, on schedule, and when Gitea permission-related webhooks arrive if available).
 3. **All** SQL for list/detail/summary/search/attention/SSE payloads must constrain `repo_id IN (SELECT repo_id FROM user_repository_access WHERE user_id = ?)`.
-4. Direct object access by Lens ID: join through access table; return **404** (not 403) for hidden resources to reduce enumeration.
+4. Direct object access by GitSeer ID: join through access table; return **404** (not 403) for hidden resources to reduce enumeration.
 5. Summary counters computed only over accessible repos.
 6. Never trust query params like `owner`/`repo` without authz check.
 7. Admin “see all” only if explicitly modeled later; V1 = Gitea visibility only.
@@ -409,7 +409,7 @@ Requirements:
 ### Hard cases
 
 - **Missed webhooks / downtime:** reconciliation heals  
-- **Renames/transfers:** match `external_id`; update `owner/name`; keep Lens PK stable  
+- **Renames/transfers:** match `external_id`; update `owner/name`; keep GitSeer PK stable  
 - **Deletes:** soft-delete repo; cascade hide from UI; purge per retention  
 - **Permission loss:** remove from user ACL; sync account may still see — user must not  
 - **Out-of-order webhooks:** compare `updated_at` / run attempt / monotonic fields; ignore stale  
@@ -486,7 +486,7 @@ Also:
 | `/` or `/attention` | Attention queue + summary counters |
 | `/pulls`, `/pulls/:owner/:repo/:number` | Table + detail tabs |
 | `/pipelines`, `/pipelines/:owner/:repo/:run` | Runs table + DAG |
-| `/repositories`, `/repositories/:owner/:repo` | Health rows + Repository Lens |
+| `/repositories`, `/repositories/:owner/:repo` | Health rows + Repository page |
 | `/runners` | Empty/disabled state if no capability |
 | `/activity` | Event stream + SSE invalidation |
 | `/settings/*` | Instance, integration, auth, retention |
@@ -584,14 +584,14 @@ gitseer uninstall-ui --gitea-custom $GITEA_CUSTOM
 
 ### Rules (PRD §18)
 
-- Detect existing files; **never silent overwrite** of non-Lens content  
-- Insert/replace only within Lens markers  
-- If file exists without markers, append Lens block or abort with instructions  
-- Uninstall removes only Lens-marked sections  
+- Detect existing files; **never silent overwrite** of non-GitSeer content  
+- Insert/replace only within GitSeer markers  
+- If file exists without markers, append GitSeer block or abort with instructions  
+- Uninstall removes only GitSeer-marked sections  
 
-### Repository Lens URL
+### Repository page URL
 
-`/repositories/{owner}/{repo}` (and `/lens/...` alias if reverse-proxied under Gitea path).
+`/repositories/{owner}/{repo}` (and `/gitseer/...` alias if reverse-proxied under Gitea path).
 
 ---
 
@@ -647,7 +647,7 @@ First-run wizard persists config into DB/`/data/config.yaml` as designed in foun
 | DB | SQLite + Postgres suite |
 | OAuth | Mock OIDC server or Gitea oauth in compose |
 | Authz isolation | Two users, overlapping/non-overlapping repos; counters |
-| Playwright | Login, attention, PR filter, pipeline DAG, logs, repo lens |
+| Playwright | Login, attention, PR filter, pipeline DAG, logs, repo page |
 | Compat matrix | CI against supported Gitea versions (declare after spike) |
 
 ---
@@ -712,7 +712,7 @@ Minor unknowns must not stall M0–M2.
 
 ### M0 — Repository and architecture baseline
 
-- **Scope:** Go module, cmd skeleton, config, logging, chi router, health, embed placeholder, Vite React shell, Makefile/task, CI lint stub, LICENSE/README draft, `compose` for Lens-only  
+- **Scope:** Go module, cmd skeleton, config, logging, chi router, health, embed placeholder, Vite React shell, Makefile/task, CI lint stub, LICENSE/README draft, `compose` for GitSeer-only  
 - **Key paths:** `cmd/gitseer`, `internal/config`, `internal/httpapi` (or `internal/server`), `web/`, `Dockerfile`, `.github/workflows/ci.yaml`  
 - **Deps:** none  
 - **Tests:** config load unit tests; health handler test  
@@ -776,11 +776,11 @@ Minor unknowns must not stall M0–M2.
 
 ### M8 — Gitea native integration
 
-- **Scope:** install-ui/uninstall-ui, extra_links/tabs, Repository Lens entry, subpath docs/tests  
+- **Scope:** install-ui/uninstall-ui, extra_links/tabs, Repository page entry, subpath docs/tests  
 - **Key paths:** `integrations/gitea`, `cmd/gitseer` subcommands  
 - **Deps:** M5  
 - **Tests:** installer dry-run on sample custom dir with pre-existing tmpl  
-- **Exit:** markers preserve admin content; tab links to Lens  
+- **Exit:** markers preserve admin content; tab links to GitSeer  
 
 ### M9 — Packaging and deployment
 
@@ -917,7 +917,7 @@ Dependencies noted as `(needs: N)`.
 45. Setup wizard API + UI (connect, validate, OAuth, webhook, history depth).  
 46. Subpath/`external_url` middleware; asset base path; proxy header tests.  
 47. `install-ui` / `uninstall-ui` with marker-safe tmpl edits.  
-48. Repository Lens page polish + Gitea tab link.  
+48. Repository page page polish + Gitea tab link.  
 49. Retention job for runs/webhooks/attention history.  
 50. Prometheus `/metrics`.  
 51. PostgreSQL migrations parity + CI job.  
@@ -934,7 +934,7 @@ Dependencies noted as `(needs: N)`.
 **Goal:** smallest vertical slice that proves the architecture.
 
 ```text
-Lens boots
+GitSeer boots
 → connects to Gitea
 → discovers repositories
 → stores normalized repository state
@@ -974,8 +974,8 @@ Lens boots
 
 1. `podman compose up` (or local `go run`) serves UI on `:8090`.  
 2. With `GITSEER_GITEA_URL` + token, operator triggers sync.  
-3. DB contains normalized rows (Lens IDs ≠ only Gitea IDs).  
-4. UI shows repository list from Lens API, not direct browser→Gitea calls.  
+3. DB contains normalized rows (GitSeer IDs ≠ only Gitea IDs).  
+4. UI shows repository list from GitSeer API, not direct browser→Gitea calls.  
 5. Health endpoints respond; logs are JSON without secrets.  
 6. No Redis, no WebSockets, no Gitea source changes.
 

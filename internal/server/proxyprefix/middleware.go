@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Middleware strips PathPrefix derived from server.external_url (e.g. "/lens").
+// Middleware strips PathPrefix derived from server.external_url (e.g. "/gitseer").
 // Client-supplied X-Forwarded-Prefix is ignored to avoid path confusion attacks.
 func Middleware(configuredPrefix string) func(http.Handler) http.Handler {
 	configuredPrefix = strings.TrimRight(configuredPrefix, "/")

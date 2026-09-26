@@ -167,3 +167,39 @@ func TestGitHubWebhookAcceptsSignedDelivery(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestGitHubWebhookRejectsUnsignedWhenGlobalAllowUnsigned(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "gh-wh-unsigned.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	// GitHub instance with no ciphertext and allow_unsigned=false.
+	inst, err := st.UpsertInstanceSecrets(ctx, store.InstanceSecrets{
+		Name:                  "GitHub",
+		ForgeType:             models.ForgeTypeGitHub,
+		BaseURL:               "https://api.github.com",
+		AllowUnsignedWebhooks: false,
+		SetFlags:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProcessor(st, nil, nil, nil)
+	p.SetSecret("legacy-gitea-secret")
+	p.SetAllowUnsigned(true) // must not leak onto instance-scoped GitHub route
+
+	body := []byte(`{"action":"opened"}`)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/webhooks/github/%d", inst.ID), bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-GitHub-Delivery", "deliv-unsigned")
+	rr := httptest.NewRecorder()
+	p.HandleGitHubHTTPForInstance(rr, req, inst.ID)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s want 401", rr.Code, rr.Body.String())
+	}
+}

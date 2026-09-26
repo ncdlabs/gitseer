@@ -1,4 +1,4 @@
-// Package store provides SQL persistence for Lens models.
+// Package store provides SQL persistence for GitSeer models.
 package store
 
 import (
@@ -58,6 +58,17 @@ func rebindPostgres(query string) string {
 
 func (s *Store) exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return s.db.ExecContext(ctx, s.sql(query), args...)
+}
+
+// isUniqueViolation reports whether err is a UNIQUE constraint failure (SQLite or Postgres).
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") ||
+		strings.Contains(msg, "unique violation") ||
+		strings.Contains(msg, "duplicate key")
 }
 
 func (s *Store) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -172,6 +183,31 @@ func (s *Store) GetPrimaryInstance(ctx context.Context) (*models.Instance, error
 	return inst, err
 }
 
+// GetPrimaryGiteaInstance returns the Gitea instance preferred for OAuth and legacy
+// webhook fallback: OAuth client id+secret configured first, else lowest id.
+func (s *Store) GetPrimaryGiteaInstance(ctx context.Context) (*models.Instance, error) {
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
+WHERE forge_type = ?
+  AND TRIM(COALESCE(oauth_client_id, '')) != ''
+  AND TRIM(COALESCE(oauth_client_secret_ciphertext, '')) != ''
+ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitea)
+	inst, err := scanInstance(row)
+	if err == nil {
+		return inst, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	row = s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
+WHERE forge_type = ? OR forge_type = '' OR forge_type IS NULL
+ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitea)
+	inst, err = scanInstance(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return inst, err
+}
+
 func scanInstance(row scanner) (*models.Instance, error) {
 	var inst models.Instance
 	var created, updated string
@@ -199,6 +235,16 @@ func normalizeForgeType(ft string) string {
 		return models.ForgeTypeGitHub
 	default:
 		return models.ForgeTypeGitea
+	}
+}
+
+// parseListForgeType returns a forge_type filter value, or empty when unset/invalid (no filter).
+func parseListForgeType(ft string) string {
+	switch strings.ToLower(strings.TrimSpace(ft)) {
+	case models.ForgeTypeGitea, models.ForgeTypeGitHub:
+		return strings.ToLower(strings.TrimSpace(ft))
+	default:
+		return ""
 	}
 }
 
@@ -261,11 +307,50 @@ FROM repositories WHERE id = ?`, id)
 }
 
 func (s *Store) GetRepositoryByOwnerName(ctx context.Context, owner, name string) (*models.Repository, error) {
-	row := s.queryRow(ctx, `
+	return s.GetRepositoryByOwnerNameInInstance(ctx, owner, name, 0)
+}
+
+// ErrAmbiguousRepository is returned when owner/name matches multiple alive repos
+// across instances and no instance_id was provided.
+var ErrAmbiguousRepository = fmt.Errorf("repository owner/name is ambiguous across forge instances")
+
+// GetRepositoryByOwnerNameInInstance looks up an alive repo by owner/name.
+// When instanceID > 0, the lookup is scoped to that instance.
+// When instanceID is 0 and multiple instances share the same owner/name, returns ErrAmbiguousRepository.
+func (s *Store) GetRepositoryByOwnerNameInInstance(ctx context.Context, owner, name string, instanceID int64) (*models.Repository, error) {
+	if instanceID > 0 {
+		row := s.queryRow(ctx, `
 SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
        private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-FROM repositories WHERE owner = ? AND name = ? AND deleted_at IS NULL`, owner, name)
-	return scanRepo(row)
+FROM repositories WHERE instance_id = ? AND owner = ? AND name = ? AND deleted_at IS NULL`, instanceID, owner, name)
+		return scanRepo(row)
+	}
+	rows, err := s.query(ctx, `
+SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
+       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
+FROM repositories WHERE owner = ? AND name = ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 2`, owner, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var found *models.Repository
+	for rows.Next() {
+		repo, err := scanRepo(rows)
+		if err != nil {
+			return nil, err
+		}
+		if found != nil {
+			return nil, ErrAmbiguousRepository
+		}
+		found = repo
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, sql.ErrNoRows
+	}
+	return found, nil
 }
 
 func scanRepo(row scanner) (*models.Repository, error) {
@@ -300,10 +385,11 @@ func scanRepoWithForge(row scanner) (*models.Repository, error) {
 	var private, archived, empty, fork int
 	var lastSynced, deleted, created, updated sql.NullString
 	var forgeType string
+	var instanceName string
 	if err := row.Scan(
 		&r.ID, &r.InstanceID, &orgID, &r.ExternalID, &r.Owner, &r.Name, &r.FullName, &r.DefaultBranch,
 		&private, &archived, &empty, &fork, &r.HTMLURL, &lastSynced, &deleted, &created, &updated,
-		&forgeType,
+		&forgeType, &instanceName,
 	); err != nil {
 		return nil, err
 	}
@@ -319,6 +405,7 @@ func scanRepoWithForge(row scanner) (*models.Repository, error) {
 	if r.ForgeType == "" {
 		r.ForgeType = models.ForgeTypeGitea
 	}
+	r.InstanceName = strings.TrimSpace(instanceName)
 	r.LastSyncedAt = nullTime(lastSynced)
 	r.DeletedAt = nullTime(deleted)
 	r.CreatedAt, _ = parseTime(created.String)
@@ -328,7 +415,8 @@ func scanRepoWithForge(row scanner) (*models.Repository, error) {
 
 type ListRepositoriesOpts struct {
 	InstanceID     int64
-	UserID         int64 // when >0, join user_repository_access (unless BootstrapAllowAll)
+	ForgeType      string // gitea | github; empty = all
+	UserID         int64  // when >0, join user_repository_access (unless BootstrapAllowAll)
 	BootstrapAll   bool
 	Query          string
 	Limit          int
@@ -356,6 +444,11 @@ func (s *Store) ListRepositories(ctx context.Context, opts ListRepositoriesOpts)
 		join = "INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
 		args = append([]any{opts.UserID}, args...)
 	}
+	forgeType := parseListForgeType(opts.ForgeType)
+	if forgeType != "" {
+		where = append(where, "COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea') = ?")
+		args = append(args, forgeType)
+	}
 	if q := strings.TrimSpace(opts.Query); q != "" {
 		if like := likePattern(q); like != "" {
 			where = append(where, "(r.full_name LIKE ? OR r.owner LIKE ? OR r.name LIKE ?)")
@@ -363,18 +456,19 @@ func (s *Store) ListRepositories(ctx context.Context, opts ListRepositoriesOpts)
 		}
 	}
 	clause := strings.Join(where, " AND ")
+	instJoin := " LEFT JOIN instances i ON i.id = r.instance_id"
 
 	var total int
-	countSQL := `SELECT COUNT(*) FROM repositories r ` + join + ` WHERE ` + clause
+	countSQL := `SELECT COUNT(*) FROM repositories r ` + join + instJoin + ` WHERE ` + clause
 	if err := s.queryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	listJoin := join + " LEFT JOIN instances i ON i.id = r.instance_id"
+	listJoin := join + instJoin
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := s.query(ctx, `
 SELECT r.id, r.instance_id, r.org_id, r.external_id, r.owner, r.name, r.full_name, r.default_branch,
        r.private, r.archived, r.empty, r.fork, r.html_url, r.last_synced_at, r.deleted_at, r.created_at, r.updated_at,
-       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea')
+       COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), COALESCE(i.name, '')
 FROM repositories r `+listJoin+`
 WHERE `+clause+`
 ORDER BY r.full_name ASC

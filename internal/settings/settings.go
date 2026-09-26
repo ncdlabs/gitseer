@@ -1,4 +1,4 @@
-// Package settings holds runtime Lens configuration overrides persisted in SQLite/Postgres.
+// Package settings holds runtime GitSeer configuration overrides persisted in SQLite/Postgres.
 package settings
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/store"
 )
 
-// Values are the user-editable Lens settings (non-secret).
+// Values are the user-editable GitSeer settings (non-secret).
 type Values struct {
 	InstanceName              string `json:"instance_name"`
 	SyncHistoryDays           int    `json:"sync_history_days"`
@@ -121,10 +121,13 @@ type Manager struct {
 	// Last known GitHub instance base URL (normalized) for upsert after URL changes.
 	githubInstanceURL string
 
-	encKey  []byte
-	st      *store.Store
-	onInteg OnIntegrationChange
-	onExt   OnExternalURLChange
+	encKey     []byte
+	encSource  string
+	encKeyPath string
+	st         *store.Store
+	onInteg    OnIntegrationChange
+	onExt      OnExternalURLChange
+	onEnc      OnEncryptionChange
 }
 
 // New builds a manager seeded from config defaults (before DB load).
@@ -160,21 +163,19 @@ func New(cfg config.Config, st *store.Store) *Manager {
 		AllowPrivateNetwork:   cfg.GitHub.AllowPrivateNetwork,
 		AllowUnsignedWebhooks: cfg.GitHub.AllowUnsignedWebhooks,
 	}
-	var encKey []byte
-	if cfg.Auth.EncryptionKey != "" {
-		k, err := gitseercrypto.KeyFromString(cfg.Auth.EncryptionKey)
-		if err != nil {
-			// Invalid keys must not silently disable encryption (fail closed at Load/Validate).
-			encKey = nil
-		} else {
+	encKey, encSource := loadKeyFromConfig(cfg)
+	encKeyPath := DefaultEncryptionKeyPath(cfg)
+	if encKey == nil {
+		if k, ok := loadKeyFromFile(encKeyPath); ok {
 			encKey = k
+			encSource = EncryptionSourceFile
 		}
 	}
 	return &Manager{
 		base: base, cur: base,
 		baseInteg: baseInteg, integ: baseInteg,
 		baseGitHub: baseGitHub, github: baseGitHub,
-		encKey: encKey, st: st,
+		encKey: encKey, encSource: encSource, encKeyPath: encKeyPath, st: st,
 	}
 }
 
@@ -185,7 +186,7 @@ func (m *Manager) SetOnIntegrationChange(fn OnIntegrationChange) {
 	m.onInteg = fn
 }
 
-// SetOnExternalURLChange registers a live-apply callback for the public Lens URL.
+// SetOnExternalURLChange registers a live-apply callback for the public GitSeer URL.
 func (m *Manager) SetOnExternalURLChange(fn OnExternalURLChange) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -462,7 +463,7 @@ func (m *Manager) Get() Values {
 	return out
 }
 
-// ExternalURL returns the effective public Lens URL (DB override or config).
+// ExternalURL returns the effective public GitSeer URL (DB override or config).
 func (m *Manager) ExternalURL() string {
 	return strings.TrimRight(strings.TrimSpace(m.Get().ServerExternalURL), "/")
 }
@@ -919,7 +920,11 @@ func (m *Manager) open(stored string) (string, error) {
 		if gitseercrypto.LooksLikeCiphertext(stored) {
 			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
 		}
-		// No key: treat as legacy plaintext row (pre-encryption installs).
+		// No key: only accept obvious legacy plaintext (non-base64). Ambiguous
+		// base64 blobs require the encryption key rather than fail-open as tokens.
+		if gitseercrypto.LooksLikeBase64Blob(stored) {
+			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
+		}
 		return stored, nil
 	}
 	pt, err := gitseercrypto.Decrypt(m.encKey, stored)

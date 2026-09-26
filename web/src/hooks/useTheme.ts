@@ -37,9 +37,9 @@ function isManualOverride(): boolean {
 }
 
 /**
- * Theme preference: if the user has not picked a Lens theme manually, apply a
+ * Theme preference: if the user has not picked a GitSeer theme manually, apply a
  * mapped Gitea default (light/dark/auto). Custom Gitea themes fail closed —
- * leave Lens on system / local choice.
+ * leave GitSeer on system / local choice.
  */
 export function useTheme(giteaTheme?: Theme | null) {
   const [theme, setThemeState] = useState<Theme>(() => {

@@ -38,7 +38,7 @@ Repo names, authors, and local account labels in these shots are substituted (`o
 
 ### Dashboard Themes
 
-Lens ships five theme options. System follows the OS preference (shown here resolving to dark).
+GitSeer ships five theme options. System follows the OS preference (shown here resolving to dark).
 
 | Light | Dark |
 |-------|------|
@@ -59,8 +59,8 @@ Lens ships five theme options. System follows the OS preference (shown here reso
 - **Dashboard** — time-scoped summary and trends (Now / 1 / 7 / 30 / 90 days)
 - **Attention** — discrete rules for CI failures, review waits, long-running runs, merge conflicts, and more
 - **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
-- **Setup wizard** — forge picker (Gitea / GitHub; GitLab & Bitbucket Coming Soon) → Connect → Validate → Finish
-- **Settings** — runtime preferences and dual Gitea + GitHub integration (DB-backed secrets are write-only)
+- **Setup wizard** — Prepare (public URL + encryption key) → forge picker (Gitea / GitHub; GitLab & Bitbucket Coming Soon) → Connect → Validate → Finish
+- **Settings** — runtime preferences and multi-instance Gitea + GitHub integration (DB-backed secrets are write-only; instance CRUD is bootstrap-admin)
 - **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
 - **Ops** — Prometheus `/metrics` (session or Bearer token), retention purge, SQLite by default (Postgres experimental)
 
@@ -88,10 +88,10 @@ Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer o
 
 Goals:
 1. Clone the repo if needed, then run the guided installer (./scripts/install.sh or make install). Prefer Compose via Podman (`podman compose`); fall back to Docker Compose or `--method binary` if Compose is unavailable.
-2. Collect or confirm: Gitea base URL, Gitea API token (repo/PR/Actions read), Lens public URL (server.external_url), and a bootstrap admin password. OAuth client id/secret are optional — the in-app Setup wizard can create or paste them later.
-3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set (required at startup). Use GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true only for private/lab Gitea URLs.
-4. Start Lens, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Connect → Validate → Finish), sign in, and click Sync now.
-5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (Gitea system webhook, OAuth redirect URI, optional `gitseer install-ui`).
+2. Collect or confirm: forge plan (Gitea and/or GitHub), Gitea base URL + API token when using Gitea, optional GitHub URL + PAT, GitSeer public URL (server.external_url), bootstrap admin password, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
+3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for GitHub-only use Compose/binary + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
+4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click Sync now.
+5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (per-instance webhooks, OAuth redirect URI, optional `gitseer install-ui`).
 
 Constraints:
 - Do not commit secrets, .env, config.yaml, or install.yaml.
@@ -100,17 +100,20 @@ Constraints:
 - Ask before destructive changes or removing existing services.
 
 My values (replace or leave blank to prompt me):
-- Gitea URL: [https://git.example.com]
+- Gitea URL: [https://git.example.com or blank for GitHub-only]
 - Gitea token: [paste or point to a secret]
-- Lens public URL: [http://127.0.0.1:8090]
+- GitHub URL: [https://github.com or blank]
+- GitHub PAT: [paste or blank]
+- GitSeer public URL: [http://127.0.0.1:8090]
 - Bootstrap password: [generate a strong one if blank]
+- Encryption key: [generate in Prepare | paste ≥24 chars | env]
 - Install method: [compose | binary]
-- Private/lab Gitea network: [yes | no]
+- Private/lab forge network: [yes | no]
 ```
 
 ### Guided installer (recommended)
 
-You need a Gitea URL and API token. OAuth can be created in the setup wizard or beforehand.
+You need a Gitea URL and API token for the guided installer (add GitHub later in Settings, or use Compose/binary + `/setup` for GitHub-only). OAuth can be created in the setup wizard or beforehand.
 
 ```bash
 ./scripts/install.sh
@@ -124,9 +127,9 @@ cp install.example.yaml install.yaml   # fill in secrets
 ./scripts/install.sh --config install.yaml --non-interactive
 ```
 
-The installer writes gitignored `.env` + `config.yaml`, checks dependencies, then starts Lens (Compose by default; `--method binary` optional).
+The installer writes gitignored `.env` + `config.yaml`, checks dependencies, then starts GitSeer (Compose by default; `--method binary` optional).
 
-Open the printed URL (default **http://127.0.0.1:8090**). If setup is incomplete, the **Setup** wizard walks Connect → Validate → Finish. After the first admin login, use **Sync now** so repositories exist before other users refresh access.
+Open the printed URL (default **http://127.0.0.1:8090**). If setup is incomplete, the **Setup** wizard walks Prepare → Choose Forge → Connect → Validate → Finish. After the first admin login, use **Sync now** so repositories exist before other users refresh access.
 
 ### Local development
 
@@ -151,10 +154,14 @@ make frontend && make build-go
 ```bash
 export GITSEER_GITEA_URL='https://git.example.com'
 export GITSEER_GITEA_TOKEN='your-gitea-api-token'
-export GITSEER_WEBHOOK_SECRET='replace-me'          # required when URL is set
+export GITSEER_WEBHOOK_SECRET='replace-me'          # required when Gitea URL is set
+# export GITSEER_GITHUB_URL='https://github.com'
+# export GITSEER_GITHUB_TOKEN='your-github-pat'
+# export GITSEER_GITHUB_WEBHOOK_SECRET='replace-me'  # required when GitHub URL is set
 export GITSEER_SERVER_EXTERNAL_URL='http://127.0.0.1:8090'
 export GITSEER_AUTH_OAUTH_CLIENT_ID='your-oauth-client-id'
 export GITSEER_AUTH_BOOTSTRAP_PASSWORD='change-me'  # optional first-run / lab
+# export GITSEER_ENCRYPTION_KEY='…'                  # or generate in /setup Prepare
 # export GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true   # private/lab Gitea URLs
 
 podman compose -f compose.yaml up --build
@@ -177,12 +184,12 @@ Defaults live in `config.example.yaml`. Environment overrides use the `GITSEER_*
 
 Important:
 
-- Set `server.external_url` to the public URL (including subpath). Lens strips only that configured prefix — not client `X-Forwarded-Prefix`.
-- When `gitea.url` is set, `GITSEER_WEBHOOK_SECRET` is required unless `GITSEER_WEBHOOK_ALLOW_UNSIGNED=true` (lab only).
-- OAuth redirect: `{external_url}/api/v1/auth/callback`. Prefer a public Gitea OAuth client (PKCE).
-- Optional `GITSEER_ENCRYPTION_KEY` (min 16 chars) encrypts OAuth tokens at rest.
+- Set `server.external_url` to the public URL (including subpath). GitSeer strips only that configured prefix — not client `X-Forwarded-Prefix`.
+- When `gitea.url` is set, `GITSEER_WEBHOOK_SECRET` is required unless `GITSEER_WEBHOOK_ALLOW_UNSIGNED=true` (lab only). Same pattern for GitHub: `GITSEER_GITHUB_WEBHOOK_SECRET` when `github.url` is set.
+- OAuth redirect: `{external_url}/api/v1/auth/callback`. Prefer a public Gitea OAuth client (PKCE). GitHub uses a service PAT (no GitHub OAuth login in this slice).
+- `GITSEER_ENCRYPTION_KEY` (env/config min **16**, prefer ≥24; wizard paste min **24**) encrypts forge secrets and OAuth tokens at rest. Required to save integration secrets to the DB; the setup wizard can generate a key file when unset.
 
-Runtime settings and Gitea/GitHub integration can also be managed in the UI (`/settings`) after bootstrap login.
+Runtime settings and multi-instance Gitea/GitHub integration can also be managed in the UI (`/settings`) after bootstrap login.
 
 ---
 

@@ -18,9 +18,9 @@ make frontend && make build-go
 Commands:
 
 ```text
-lens serve [--config path]
-lens version
-gitseer install-ui --custom-path DIR --gitseer-url URL
+gitseer serve [--config path]
+gitseer version
+gitseer install-ui --custom-path DIR --gitseer-url URL [--instance-id N]
 gitseer uninstall-ui --custom-path DIR
 ```
 
@@ -36,23 +36,24 @@ helm upgrade --install gitseer deploy/helm/gitseer \
   -f deploy/helm/gitseer/values-k3s-home.yaml
 ```
 
-Provide secrets via a Kubernetes Secret (token, bootstrap password, OAuth, webhook secret, encryption key). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup.
+Provide secrets via a Kubernetes Secret (`GITSEER_GITEA_TOKEN`, bootstrap password, OAuth, `GITSEER_WEBHOOK_SECRET`, `GITSEER_ENCRYPTION_KEY`, and GitHub vars when used). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup. When `GITSEER_GITHUB_URL` is set, `GITSEER_GITHUB_WEBHOOK_SECRET` must be present unless unsigned webhooks are allowed for GitHub.
 
 Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
 
 ## Reverse proxy
 
 1. Terminate TLS at the proxy.
-2. Set `server.external_url` to the public URL users and Gitea see (include subpath).
+2. Set `server.external_url` to the public URL users and forges see (include subpath).
 3. Forward to `server.listen`.
 4. Do not rely on client `X-Forwarded-Prefix`.
+5. Set `GITSEER_SERVER_TRUSTED_PROXIES` to the proxy CIDRs so rate limits see real client IPs — never `0.0.0.0/0`.
 
 ## Gitea companion UI
 
 After deploy:
 
 ```bash
-./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com
+./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com --instance-id 1
 ```
 
 Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITSEER -->` / `<!-- BEGIN GITSEER-TABS -->`.
@@ -60,9 +61,11 @@ Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITSEER -->` / `<!-
 ## Checklist
 
 - [ ] `external_url` matches public scheme/host/path
-- [ ] Webhook secret set and Gitea webhook registered
-- [ ] OAuth app redirect matches `{external_url}/api/v1/auth/callback`
+- [ ] Encryption key set (`GITSEER_ENCRYPTION_KEY` or wizard Prepare) before saving forge secrets
+- [ ] Per-instance webhook URLs registered (Gitea and/or GitHub) with matching secrets
+- [ ] Config URL set ⇒ matching webhook secret present at startup (or lab unsigned flag for that forge)
+- [ ] OAuth app redirect matches `{external_url}/api/v1/auth/callback` (Gitea login)
 - [ ] Bootstrap password set for first admin **or** OAuth ready
-- [ ] Private Gitea? `allow_private_network` / `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=true`
-- [ ] Encryption key set if OAuth tokens must persist for ACL refresh
+- [ ] Private forge? `allow_private_network` / `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK` / `GITSEER_GITHUB_ALLOW_PRIVATE_NETWORK`
 - [ ] First sync completed
+- [ ] Probes: `/health/live`, `/health/ready`

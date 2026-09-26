@@ -323,6 +323,33 @@ func isLocalExternalURL(raw string) bool {
 	return false
 }
 
+// IsLoopbackExternalURL reports whether external_url is empty or strictly loopback
+// (localhost / 127.0.0.1 / ::1 / *.localhost). Unlike isLocalExternalURL, it does
+// not treat arbitrary *.local LAN names as loopback — used before exposing the
+// bootstrap password via ui-config.
+func IsLoopbackExternalURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
 // CookieSecureResolved returns whether the session cookie should be Secure.
 func (c Config) CookieSecureResolved() bool {
 	if c.Auth.CookieSecure != nil {
@@ -331,7 +358,7 @@ func (c Config) CookieSecureResolved() bool {
 	return strings.HasPrefix(strings.ToLower(c.Server.ExternalURL), "https://")
 }
 
-// PathPrefix returns the HTTP path prefix derived from external_url (e.g. "/lens") or "".
+// PathPrefix returns the HTTP path prefix derived from external_url (e.g. "/gitseer") or "".
 func (c Config) PathPrefix() string {
 	if c.Server.ExternalURL == "" {
 		return ""

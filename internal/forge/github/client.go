@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ncdlabs/gitseer/internal/forge"
+	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
 	"github.com/ncdlabs/gitseer/internal/models"
 	"github.com/ncdlabs/gitseer/internal/workflows"
 )
@@ -288,7 +289,13 @@ func (c *Client) doBody(ctx context.Context, method, path string, query url.Valu
 
 		resp, err = c.http.Do(req)
 		if err != nil {
+			gitseermetrics.GitHubAPIErrorsTotal.Inc()
 			return nil, err
+		}
+		status := strconv.Itoa(resp.StatusCode/100) + "xx"
+		gitseermetrics.GitHubAPIRequestsTotal.WithLabelValues(status).Inc()
+		if resp.StatusCode >= 500 {
+			gitseermetrics.GitHubAPIErrorsTotal.Inc()
 		}
 		if resp.StatusCode != http.StatusTooManyRequests {
 			return resp, nil
@@ -523,11 +530,59 @@ func (c *Client) ListPullRequests(ctx context.Context, repo models.RepoRef, opts
 	return forge.Page[models.PullRequest]{Items: items, Page: page, HasMore: len(raw) >= limit}, nil
 }
 
-// GetCombinedCommitStatus returns the normalized Lens ci_state for a commit/ref.
+// GetPullRequestReviewState aggregates PR reviews into GitSeer review_state.
+func (c *Client) GetPullRequestReviewState(ctx context.Context, repo models.RepoRef, number int64) (string, error) {
+	if number <= 0 {
+		return "", nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), number)
+	resp, err := c.do(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return "", err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	resp.Body.Close()
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		return "", nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	var raw []struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return "", fmt.Errorf("decode reviews: %w", err)
+	}
+	states := make([]string, 0, len(raw))
+	for _, r := range raw {
+		states = append(states, r.State)
+	}
+	return forge.AggregateReviewState(states), nil
+}
+
+// GetCombinedCommitStatus returns the normalized GitSeer ci_state for a commit/ref,
+// merging classic commit statuses with check-runs (Actions).
 func (c *Client) GetCombinedCommitStatus(ctx context.Context, repo models.RepoRef, ref string) (string, error) {
 	if ref == "" {
 		return "", nil
 	}
+	statusState, err := c.commitStatusState(ctx, repo, ref)
+	if err != nil {
+		return "", err
+	}
+	checkState, err := c.checkRunsState(ctx, repo, ref)
+	if err != nil {
+		// Checks API may be unavailable; keep classic status.
+		return statusState, nil
+	}
+	return forge.MergeCIState(statusState, checkState), nil
+}
+
+func (c *Client) commitStatusState(ctx context.Context, repo models.RepoRef, ref string) (string, error) {
 	path := fmt.Sprintf("/repos/%s/%s/commits/%s/status", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(ref))
 	resp, err := c.do(ctx, http.MethodGet, path, nil, "")
 	if err != nil {
@@ -555,6 +610,69 @@ func (c *Client) GetCombinedCommitStatus(ctx context.Context, repo models.RepoRe
 		return "", nil
 	}
 	return forge.NormalizeCIState(raw.State), nil
+}
+
+func (c *Client) checkRunsState(ctx context.Context, repo models.RepoRef, ref string) (string, error) {
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(ref))
+	q := url.Values{"per_page": {"100"}}
+	resp, err := c.doAccept(ctx, http.MethodGet, path, q, "", "application/vnd.github+json")
+	if err != nil {
+		return "", err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	resp.Body.Close()
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		return "", nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	var wrapped struct {
+		CheckRuns []struct {
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"check_runs"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err != nil {
+		return "", fmt.Errorf("decode check runs: %w", err)
+	}
+	if len(wrapped.CheckRuns) == 0 {
+		return "", nil
+	}
+	hasPending, hasSuccess, hasFailure, hasCancelled := false, false, false, false
+	for _, cr := range wrapped.CheckRuns {
+		st := strings.ToLower(cr.Status)
+		if st != "completed" {
+			hasPending = true
+			continue
+		}
+		switch strings.ToLower(cr.Conclusion) {
+		case "failure", "timed_out", "action_required", "startup_failure":
+			hasFailure = true
+		case "success", "neutral", "skipped":
+			hasSuccess = true
+		case "cancelled", "canceled", "stale":
+			hasCancelled = true
+		default:
+			hasPending = true
+		}
+	}
+	if hasFailure {
+		return models.CIStateFailure, nil
+	}
+	if hasPending {
+		return models.CIStatePending, nil
+	}
+	if hasSuccess {
+		return models.CIStateSuccess, nil
+	}
+	if hasCancelled {
+		return models.CIStateCancelled, nil
+	}
+	return "", nil
 }
 
 func (c *Client) ListWorkflowRuns(ctx context.Context, repo models.RepoRef, opts forge.RunOpts) (forge.Page[models.WorkflowRun], error) {
@@ -592,6 +710,34 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, repo models.RepoRef, opts
 		items = append(items, mapRun(r))
 	}
 	return forge.Page[models.WorkflowRun]{Items: items, Page: page, HasMore: len(wrapped.WorkflowRuns) >= limit}, nil
+}
+
+func (c *Client) GetWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) (*models.WorkflowRun, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), runExternalID)
+	resp, err := c.do(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		return nil, forge.ErrNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	var raw ghRun
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode workflow run: %w", err)
+	}
+	if raw.ID == 0 {
+		return nil, forge.ErrNotFound
+	}
+	mapped := mapRun(raw)
+	return &mapped, nil
 }
 
 func (c *Client) ListJobs(ctx context.Context, repo models.RepoRef, runExternalID int64) ([]models.Job, error) {
@@ -722,7 +868,7 @@ func mapRepo(r ghRepo) models.Repository {
 		DefaultBranch: r.DefaultBranch,
 		Private:       r.Private,
 		Archived:      r.Archived,
-		Empty:         r.Size == 0,
+		Empty:         false, // GitHub size can be 0 for brand-new non-empty repos; leave unset
 		Fork:          r.Fork,
 		HTMLURL:       r.HTMLURL,
 	}

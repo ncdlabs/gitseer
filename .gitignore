@@ -11,4 +11,6 @@ web/dist/
 config.yaml
 install.yaml
 .env
+*.encryption_key
+gitseer.encryption_key
 coverage/

@@ -10,7 +10,7 @@ import (
 
 func TestOpenMigrates(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "lens.db")
+	path := filepath.Join(t.TempDir(), "gitseer.db")
 	db, err := database.Open(ctx, "sqlite", path, "")
 	if err != nil {
 		t.Fatal(err)

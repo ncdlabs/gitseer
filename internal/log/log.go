@@ -1,4 +1,4 @@
-// Package log configures structured logging for Lens.
+// Package log configures structured logging for GitSeer.
 package log
 
 import (

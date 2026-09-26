@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// DefaultOAuthAppName is the application name Lens creates on Gitea.
+// DefaultOAuthAppName is the application name GitSeer creates on Gitea.
 const DefaultOAuthAppName = "GitSeer"
 
 // OAuthAppPreview is the create-app summary shown in the setup wizard.
@@ -47,8 +47,8 @@ type OAuth2Application struct {
 	ConfidentialClient bool     `json:"confidential_client"`
 }
 
-// EnsureOAuthApplication creates or updates a Lens OAuth2 application on Gitea.
-// Updating regenerates the client secret (Gitea API behavior) so Lens can store it.
+// EnsureOAuthApplication creates or updates a GitSeer OAuth2 application on Gitea.
+// Updating regenerates the client secret (Gitea API behavior) so GitSeer can store it.
 func (c *Client) EnsureOAuthApplication(ctx context.Context, name, redirectURI string) (*OAuth2Application, bool, error) {
 	name = strings.TrimSpace(name)
 	redirectURI = strings.TrimSpace(redirectURI)

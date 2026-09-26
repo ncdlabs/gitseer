@@ -5,9 +5,9 @@
 | Path | When to use |
 |------|-------------|
 | **Install with Agent** | Paste the prompt from [docs/install.md](install.md#install-with-agent) into your coding agent |
-| **Guided installer** | First production or lab install |
+| **Guided installer** | First production or lab install (Gitea-oriented; add GitHub in the wizard/Settings) |
 | **Compose** | Container runtime already in place |
-| **Binary** | Single process, no Compose |
+| **Binary** | Single process, no Compose; good for GitHub-only via wizard |
 | **Local dev** | Contributing / iterating on UI + API |
 
 In-repo detail: [docs/install.md](install.md).
@@ -17,7 +17,7 @@ In-repo detail: [docs/install.md](install.md).
 - Go **1.26+** and Node **22+** (binary / local builds)
 - Podman Compose or Docker Compose (installer default)
 - At least one forge: a Gitea instance (~1.25+) and/or GitHub / GitHub Enterprise with an API token that can list repos, PRs, and Actions/workflows
-- Public URL for GitSeer / Lens (needed for OAuth redirect and webhook delivery)
+- Public URL for GitSeer (needed for OAuth redirect and webhook delivery)
 
 ## 2. Run the installer
 
@@ -36,18 +36,19 @@ cp install.example.yaml install.yaml
 ./scripts/install.sh --config install.yaml --non-interactive
 ```
 
-The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, then starts Lens.
+The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, then starts GitSeer. It currently requires a Gitea URL/token; for GitHub-only, start with Compose/binary and use `/setup` to connect GitHub.
 
 ## 3. Complete the setup wizard
 
 On first bootstrap-admin visit (when `setup_completed` is false), GitSeer opens **`/setup`**:
 
-1. **Forge picker** — Gitea or GitHub (GitLab / Bitbucket Coming Soon)
-2. **Connect** — forge URL, service token / PAT, Lens public URL  
-3. **Validate** — connectivity/permission checks; create or paste webhook (+ Gitea OAuth when applicable)  
-4. **Finish** — mark setup complete when at least one forge is configured  
+1. **Prepare** — public GitSeer URL + generate or paste encryption key (required to store secrets)
+2. **Forge picker** — Gitea or GitHub (GitLab / Bitbucket Coming Soon)
+3. **Connect** — forge URL, service token / PAT
+4. **Validate** — connectivity/permission checks; create or paste webhook (+ Gitea OAuth when applicable)  
+5. **Finish** — mark setup complete when at least one forge is configured  
 
-A second forge can be added later under Settings → Integration.
+A second forge (or more instances of the same type) can be added later under Settings → Integration.
 
 See [Setup Wizard](setup-wizard.md).
 
@@ -55,25 +56,28 @@ See [Setup Wizard](setup-wizard.md).
 
 1. Sign in (Gitea OAuth or bootstrap password).
 2. Click **Sync now** so the catalog is populated.
-3. Other users sign in with Gitea; ACL is refreshed on login and on an interval (default 6h).
+3. Other users sign in with Gitea; ACL is refreshed on login and on an interval (default 6h), scoped to that user’s Gitea instance.
 
-## 5. Point Gitea webhooks at Lens
+## 5. Point forge webhooks at GitSeer
 
-Webhook endpoint:
+Prefer the **per-instance** URL from Settings → Integration:
 
 ```text
-POST {external_url}/api/webhooks/gitea
+POST {external_url}/api/webhooks/gitea/{instanceID}
+POST {external_url}/api/webhooks/github/{instanceID}
 ```
 
-HMAC secret must match `GITSEER_WEBHOOK_SECRET` / Settings. Fail-closed when Gitea URL is set and the secret is empty (unless unsigned webhooks are explicitly allowed for lab use).
+Legacy unscoped Gitea: `POST {external_url}/api/webhooks/gitea` (primary Gitea instance secret).
+
+HMAC secret must match the instance (or config) webhook secret. Fail-closed when a forge URL is set in config and that forge’s secret is empty (unless unsigned webhooks are explicitly allowed for lab use).
 
 ## Optional: Gitea navigation links
 
 ```bash
-./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com
+./bin/gitseer install-ui --custom-path /var/lib/gitea/custom --gitseer-url https://gitseer.example.com --instance-id 1
 ```
 
-Opens Lens in a new tab from Gitea’s custom templates. Restart Gitea after template changes.
+Opens GitSeer in a new tab from Gitea’s custom templates. Restart Gitea after template changes.
 
 ## Next
 

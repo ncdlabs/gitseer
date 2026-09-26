@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setUnauthorizedHandler, type User } from "./api/client";
 import { AppShell } from "./components/AppShell";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { MAIN_WINDOW_NAME, NAV_CHANNEL } from "./components/ActiveActionsPanel";
 import { useTheme } from "./hooks/useTheme";
 import { AttentionPage } from "./pages/AttentionPage";
 import { ActionsPopoutPage } from "./pages/ActionsPopoutPage";
@@ -12,6 +14,7 @@ import { PipelineDetailPage, PipelinesPage } from "./pages/PipelinesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
 import { PullRequestsPage, RepositoriesPage } from "./pages/RepositoriesPage";
+import { RepositoryDetailPage } from "./pages/RepositoryDetailPage";
 import "./styles/app.css";
 
 const qc = new QueryClient({
@@ -74,13 +77,53 @@ function useRealtimeInvalidation() {
   }, [queryClient]);
 }
 
+function useActionsPopoutNavigation() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isPopout = location.pathname === "/actions-popout";
+
+  useEffect(() => {
+    if (isPopout) return;
+    if (!window.name) {
+      window.name = MAIN_WINDOW_NAME;
+    }
+    const go = (path: unknown) => {
+      if (typeof path !== "string" || !path.startsWith("/")) return;
+      navigate(path);
+      window.focus();
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== "gitseer:navigate") return;
+      go(event.data.path);
+    };
+    window.addEventListener("message", onMessage);
+    let bc: BroadcastChannel | undefined;
+    try {
+      bc = new BroadcastChannel(NAV_CHANNEL);
+      bc.onmessage = (event) => {
+        if (event.data?.type !== "navigate") return;
+        go(event.data.path);
+      };
+    } catch {
+      /* BroadcastChannel unavailable */
+    }
+    return () => {
+      window.removeEventListener("message", onMessage);
+      bc?.close();
+    };
+  }, [isPopout, navigate]);
+}
+
 function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const giteaTheme =
     user.theme === "light" || user.theme === "dark" || user.theme === "system" ? user.theme : null;
   const { theme, setTheme } = useTheme(giteaTheme);
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   useRealtimeInvalidation();
+  useActionsPopoutNavigation();
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -98,7 +141,7 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
       await api.syncRepos();
       await queryClient.invalidateQueries();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "sync failed");
+      setSyncError(err instanceof Error ? err.message : "Sync failed.");
     } finally {
       setSyncing(false);
     }
@@ -132,27 +175,38 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
   }
 
   return (
-    <Routes>
-      <Route path="/actions-popout" element={<ActionsPopoutPage />} />
-      <Route
-        path="*"
-        element={
-          <AppShell user={user} theme={theme} onTheme={setTheme} onLogout={onLogout} onSync={syncNow} syncing={syncing}>
-            <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/attention" element={<AttentionPage />} />
-              <Route path="/repositories" element={<RepositoriesPage />} />
-              <Route path="/pull-requests" element={<PullRequestsPage />} />
-              <Route path="/pipelines" element={<PipelinesPage />} />
-              <Route path="/pipelines/:id" element={<PipelineDetailPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/setup" element={<Navigate to="/" replace />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </AppShell>
-        }
+    <>
+      <Routes>
+        <Route path="/actions-popout" element={<ActionsPopoutPage />} />
+        <Route
+          path="*"
+          element={
+            <AppShell user={user} theme={theme} onTheme={setTheme} onLogout={onLogout} onSync={syncNow} syncing={syncing}>
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/attention" element={<AttentionPage />} />
+                <Route path="/repositories" element={<RepositoriesPage />} />
+                <Route path="/repositories/:owner/:repo" element={<RepositoryDetailPage />} />
+                <Route path="/pull-requests" element={<PullRequestsPage />} />
+                <Route path="/pipelines" element={<PipelinesPage />} />
+                <Route path="/pipelines/:id" element={<PipelineDetailPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/setup" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </AppShell>
+          }
+        />
+      </Routes>
+      <ConfirmDialog
+        open={syncError != null}
+        title="Sync Failed"
+        message={syncError ?? ""}
+        cancelLabel={null}
+        onConfirm={() => setSyncError(null)}
+        onCancel={() => setSyncError(null)}
       />
-    </Routes>
+    </>
   );
 }
 

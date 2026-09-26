@@ -8,7 +8,7 @@ import (
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
-	key, err := gitseercrypto.KeyFromString("sixteen-chars-ok")
+	key, err := gitseercrypto.KeyFromString("twenty-four-chars-ok-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 }
 
 func TestLooksLikeCiphertext(t *testing.T) {
-	key, err := gitseercrypto.KeyFromString("sixteen-chars-ok")
+	key, err := gitseercrypto.KeyFromString("twenty-four-chars-ok-key")
 	if err != nil {
 		t.Fatal(err)
 	}

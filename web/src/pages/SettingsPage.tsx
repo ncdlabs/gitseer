@@ -1,17 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import {
   api,
   type ForgeStatusRow,
-  type IntegrationPatch,
-  type IntegrationPublic,
-  type LensSettings,
+  type GitSeerSettings,
   type SettingsResponse,
   type SystemStatus,
 } from "../api/client";
-import { InfoTip } from "../components/InfoTip";
-import { PasswordInput } from "../components/PasswordInput";
-import { DEFAULT_GITHUB_URL } from "../lib/product";
+import { InstanceSettingsPanel } from "../components/InstanceSettingsPanel";
 
 type SettingsTab = "preferences" | "integration" | "status";
 
@@ -27,7 +24,7 @@ function tabFromHash(hash: string): SettingsTab {
   return "preferences";
 }
 
-function emptySettings(): LensSettings {
+function emptySettings(): GitSeerSettings {
   return {
     instance_name: "",
     sync_history_days: 30,
@@ -39,56 +36,7 @@ function emptySettings(): LensSettings {
   };
 }
 
-function emptyIntegration(): IntegrationPublic {
-  return {
-    gitea_url: "",
-    gitea_token_configured: false,
-    gitea_webhook_secret_configured: false,
-    gitea_allow_private_network: false,
-    gitea_allow_unsigned_webhooks: false,
-    oauth_client_id: "",
-    oauth_client_secret_configured: false,
-    github_url: "",
-    github_token_configured: false,
-    github_webhook_secret_configured: false,
-    github_allow_private_network: false,
-    github_allow_unsigned_webhooks: false,
-  };
-}
-
-type IntegrationDraft = {
-  gitea_url: string;
-  gitea_token: string;
-  gitea_webhook_secret: string;
-  gitea_allow_private_network: boolean;
-  gitea_allow_unsigned_webhooks: boolean;
-  oauth_client_id: string;
-  oauth_client_secret: string;
-  github_url: string;
-  github_token: string;
-  github_webhook_secret: string;
-  github_allow_private_network: boolean;
-  github_allow_unsigned_webhooks: boolean;
-};
-
-function draftFromPublic(integ: IntegrationPublic): IntegrationDraft {
-  return {
-    gitea_url: integ.gitea_url || "",
-    gitea_token: "",
-    gitea_webhook_secret: "",
-    gitea_allow_private_network: integ.gitea_allow_private_network,
-    gitea_allow_unsigned_webhooks: integ.gitea_allow_unsigned_webhooks,
-    oauth_client_id: integ.oauth_client_id || "",
-    oauth_client_secret: "",
-    github_url: integ.github_url || "",
-    github_token: "",
-    github_webhook_secret: "",
-    github_allow_private_network: integ.github_allow_private_network,
-    github_allow_unsigned_webhooks: integ.github_allow_unsigned_webhooks,
-  };
-}
-
-function sameSettings(a: LensSettings, b: LensSettings): boolean {
+function sameSettings(a: GitSeerSettings, b: GitSeerSettings): boolean {
   return (
     a.instance_name === b.instance_name &&
     a.sync_history_days === b.sync_history_days &&
@@ -97,23 +45,6 @@ function sameSettings(a: LensSettings, b: LensSettings): boolean {
     a.retention_webhooks_days === b.retention_webhooks_days &&
     a.retention_attention_days === b.retention_attention_days &&
     a.server_external_url === b.server_external_url
-  );
-}
-
-function sameIntegrationDraft(a: IntegrationDraft, b: IntegrationDraft): boolean {
-  return (
-    a.gitea_url === b.gitea_url &&
-    a.gitea_token === b.gitea_token &&
-    a.gitea_webhook_secret === b.gitea_webhook_secret &&
-    a.gitea_allow_private_network === b.gitea_allow_private_network &&
-    a.gitea_allow_unsigned_webhooks === b.gitea_allow_unsigned_webhooks &&
-    a.oauth_client_id === b.oauth_client_id &&
-    a.oauth_client_secret === b.oauth_client_secret &&
-    a.github_url === b.github_url &&
-    a.github_token === b.github_token &&
-    a.github_webhook_secret === b.github_webhook_secret &&
-    a.github_allow_private_network === b.github_allow_private_network &&
-    a.github_allow_unsigned_webhooks === b.github_allow_unsigned_webhooks
   );
 }
 
@@ -128,6 +59,21 @@ function forgeDisplayName(ft: string): string {
   }
 }
 
+/** Label forges by name / instance_id when multiple of the same type. */
+function forgeStatusLabel(f: ForgeStatusRow, forges: ForgeStatusRow[]): string {
+  const typeLabel = forgeDisplayName(f.forge_type);
+  const sameType = forges.filter(
+    (x) => (x.forge_type || "").toLowerCase() === (f.forge_type || "").toLowerCase(),
+  );
+  if (sameType.length <= 1) {
+    return (f.name || "").trim() || typeLabel;
+  }
+  const name = (f.name || "").trim();
+  if (name) return `${typeLabel} (${name})`;
+  if (f.instance_id != null) return `${typeLabel} (#${f.instance_id})`;
+  return typeLabel;
+}
+
 function yesNo(v: unknown): string {
   return v ? "yes" : "no";
 }
@@ -135,7 +81,7 @@ function yesNo(v: unknown): string {
 function statusRows(status: SystemStatus | undefined): { label: string; value: string }[] {
   if (!status) return [];
   const rows: { label: string; value: string }[] = [
-    { label: "Lens Version", value: String(status.version ?? "—") },
+    { label: "GitSeer Version", value: String(status.version ?? "—") },
     { label: "Instance Name", value: String(status.ui_name ?? "—") },
     { label: "Bootstrap Auth", value: status.bootstrap_auth ? "enabled" : "disabled" },
     { label: "Setup Completed", value: yesNo(status.setup_completed) },
@@ -146,7 +92,7 @@ function statusRows(status: SystemStatus | undefined): { label: string; value: s
   const forges = Array.isArray(status.forges) ? (status.forges as ForgeStatusRow[]) : [];
   if (forges.length > 0) {
     for (const f of forges) {
-      const name = forgeDisplayName(f.forge_type);
+      const name = forgeStatusLabel(f, forges);
       rows.push(
         { label: `${name} URL`, value: String(f.url || "—") },
         { label: `${name} Connected`, value: yesNo(f.connected) },
@@ -156,13 +102,12 @@ function statusRows(status: SystemStatus | undefined): { label: string; value: s
       );
       if ((f.forge_type || "").toLowerCase() === "gitea") {
         rows.push({
-          label: "Gitea OAuth",
+          label: `${name} OAuth`,
           value: f.oauth_configured ? "configured" : "missing",
         });
       }
     }
   } else {
-    // Legacy flat keys when forges[] is absent.
     rows.push(
       { label: "Gitea Connected", value: status.instance_connected ? "yes" : "no" },
       { label: "Gitea Version", value: String(status.gitea_version ?? "—") },
@@ -184,23 +129,21 @@ function statusRows(status: SystemStatus | undefined): { label: string; value: s
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
+  const location = useLocation();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
 
   const [tab, setTab] = useState<SettingsTab>(() =>
     typeof window !== "undefined" ? tabFromHash(window.location.hash) : "preferences",
   );
-  const [draft, setDraft] = useState<LensSettings>(emptySettings());
-  const [baseline, setBaseline] = useState<LensSettings>(emptySettings());
+  const [draft, setDraft] = useState<GitSeerSettings>(emptySettings());
+  const [baseline, setBaseline] = useState<GitSeerSettings>(emptySettings());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
 
-  const [integDraft, setIntegDraft] = useState<IntegrationDraft>(draftFromPublic(emptyIntegration()));
-  const [integBaseline, setIntegBaseline] = useState<IntegrationDraft>(draftFromPublic(emptyIntegration()));
-  const [integMeta, setIntegMeta] = useState<IntegrationPublic>(emptyIntegration());
-  const [integSaving, setIntegSaving] = useState(false);
-  const [integError, setIntegError] = useState<string | null>(null);
-  const [integSavedFlash, setIntegSavedFlash] = useState(false);
+  useEffect(() => {
+    setTab(tabFromHash(location.hash));
+  }, [location.hash]);
 
   useEffect(() => {
     function onHashChange() {
@@ -215,12 +158,6 @@ export function SettingsPage() {
     setDraft(settingsQuery.data.settings);
     setBaseline(settingsQuery.data.settings);
     setError(null);
-    const integ = settingsQuery.data.integration ?? emptyIntegration();
-    const next = draftFromPublic(integ);
-    setIntegDraft(next);
-    setIntegBaseline(next);
-    setIntegMeta(integ);
-    setIntegError(null);
   }, [settingsQuery.data]);
 
   function selectTab(next: SettingsTab) {
@@ -233,32 +170,17 @@ export function SettingsPage() {
 
   const editable = settingsQuery.data?.editable === true;
   const dirty = useMemo(() => !sameSettings(draft, baseline), [draft, baseline]);
-  const integDirty = useMemo(
-    () => !sameIntegrationDraft(integDraft, integBaseline),
-    [integDraft, integBaseline],
-  );
   const status = statusRows(settingsQuery.data?.status);
 
-  function setField<K extends keyof LensSettings>(key: K, value: LensSettings[K]) {
+  function setField<K extends keyof GitSeerSettings>(key: K, value: GitSeerSettings[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));
     setSavedFlash(false);
-  }
-
-  function setIntegField<K extends keyof IntegrationDraft>(key: K, value: IntegrationDraft[K]) {
-    setIntegDraft((prev) => ({ ...prev, [key]: value }));
-    setIntegSavedFlash(false);
   }
 
   function cancel() {
     setDraft(baseline);
     setError(null);
     setSavedFlash(false);
-  }
-
-  function cancelIntegration() {
-    setIntegDraft(integBaseline);
-    setIntegError(null);
-    setIntegSavedFlash(false);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -276,46 +198,6 @@ export function SettingsPage() {
       setError(err instanceof Error ? err.message : "save failed");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function onSubmitIntegration(e: FormEvent) {
-    e.preventDefault();
-    if (!editable || !integDirty || integSaving) return;
-    setIntegSaving(true);
-    setIntegError(null);
-    try {
-      const patch: IntegrationPatch = {
-        gitea_url: integDraft.gitea_url.trim(),
-        gitea_token: integDraft.gitea_token,
-        gitea_webhook_secret: integDraft.gitea_webhook_secret,
-        gitea_allow_private_network: integDraft.gitea_allow_private_network,
-        gitea_allow_unsigned_webhooks: integDraft.gitea_allow_unsigned_webhooks,
-        oauth_client_id: integDraft.oauth_client_id.trim(),
-        oauth_client_secret: integDraft.oauth_client_secret,
-        apply_github: true,
-        github_url: integDraft.github_url.trim() || DEFAULT_GITHUB_URL,
-        github_token: integDraft.github_token,
-        github_webhook_secret: integDraft.github_webhook_secret,
-        github_allow_private_network: integDraft.github_allow_private_network,
-        github_allow_unsigned_webhooks: integDraft.github_allow_unsigned_webhooks,
-      };
-      // If GitHub URL is blank and no token was entered / configured, clear to empty URL.
-      if (!integDraft.github_url.trim() && !integDraft.github_token && !integMeta.github_token_configured) {
-        patch.github_url = "";
-      }
-      const res: SettingsResponse = await api.updateSettings({ integration: patch });
-      const integ = res.integration ?? emptyIntegration();
-      const next = draftFromPublic(integ);
-      setIntegDraft(next);
-      setIntegBaseline(next);
-      setIntegMeta(integ);
-      setIntegSavedFlash(true);
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
-    } catch (err) {
-      setIntegError(err instanceof Error ? err.message : "save failed");
-    } finally {
-      setIntegSaving(false);
     }
   }
 
@@ -364,8 +246,7 @@ export function SettingsPage() {
           >
             {SETTINGS_TABS.map((item) => {
               const selected = tab === item.id;
-              const dirtyMark =
-                (item.id === "preferences" && dirty) || (item.id === "integration" && integDirty);
+              const dirtyMark = item.id === "preferences" && dirty;
               return (
                 <button
                   key={item.id}
@@ -415,8 +296,8 @@ export function SettingsPage() {
                     inputMode="url"
                     value={draft.server_external_url}
                     onChange={(e) => setField("server_external_url", e.target.value)}
-                    placeholder="Lens public URL (https://lens.example.com)"
-                    aria-label="Lens public URL"
+                    placeholder="GitSeer public URL (https://gitseer.example.com)"
+                    aria-label="GitSeer public URL"
                     autoComplete="off"
                   />
                   <p className="settings-form__hint">
@@ -515,216 +396,7 @@ export function SettingsPage() {
             </form>
           )}
 
-          {tab === "integration" && (
-            <form
-              className="panel panel--padded settings-form"
-              id="settings-panel-integration"
-              role="tabpanel"
-              aria-labelledby="settings-tab-integration"
-              onSubmit={onSubmitIntegration}
-            >
-              <fieldset className="settings-form__section" disabled={!editable || integSaving}>
-                <legend>Gitea</legend>
-                <div className="settings-form__field">
-                  <input
-                    id="integ_gitea_url"
-                    type="url"
-                    value={integDraft.gitea_url}
-                    onChange={(e) => setIntegField("gitea_url", e.target.value)}
-                    placeholder="Gitea URL (https://git.example.com)"
-                    aria-label="Gitea URL"
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="settings-form__field">
-                  <PasswordInput
-                    id="integ_gitea_token"
-                    value={integDraft.gitea_token}
-                    onChange={(value) => setIntegField("gitea_token", value)}
-                    placeholder={
-                      integMeta.gitea_token_configured ? "Service token (leave blank to keep)" : "Service token"
-                    }
-                    aria-label="Gitea service token"
-                    autoComplete="new-password"
-                  />
-                  <p className="settings-form__hint">
-                    {integMeta.gitea_token_configured
-                      ? "Token is configured. Leave blank to keep it."
-                      : "Personal access token or app token used for sync and API calls."}
-                  </p>
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="integ_webhook_secret"
-                    type="password"
-                    value={integDraft.gitea_webhook_secret}
-                    onChange={(e) => setIntegField("gitea_webhook_secret", e.target.value)}
-                    placeholder={
-                      integMeta.gitea_webhook_secret_configured
-                        ? "Webhook HMAC secret (leave blank to keep)"
-                        : "Webhook HMAC secret"
-                    }
-                    aria-label="Gitea webhook HMAC secret"
-                    autoComplete="new-password"
-                  />
-                  <p className="settings-form__hint">
-                    {integMeta.gitea_webhook_secret_configured
-                      ? "Secret is configured. Leave blank to keep it."
-                      : "Must match the Gitea system webhook secret unless unsigned webhooks are allowed."}
-                  </p>
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="integ_oauth_client_id"
-                    type="text"
-                    value={integDraft.oauth_client_id}
-                    onChange={(e) => setIntegField("oauth_client_id", e.target.value)}
-                    placeholder="OAuth client ID"
-                    aria-label="OAuth client ID"
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="integ_oauth_client_secret"
-                    type="password"
-                    value={integDraft.oauth_client_secret}
-                    onChange={(e) => setIntegField("oauth_client_secret", e.target.value)}
-                    placeholder={
-                      integMeta.oauth_client_secret_configured
-                        ? "OAuth client secret (leave blank to keep)"
-                        : "OAuth client secret"
-                    }
-                    aria-label="OAuth client secret"
-                    autoComplete="new-password"
-                  />
-                  <p className="settings-form__hint">
-                    {integMeta.oauth_client_secret_configured
-                      ? "Secret is configured. Leave blank to keep it."
-                      : "From the Gitea OAuth application. GitHub has no OAuth login in this release."}
-                  </p>
-                </div>
-                <label className="settings-form__check">
-                  <input
-                    type="checkbox"
-                    checked={integDraft.gitea_allow_private_network}
-                    onChange={(e) => setIntegField("gitea_allow_private_network", e.target.checked)}
-                  />
-                  <span className="settings-form__check-text">
-                    Allow Private Network Addresses
-                    <InfoTip label="About private network addresses">
-                      Lets GitSeer call Gitea on private or lab addresses (10.x, 192.168.x, localhost, and similar). Off by
-                      default to block SSRF. Enable when Gitea is only reachable on a private network.
-                    </InfoTip>
-                  </span>
-                </label>
-                <label className="settings-form__check">
-                  <input
-                    type="checkbox"
-                    checked={integDraft.gitea_allow_unsigned_webhooks}
-                    onChange={(e) => setIntegField("gitea_allow_unsigned_webhooks", e.target.checked)}
-                  />
-                  Allow Unsigned Webhooks (Not Recommended)
-                </label>
-              </fieldset>
-
-              <fieldset className="settings-form__section" disabled={!editable || integSaving}>
-                <legend>GitHub</legend>
-                <div className="settings-form__field">
-                  <input
-                    id="integ_github_url"
-                    type="url"
-                    value={integDraft.github_url}
-                    onChange={(e) => setIntegField("github_url", e.target.value)}
-                    placeholder={`GitHub URL (${DEFAULT_GITHUB_URL})`}
-                    aria-label="GitHub URL"
-                    autoComplete="off"
-                  />
-                  <p className="settings-form__hint">
-                    github.com or GitHub Enterprise host. Leave blank if you are not connecting GitHub.
-                  </p>
-                </div>
-                <div className="settings-form__field">
-                  <PasswordInput
-                    id="integ_github_token"
-                    value={integDraft.github_token}
-                    onChange={(value) => setIntegField("github_token", value)}
-                    placeholder={
-                      integMeta.github_token_configured
-                        ? "Personal access token (leave blank to keep)"
-                        : "Personal access token"
-                    }
-                    aria-label="GitHub personal access token"
-                    autoComplete="new-password"
-                  />
-                  <p className="settings-form__hint">
-                    {integMeta.github_token_configured
-                      ? "Token is configured. Leave blank to keep it."
-                      : "Service PAT for sync and ACL. No GitHub OAuth login in this release."}
-                  </p>
-                </div>
-                <div className="settings-form__field">
-                  <input
-                    id="integ_github_webhook_secret"
-                    type="password"
-                    value={integDraft.github_webhook_secret}
-                    onChange={(e) => setIntegField("github_webhook_secret", e.target.value)}
-                    placeholder={
-                      integMeta.github_webhook_secret_configured
-                        ? "Webhook HMAC secret (leave blank to keep)"
-                        : "Webhook HMAC secret"
-                    }
-                    aria-label="GitHub webhook HMAC secret"
-                    autoComplete="new-password"
-                  />
-                  <p className="settings-form__hint">
-                    {integMeta.github_webhook_secret_configured
-                      ? "Secret is configured. Leave blank to keep it."
-                      : "Must match the GitHub webhook secret. Delivery path is /api/webhooks/github/{instanceID}."}
-                  </p>
-                </div>
-                <label className="settings-form__check">
-                  <input
-                    type="checkbox"
-                    checked={integDraft.github_allow_private_network}
-                    onChange={(e) => setIntegField("github_allow_private_network", e.target.checked)}
-                  />
-                  <span className="settings-form__check-text">
-                    Allow Private Network Addresses
-                    <InfoTip label="About private network addresses">
-                      Lets GitSeer call GitHub Enterprise on private or lab addresses. Off by default to block SSRF.
-                    </InfoTip>
-                  </span>
-                </label>
-                <label className="settings-form__check">
-                  <input
-                    type="checkbox"
-                    checked={integDraft.github_allow_unsigned_webhooks}
-                    onChange={(e) => setIntegField("github_allow_unsigned_webhooks", e.target.checked)}
-                  />
-                  Allow Unsigned Webhooks (Not Recommended)
-                </label>
-              </fieldset>
-
-              {integError && (
-                <p className="error" role="alert">
-                  {integError}
-                </p>
-              )}
-              {integSavedFlash && !integDirty && <p className="settings-form__saved">Integration saved.</p>}
-
-              {editable && (
-                <div className="settings-form__actions">
-                  <button className="btn" type="button" onClick={cancelIntegration} disabled={!integDirty || integSaving}>
-                    Cancel
-                  </button>
-                  <button className="btn primary" type="submit" disabled={!integDirty || integSaving}>
-                    {integSaving ? "Saving…" : "Save Changes"}
-                  </button>
-                </div>
-              )}
-            </form>
-          )}
+          {tab === "integration" && <InstanceSettingsPanel editable={editable} />}
 
           {tab === "status" && (
             <div

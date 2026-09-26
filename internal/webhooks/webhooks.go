@@ -85,6 +85,9 @@ func (p *Processor) openSecret(stored string) (string, error) {
 		if gitseercrypto.LooksLikeCiphertext(stored) {
 			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
 		}
+		if gitseercrypto.LooksLikeBase64Blob(stored) {
+			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
+		}
 		return stored, nil
 	}
 	return gitseercrypto.Decrypt(p.encKey, stored)
@@ -94,13 +97,13 @@ func (p *Processor) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.HandleHTTPForInstance(w, r, 0)
 }
 
-// HandleHTTPForInstance accepts a Gitea webhook for a specific Lens instance ID.
+// HandleHTTPForInstance accepts a Gitea webhook for a specific GitSeer instance ID.
 // When instanceID is 0, the primary (oldest) instance is used.
 func (p *Processor) HandleHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
 	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeGitea)
 }
 
-// HandleGitHubHTTPForInstance accepts a GitHub webhook for a specific Lens instance ID.
+// HandleGitHubHTTPForInstance accepts a GitHub webhook for a specific GitSeer instance ID.
 func (p *Processor) HandleGitHubHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
 	if instanceID <= 0 {
 		http.Error(w, "instance required", http.StatusBadRequest)
@@ -123,8 +126,11 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 	var inst *models.Instance
 	if instanceID > 0 {
 		inst, err = p.store.GetInstanceByID(r.Context(), instanceID)
+	} else if forgeType == models.ForgeTypeGitHub {
+		http.Error(w, "instance required", http.StatusBadRequest)
+		return
 	} else {
-		inst, err = p.store.GetPrimaryInstance(r.Context())
+		inst, err = p.store.GetPrimaryGiteaInstance(r.Context())
 	}
 	if err != nil || inst == nil {
 		http.Error(w, "no instance", http.StatusServiceUnavailable)
@@ -135,7 +141,10 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	secret, allowUnsigned, err := p.webhookAuthForInstance(inst)
+	// Legacy global HMAC/allow-unsigned applies only to the unscoped Gitea route
+	// (instanceID==0). Instance-scoped routes never inherit another forge's secret/flag.
+	inheritLegacy := instanceID == 0 && forgeType != models.ForgeTypeGitHub
+	secret, allowUnsigned, err := p.webhookAuthForInstance(inst, inheritLegacy)
 	if err != nil {
 		p.log.Error("webhook secret decrypt", "instance_id", inst.ID, "err", err)
 		http.Error(w, "webhook secret unavailable", http.StatusServiceUnavailable)
@@ -177,7 +186,11 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 	_, _ = w.Write([]byte(`{"status":"accepted"}`))
 }
 
-func (p *Processor) webhookAuthForInstance(inst *models.Instance) (secret string, allowUnsigned bool, err error) {
+// webhookAuthForInstance resolves HMAC secret and allow-unsigned for a delivery.
+// When inheritLegacyGlobal is false (per-instance webhook routes), empty ciphertext
+// uses only the instance's allow_unsigned_webhooks flag — never the legacy global
+// Gitea secret or global allow-unsigned (which would fail-open secondary forges).
+func (p *Processor) webhookAuthForInstance(inst *models.Instance, inheritLegacyGlobal bool) (secret string, allowUnsigned bool, err error) {
 	if inst != nil && strings.TrimSpace(inst.WebhookSecretCiphertext) != "" {
 		secret, err = p.openSecret(inst.WebhookSecretCiphertext)
 		if err != nil {
@@ -185,12 +198,18 @@ func (p *Processor) webhookAuthForInstance(inst *models.Instance) (secret string
 		}
 		return secret, inst.AllowUnsignedWebhooks, nil
 	}
-	// Legacy global settings (primary Gitea path / pre-migration).
+	allow := false
+	if inst != nil {
+		allow = inst.AllowUnsignedWebhooks
+	}
+	if !inheritLegacyGlobal {
+		return "", allow, nil
+	}
+	// Legacy unscoped Gitea path (pre-per-instance secrets).
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	allow := p.allowUnsigned
-	if inst != nil {
-		allow = allow || inst.AllowUnsignedWebhooks
+	if inst == nil {
+		allow = p.allowUnsigned
 	}
 	return p.secret, allow, nil
 }
@@ -270,12 +289,16 @@ func (p *Processor) apply(ctx context.Context, ev store.WebhookEvent) error {
 	switch ev.EventType {
 	case "pull_request":
 		return p.applyPR(ctx, ev)
+	case "pull_request_review":
+		return p.applyPRReview(ctx, ev)
 	case "workflow_run", "actions_run":
 		return p.applyRun(ctx, ev)
 	case "workflow_job", "actions_job":
 		return p.applyJob(ctx, ev)
 	case "repository":
 		return p.applyRepository(ctx, ev)
+	case "status", "check_run", "check_suite":
+		return p.applyCommitStatus(ctx, ev)
 	default:
 		return nil // ignore unknown
 	}
@@ -285,17 +308,17 @@ func (p *Processor) applyPR(ctx context.Context, ev store.WebhookEvent) error {
 	var payload struct {
 		Action string `json:"action"`
 		PR     struct {
-			ID             int64  `json:"id"`
-			Number         int64  `json:"number"`
-			Title          string `json:"title"`
-			Body           string `json:"body"`
-			State          string `json:"state"`
-			Draft          bool   `json:"draft"`
-			Mergeable      *bool  `json:"mergeable"`
-			HTMLURL        string `json:"html_url"`
-			CreatedAt      string `json:"created_at"`
-			UpdatedAt      string `json:"updated_at"`
-			User           *struct {
+			ID        int64  `json:"id"`
+			Number    int64  `json:"number"`
+			Title     string `json:"title"`
+			Body      string `json:"body"`
+			State     string `json:"state"`
+			Draft     bool   `json:"draft"`
+			Mergeable *bool  `json:"mergeable"`
+			HTMLURL   string `json:"html_url"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			User      *struct {
 				ID    int64  `json:"id"`
 				Login string `json:"login"`
 			} `json:"user"`
@@ -334,16 +357,16 @@ func (p *Processor) applyPR(ctx context.Context, ev store.WebhookEvent) error {
 		}
 	}
 	pr := models.PullRequest{
-		ExternalID: payload.PR.ID,
-		Number:     payload.PR.Number,
-		Title:      payload.PR.Title,
+		ExternalID:  payload.PR.ID,
+		Number:      payload.PR.Number,
+		Title:       payload.PR.Title,
 		BodyExcerpt: truncate(payload.PR.Body, 500),
-		State:      payload.PR.State,
-		Draft:      payload.PR.Draft,
-		Mergeable:  payload.PR.Mergeable,
-		HTMLURL:    payload.PR.HTMLURL,
-		CreatedAt:  parseWebhookTime(payload.PR.CreatedAt),
-		UpdatedAt:  parseWebhookTime(payload.PR.UpdatedAt),
+		State:       payload.PR.State,
+		Draft:       payload.PR.Draft,
+		Mergeable:   payload.PR.Mergeable,
+		HTMLURL:     payload.PR.HTMLURL,
+		CreatedAt:   parseWebhookTime(payload.PR.CreatedAt),
+		UpdatedAt:   parseWebhookTime(payload.PR.UpdatedAt),
 	}
 	if payload.PR.User != nil {
 		pr.AuthorLogin = payload.PR.User.Login
@@ -371,19 +394,152 @@ func (p *Processor) applyPR(ctx context.Context, ev store.WebhookEvent) error {
 	return nil
 }
 
+func (p *Processor) applyPRReview(ctx context.Context, ev store.WebhookEvent) error {
+	var payload struct {
+		Action string `json:"action"`
+		Review struct {
+			State string `json:"state"`
+		} `json:"review"`
+		PR struct {
+			ID     int64 `json:"id"`
+			Number int64 `json:"number"`
+		} `json:"pull_request"`
+		Repository struct {
+			ID       int64  `json:"id"`
+			Name     string `json:"name"`
+			FullName string `json:"full_name"`
+			Owner    struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal([]byte(ev.Payload), &payload); err != nil {
+		return err
+	}
+	if payload.PR.Number <= 0 || payload.Repository.ID == 0 {
+		return nil
+	}
+	repo, err := p.ensureRepo(ctx, ev.InstanceID, payload.Repository.ID, payload.Repository.Owner.Login, payload.Repository.Name, payload.Repository.FullName)
+	if err != nil {
+		return err
+	}
+	existing, err := p.store.GetPullRequestByNumber(ctx, repo.ID, payload.PR.Number)
+	if err != nil || existing == nil {
+		// Minimal row; full sync will enrich.
+		existing, err = p.store.UpsertPullRequest(ctx, repo.ID, models.PullRequest{
+			ExternalID: payload.PR.ID,
+			Number:     payload.PR.Number,
+			State:      "open",
+			Title:      fmt.Sprintf("PR #%d", payload.PR.Number),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	state := forge.AggregateReviewState([]string{payload.Review.State, existing.ReviewState})
+	if state == "" && payload.Review.State != "" {
+		state = forge.AggregateReviewState([]string{payload.Review.State})
+	}
+	existing.ReviewState = state
+	saved, err := p.store.UpsertPullRequest(ctx, repo.ID, *existing)
+	if err != nil {
+		return err
+	}
+	if p.att != nil {
+		_ = p.att.EvaluatePullRequest(ctx, ev.InstanceID, saved)
+	}
+	if p.hub != nil {
+		p.hub.Publish(realtime.Event{Type: "pull_request", ID: saved.ID, RepoID: repo.ID})
+	}
+	return nil
+}
+
+func (p *Processor) applyCommitStatus(ctx context.Context, ev store.WebhookEvent) error {
+	var payload struct {
+		SHA    string `json:"sha"`
+		State  string `json:"state"`
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+		CheckRun struct {
+			HeadSHA    string `json:"head_sha"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"check_run"`
+		CheckSuite struct {
+			HeadSHA    string `json:"head_sha"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"check_suite"`
+		Repository struct {
+			ID int64 `json:"id"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal([]byte(ev.Payload), &payload); err != nil {
+		return err
+	}
+	sha := payload.SHA
+	if sha == "" {
+		sha = payload.Commit.SHA
+	}
+	if sha == "" {
+		sha = payload.CheckRun.HeadSHA
+	}
+	if sha == "" {
+		sha = payload.CheckSuite.HeadSHA
+	}
+	if sha == "" || payload.Repository.ID == 0 {
+		return nil
+	}
+	repo, err := p.store.GetRepositoryByExternalID(ctx, ev.InstanceID, payload.Repository.ID)
+	if err != nil || repo == nil {
+		return nil
+	}
+	ci := forge.NormalizeCIState(payload.State)
+	if ci == "" && payload.CheckRun.HeadSHA != "" {
+		if strings.ToLower(payload.CheckRun.Status) != "completed" {
+			ci = models.CIStatePending
+		} else {
+			ci = forge.NormalizeCIState(payload.CheckRun.Conclusion)
+			if ci == "" {
+				_, conc := forge.NormalizeStatus(payload.CheckRun.Conclusion)
+				switch conc {
+				case models.ConclusionFailure, models.ConclusionTimedOut, models.ConclusionActionRequired:
+					ci = models.CIStateFailure
+				case models.ConclusionSuccess:
+					ci = models.CIStateSuccess
+				case models.ConclusionCancelled, models.ConclusionSkipped, models.ConclusionNeutral:
+					ci = models.CIStateCancelled
+				}
+			}
+		}
+	}
+	if ci == "" && payload.CheckSuite.HeadSHA != "" {
+		if strings.ToLower(payload.CheckSuite.Status) != "completed" {
+			ci = models.CIStatePending
+		} else {
+			ci = forge.NormalizeCIState(payload.CheckSuite.Conclusion)
+		}
+	}
+	if ci == "" {
+		return nil
+	}
+	return p.store.SetPullRequestsCIStateByHeadSHA(ctx, repo.ID, sha, ci)
+}
+
 func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 	var payload struct {
 		WorkflowRun struct {
-			ID         int64  `json:"id"`
-			Name       string `json:"name"`
-			Event      string `json:"event"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			HTMLURL    string `json:"html_url"`
-			HeadBranch string `json:"head_branch"`
-			HeadSHA    string `json:"head_sha"`
-			Path       string `json:"path"`
-			RunAttempt int    `json:"run_attempt"`
+			ID           int64  `json:"id"`
+			Name         string `json:"name"`
+			Event        string `json:"event"`
+			Status       string `json:"status"`
+			Conclusion   string `json:"conclusion"`
+			HTMLURL      string `json:"html_url"`
+			HeadBranch   string `json:"head_branch"`
+			HeadSHA      string `json:"head_sha"`
+			Path         string `json:"path"`
+			RunAttempt   int    `json:"run_attempt"`
 			RunStartedAt string `json:"run_started_at"`
 			UpdatedAt    string `json:"updated_at"`
 			CreatedAt    string `json:"created_at"`
@@ -625,4 +781,3 @@ func VerifySignatureForTest(secret string, body []byte, sig string) bool {
 func VerifyGitHubSignatureForTest(secret string, body []byte, header string) bool {
 	return validGitHubSignature(secret, body, header)
 }
-

@@ -120,7 +120,7 @@ func validateHost(displayURL, host string, allowPrivate bool) error {
 
 func privateAddressError(_displayURL string, ip net.IP) error {
 	return fmt.Errorf(
-		"This GitHub URL points to a private network address (%s). Check %q to allow Lens to connect.",
+		"This GitHub URL points to a private network address (%s). Check %q to allow GitSeer to connect.",
 		ip,
 		PrivateNetworkOptionLabel,
 	)

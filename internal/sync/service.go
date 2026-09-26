@@ -112,6 +112,9 @@ func (s *Service) openSecret(stored string) (string, error) {
 		if gitseercrypto.LooksLikeCiphertext(stored) {
 			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
 		}
+		if gitseercrypto.LooksLikeBase64Blob(stored) {
+			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
+		}
 		return stored, nil
 	}
 	pt, err := gitseercrypto.Decrypt(s.encKey, stored)
@@ -191,7 +194,36 @@ func (s *Service) SyncAllInstances(ctx context.Context) ([]Result, error) {
 	}
 	out := make([]Result, 0, len(targets))
 	var firstErr error
+	leaseTTL := s.cfg.Sync.ReconcileInterval
+	if leaseTTL <= 0 {
+		leaseTTL = 5 * time.Minute
+	}
 	for _, t := range targets {
+		instID := t.inst.ID
+		if instID <= 0 {
+			meta, err := s.store.UpsertInstanceMeta(ctx, t.inst.ForgeType, t.inst.Name, t.inst.BaseURL, t.inst.Version, t.inst.CapabilitiesJSON)
+			if err != nil || meta == nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s (%s): ensure instance: %w", t.inst.Name, t.inst.ForgeType, err)
+				}
+				continue
+			}
+			instID = meta.ID
+			t.inst.ID = instID
+		}
+		holder := fmt.Sprintf("gitseer-manual-%d", instID)
+		ok, err := s.store.TryAcquireSyncLease(ctx, instID, holder, leaseTTL)
+		if err != nil {
+			s.log.Error("sync lease acquire failed", "instance_id", instID, "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s (%s): lease: %w", t.inst.Name, t.inst.ForgeType, err)
+			}
+			continue
+		}
+		if !ok {
+			s.log.Info("sync skipped; lease held", "instance_id", instID, "forge", t.inst.ForgeType)
+			continue
+		}
 		res, err := s.syncTarget(ctx, t)
 		if err != nil {
 			s.log.Error("instance sync failed", "instance_id", t.inst.ID, "forge", t.inst.ForgeType, "err", err)
@@ -204,6 +236,9 @@ func (s *Service) SyncAllInstances(ctx context.Context) ([]Result, error) {
 	}
 	if len(out) == 0 && firstErr != nil {
 		return nil, firstErr
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no forge instances available to sync (leases held or no tokens)")
 	}
 	return out, nil
 }
@@ -360,6 +395,11 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, forgeType, instan
 						s.log.Debug("commit status failed", "repo", repo.FullName, "sha", pr.HeadSHA, "err", err)
 					}
 				}
+				if rs, err := f.GetPullRequestReviewState(ctx, ref, pr.Number); err == nil {
+					pr.ReviewState = rs
+				} else if err != nil {
+					s.log.Debug("review state failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
+				}
 				saved, err := s.store.UpsertPullRequest(ctx, repo.ID, pr)
 				if err != nil {
 					return nil, err
@@ -449,6 +489,8 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, forgeType, instan
 			}
 		}
 
+		s.reconcileInFlightRuns(ctx, f, ref, &repo, inst.ID)
+
 		// Fill PR ci_state gaps from indexed runs when commit-status was empty.
 		s.refreshOpenPRCIFromRuns(ctx, repo.ID)
 	}
@@ -492,6 +534,58 @@ func (s *Service) refreshOpenPRCIFromRuns(ctx context.Context, repoID int64) {
 			continue
 		}
 		_ = s.store.SetPullRequestsCIStateByHeadSHA(ctx, repoID, pr.HeadSHA, state)
+	}
+}
+
+// reconcileInFlightRuns closes DB runs that vanished from the forge (missed webhooks /
+// purged history) so Active Actions does not keep ghost queued/waiting/running rows.
+func (s *Service) reconcileInFlightRuns(ctx context.Context, f forge.Forge, ref models.RepoRef, repo *models.Repository, instanceID int64) {
+	inFlight, err := s.store.ListInFlightWorkflowRunsByRepo(ctx, repo.ID)
+	if err != nil {
+		s.log.Debug("list in-flight runs failed", "repo", repo.FullName, "err", err)
+		return
+	}
+	for i := range inFlight {
+		run := inFlight[i]
+		remote, err := f.GetWorkflowRun(ctx, ref, run.ExternalID)
+		if forge.IsNotFound(err) {
+			closed, cerr := s.store.CompleteOrphanedWorkflowRun(ctx, run.ID)
+			if cerr != nil {
+				s.log.Warn("close orphaned run failed", "repo", repo.FullName, "run", run.ExternalID, "err", cerr)
+				continue
+			}
+			s.log.Info("closed orphaned in-flight run", "repo", repo.FullName, "run", run.ExternalID)
+			if s.att != nil && closed != nil {
+				_ = s.att.EvaluateRun(ctx, instanceID, closed)
+			}
+			if s.hub != nil {
+				s.hub.Publish(realtime.Event{Type: "workflow_run", ID: run.ID, RepoID: repo.ID})
+			}
+			continue
+		}
+		if err != nil {
+			s.log.Debug("get workflow run failed", "repo", repo.FullName, "run", run.ExternalID, "err", err)
+			continue
+		}
+		if remote == nil {
+			continue
+		}
+		saved, err := s.store.UpsertWorkflowRun(ctx, repo.ID, *remote)
+		if err != nil {
+			s.log.Debug("upsert reconciled run failed", "repo", repo.FullName, "run", run.ExternalID, "err", err)
+			continue
+		}
+		if jobs, jerr := f.ListJobs(ctx, ref, saved.ExternalID); jerr == nil {
+			for _, job := range jobs {
+				_, _ = s.store.UpsertJob(ctx, repo.ID, saved.ID, job)
+			}
+		}
+		if s.att != nil {
+			_ = s.att.EvaluateRun(ctx, instanceID, saved)
+		}
+		if s.hub != nil {
+			s.hub.Publish(realtime.Event{Type: "workflow_run", ID: saved.ID, RepoID: repo.ID})
+		}
 	}
 }
 
