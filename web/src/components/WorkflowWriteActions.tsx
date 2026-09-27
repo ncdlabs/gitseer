@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api, type User, type WorkflowRun } from "../api/client";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { IconTipButton } from "./IconTipButton";
 
 function isInFlight(status?: string): boolean {
   const s = (status || "").toLowerCase();
@@ -19,7 +20,7 @@ function servicePatWarning(user?: User | null, forgeType?: string): string {
 export type WorkflowWriteActionsProps = {
   run: WorkflowRun;
   user?: User | null;
-  /** Compact buttons for flyout rows. */
+  /** Compact layout for flyout rows. */
   compact?: boolean;
   className?: string;
   onDone?: () => void;
@@ -64,7 +65,14 @@ export function WorkflowWriteActions({ run, user, compact, className, onDone }: 
   if (!canRerun && !canCancel) return null;
 
   const warn = servicePatWarning(user, run.forge_type);
-  const btnClass = compact ? "btn btn--small" : "btn";
+  const rootClass = [
+    "workflow-write-actions",
+    compact ? "workflow-write-actions--compact" : "",
+    canCancel ? "workflow-write-actions--cancel" : "",
+    className || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   let dialogTitle = "";
   let dialogMessage: ReactNode = null;
@@ -94,11 +102,12 @@ export function WorkflowWriteActions({ run, user, compact, className, onDone }: 
   }
 
   return (
-    <div className={className ? `workflow-write-actions ${className}` : "workflow-write-actions"}>
+    <div className={rootClass}>
       {canRerun && (
-        <button
-          className={btnClass}
-          type="button"
+        <IconTipButton
+          label="Rerun Workflow"
+          icon="rerun"
+          compact={compact}
           disabled={busy}
           onClick={(e) => {
             e.preventDefault();
@@ -106,14 +115,14 @@ export function WorkflowWriteActions({ run, user, compact, className, onDone }: 
             setError(null);
             setConfirm("rerun");
           }}
-        >
-          Rerun Workflow
-        </button>
+        />
       )}
       {canCancel && (
-        <button
-          className={`${btnClass} danger`}
-          type="button"
+        <IconTipButton
+          label="Cancel Workflow"
+          icon="cancel"
+          danger
+          compact={compact}
           disabled={busy}
           onClick={(e) => {
             e.preventDefault();
@@ -121,9 +130,7 @@ export function WorkflowWriteActions({ run, user, compact, className, onDone }: 
             setError(null);
             setConfirm("cancel");
           }}
-        >
-          Cancel Workflow
-        </button>
+        />
       )}
       {error && <p className="error workflow-write-actions__error">{error}</p>}
       <ConfirmDialog

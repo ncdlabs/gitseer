@@ -6,6 +6,7 @@ import {
   openOnForgeLabel,
   repoLabel,
   safeExternalHref,
+  type Job,
   type User,
   type WorkflowNode,
   type WorkflowRun,
@@ -14,9 +15,11 @@ import { ExpandCollapseControls } from "../components/ExpandCollapseControls";
 import { ForgeBadge } from "../components/ForgeBadge";
 import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
+import { SortableTh } from "../components/SortableTh";
 import { WorkflowDAG } from "../components/WorkflowDAG";
 import { WorkflowWriteActions } from "../components/WorkflowWriteActions";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
+import { useTableSort } from "../hooks/useTableSort";
 import { useViewMode } from "../hooks/useViewMode";
 import { relativeAge } from "../lib/relativeAge";
 
@@ -31,6 +34,24 @@ type ActionGroup = {
   latest: WorkflowRun;
   runs: WorkflowRun[];
 };
+
+type PipelineGroupSortKey = "action" | "repository" | "forge" | "latest" | "runs";
+type PipelineJobSortKey = "job" | "status";
+
+const pipelineGroupAccessors = {
+  action: (g: ActionGroup) => g.name,
+  repository: (g: ActionGroup) => g.repoFull,
+  forge: (g: ActionGroup) =>
+    [g.forgeType, g.instanceName].filter(Boolean).join(" ").toLowerCase() || undefined,
+  latest: (g: ActionGroup) =>
+    (g.latest.conclusion || g.latest.status || "").toLowerCase() || undefined,
+  runs: (g: ActionGroup) => g.runs.length,
+} as const;
+
+const pipelineJobAccessors = {
+  job: (j: Job) => j.name,
+  status: (j: Job) => (j.conclusion || j.status || "").toLowerCase() || undefined,
+} as const;
 
 function runTime(run: WorkflowRun): number {
   const raw = run.started_at || run.completed_at;
@@ -119,11 +140,17 @@ export function PipelinesPage() {
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
   const groups = useMemo(() => groupByAction(q.data?.items ?? []), [q.data?.items]);
+  const {
+    sorted: sortedGroups,
+    sortKey,
+    sortDir,
+    toggle: toggleSort,
+  } = useTableSort<ActionGroup, PipelineGroupSortKey>(groups, pipelineGroupAccessors);
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pipelines…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
 
-  const toggle = (key: string) => {
+  const toggleOpen = (key: string) => {
     setOpenKeys((cur) => {
       const next = new Set(cur);
       if (next.has(key)) next.delete(key);
@@ -131,9 +158,9 @@ export function PipelinesPage() {
       return next;
     });
   };
-  const allOpen = groups.length > 0 && groups.every((group) => openKeys.has(group.key));
-  const anyOpen = groups.some((group) => openKeys.has(group.key));
-  const expandAll = () => setOpenKeys(new Set(groups.map((group) => group.key)));
+  const allOpen = sortedGroups.length > 0 && sortedGroups.every((group) => openKeys.has(group.key));
+  const anyOpen = sortedGroups.some((group) => openKeys.has(group.key));
+  const expandAll = () => setOpenKeys(new Set(sortedGroups.map((group) => group.key)));
   const collapseAll = () => setOpenKeys(new Set());
   const empty =
     filter || effectiveForge !== "all" ? "No pipelines match this filter." : "No workflow runs indexed yet.";
@@ -169,7 +196,7 @@ export function PipelinesPage() {
           {showForge && (
             <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} options={chipOptions} />
           )}
-          {groups.length > 0 && (
+          {sortedGroups.length > 0 && (
             <ExpandCollapseControls
               onExpandAll={expandAll}
               onCollapseAll={collapseAll}
@@ -179,11 +206,11 @@ export function PipelinesPage() {
           )}
         </ListControls>
       </div>
-      {groups.length === 0 ? (
+      {sortedGroups.length === 0 ? (
         <div className="empty">{empty}</div>
       ) : mode === "cards" ? (
         <div className="item-grid item-grid--actions">
-          {groups.map((group) => {
+          {sortedGroups.map((group) => {
             const open = openKeys.has(group.key);
             return (
               <div
@@ -194,7 +221,7 @@ export function PipelinesPage() {
                   type="button"
                   className="action-card__toggle"
                   aria-expanded={open}
-                  onClick={() => toggle(group.key)}
+                  onClick={() => toggleOpen(group.key)}
                 >
                   <div className="item-card__meta">
                     {showForge && <ForgeBadge {...groupBadge(group)} />}
@@ -222,15 +249,47 @@ export function PipelinesPage() {
           <table className="action-table">
             <thead>
               <tr>
-                <th>Action</th>
-                <th>Repository</th>
-                {showForge && <th>Forge</th>}
-                <th>Latest</th>
-                <th>Runs</th>
+                <SortableTh
+                  label="Action"
+                  columnKey="action"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggleSort}
+                />
+                <SortableTh
+                  label="Repository"
+                  columnKey="repository"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggleSort}
+                />
+                {showForge && (
+                  <SortableTh
+                    label="Forge"
+                    columnKey="forge"
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onToggle={toggleSort}
+                  />
+                )}
+                <SortableTh
+                  label="Latest"
+                  columnKey="latest"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggleSort}
+                />
+                <SortableTh
+                  label="Runs"
+                  columnKey="runs"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggleSort}
+                />
               </tr>
             </thead>
             <tbody>
-              {groups.map((group) => {
+              {sortedGroups.map((group) => {
                 const open = openKeys.has(group.key);
                 return (
                   <Fragment key={group.key}>
@@ -240,7 +299,7 @@ export function PipelinesPage() {
                           type="button"
                           className="action-table__toggle"
                           aria-expanded={open}
-                          onClick={() => toggle(group.key)}
+                          onClick={() => toggleOpen(group.key)}
                         >
                           <span className="action-table__chevron" aria-hidden>
                             {open ? "▾" : "▸"}
@@ -296,19 +355,26 @@ export function PipelineDetailPage() {
     enabled: logJob != null,
   });
 
+  const jobs = q.data?.jobs ?? [];
   const jobStatus = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const job of q.data?.jobs || []) {
+    for (const job of jobs) {
       map[job.name] = job.conclusion || job.status;
     }
     return map;
-  }, [q.data?.jobs]);
+  }, [jobs]);
+  const {
+    sorted: sortedJobs,
+    sortKey: jobSortKey,
+    sortDir: jobSortDir,
+    toggle: toggleJobSort,
+  } = useTableSort<Job, PipelineJobSortKey>(jobs, pipelineJobAccessors);
 
   if (!validId) return <div className="error">Invalid pipeline id.</div>;
   if (q.isLoading || q.isPending) return <div className="loading">Loading run…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
   if (!q.data) return <div className="error">Run not found.</div>;
-  const { run, jobs, graph } = q.data;
+  const { run, graph } = q.data;
   const forgeHref = safeExternalHref(run.html_url);
   const user = (me.data as User | undefined) ?? null;
   return (
@@ -354,10 +420,26 @@ export function PipelineDetailPage() {
       <div className="panel">
         <table>
           <thead>
-            <tr><th>Job</th><th>Status</th><th>Logs</th></tr>
+            <tr>
+              <SortableTh
+                label="Job"
+                columnKey="job"
+                sortKey={jobSortKey}
+                sortDir={jobSortDir}
+                onToggle={toggleJobSort}
+              />
+              <SortableTh
+                label="Status"
+                columnKey="status"
+                sortKey={jobSortKey}
+                sortDir={jobSortDir}
+                onToggle={toggleJobSort}
+              />
+              <th>Logs</th>
+            </tr>
           </thead>
           <tbody>
-            {jobs.map((job) => (
+            {sortedJobs.map((job) => (
               <tr key={job.id}>
                 <td>{job.name}</td>
                 <td><span className={`badge ${job.conclusion || job.status}`}>{job.conclusion || job.status}</span></td>
@@ -366,7 +448,7 @@ export function PipelineDetailPage() {
                 </td>
               </tr>
             ))}
-            {jobs.length === 0 && (
+            {sortedJobs.length === 0 && (
               <tr><td colSpan={3} className="empty">No jobs for this run.</td></tr>
             )}
           </tbody>

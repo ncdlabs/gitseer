@@ -29,7 +29,11 @@ export type ShellIconName =
   | "warn"
   | "skip"
   | "running"
-  | "pending";
+  | "pending"
+  | "rerun"
+  | "cancel"
+  | "mute"
+  | "logTail";
 
 const ASCII: Record<ShellIconName, string> = {
   dashboard: "[#]",
@@ -60,6 +64,10 @@ const ASCII: Record<ShellIconName, string> = {
   skip: "[-]",
   running: "[~]",
   pending: "[.]",
+  rerun: "[<<]",
+  cancel: "[#]",
+  mute: "[z]",
+  logTail: "[L]",
 };
 
 type SvgCommon = SVGProps<SVGSVGElement>;
@@ -214,6 +222,29 @@ function SvgIcon({ name, className }: { name: ShellIconName; className?: string 
     skip: <path d="M6 12h12" strokeWidth={2} />,
     running: <path d="M5 12h14M12 5v14" strokeWidth={2} />,
     pending: <circle cx="12" cy="12" r="2" strokeWidth={2} />,
+    rerun: (
+      <>
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" strokeWidth={1.75} />
+        <path d="M20 4v5h-5" strokeWidth={1.75} />
+      </>
+    ),
+    cancel: (
+      <>
+        <circle cx="12" cy="12" r="9" strokeWidth={1.5} />
+        <rect x="8.5" y="8.5" width="7" height="7" rx="1" strokeWidth={1.5} />
+      </>
+    ),
+    mute: (
+      <>
+        <path d="M11 5 6 9H3v6h3l5 4V5z" strokeWidth={1.75} />
+        <path d="m16 9 5 5M21 9l-5 5" strokeWidth={1.75} />
+      </>
+    ),
+    logTail: (
+      <>
+        <path d="M5 6h14M5 12h10M5 18h12" strokeWidth={1.75} />
+      </>
+    ),
   };
 
   return <svg {...common}>{paths[name]}</svg>;

@@ -6,30 +6,35 @@ import { ViewModeToggle } from "./ViewModeToggle";
 type Props = {
   mode: ViewMode;
   onMode: (mode: ViewMode) => void;
-  filter: string;
-  onFilter: (query: string) => void;
+  filter?: string;
+  onFilter?: (query: string) => void;
   filterPlaceholder?: string;
   filterLabel?: string;
+  /** When set, replaces the default ListFilter control. */
+  filterControl?: ReactNode;
   children?: ReactNode;
 };
 
 export function ListControls({
   mode,
   onMode,
-  filter,
+  filter = "",
   onFilter,
   filterPlaceholder,
   filterLabel,
+  filterControl,
   children,
 }: Props) {
   return (
     <div className="list-controls">
-      <ListFilter
-        value={filter}
-        onApply={onFilter}
-        placeholder={filterPlaceholder}
-        label={filterLabel}
-      />
+      {filterControl ?? (
+        <ListFilter
+          value={filter}
+          onApply={onFilter ?? (() => {})}
+          placeholder={filterPlaceholder}
+          label={filterLabel}
+        />
+      )}
       {children}
       <ViewModeToggle mode={mode} onMode={onMode} />
     </div>

@@ -11,9 +11,36 @@ import {
   type ForgeStatusRow,
 } from "../api/client";
 import { resolveInstanceName } from "../hooks/useShowForgeUI";
+import { useTableSort, type TableSortAccessors } from "../hooks/useTableSort";
 import type { ViewMode } from "../hooks/useViewMode";
 import { relativeAge } from "../lib/relativeAge";
 import { ForgeBadge } from "./ForgeBadge";
+import { IconTipButton } from "./IconTipButton";
+import { SortableTh } from "./SortableTh";
+
+const SEVERITY_RANK: Record<string, number> = {
+  critical: 0,
+  warning: 1,
+  waiting: 2,
+};
+
+type AttentionSortKey = "severity" | "type" | "title" | "repository" | "forge" | "age";
+
+const ATTENTION_SORT_ACCESSORS: TableSortAccessors<AttentionItem, AttentionSortKey> = {
+  severity: (item) => SEVERITY_RANK[item.severity] ?? null,
+  type: (item) => item.type || null,
+  title: (item) => item.title || null,
+  repository: (item) => repoLabel(item) || null,
+  forge: (item) => {
+    const parts = [item.forge_type, item.instance_name].filter(Boolean);
+    return parts.length ? parts.join(" ") : null;
+  },
+  age: (item) => {
+    if (!item.opened_at) return null;
+    const t = Date.parse(item.opened_at);
+    return Number.isFinite(t) ? t : null;
+  },
+};
 
 function typeLabel(type: string) {
   return type.replaceAll("_", " ");
@@ -133,9 +160,9 @@ function MuteMenu({
 
   return (
     <div className="attention-mute">
-      <button
-        type="button"
-        className="btn btn--small"
+      <IconTipButton
+        label={mute.isPending ? "Muting…" : "Mute"}
+        icon="mute"
         aria-expanded={open}
         aria-haspopup="menu"
         disabled={mute.isPending}
@@ -144,9 +171,7 @@ function MuteMenu({
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-      >
-        {mute.isPending ? "Muting…" : "Mute"}
-      </button>
+      />
       {open && (
         <div
           className="attention-mute__menu"
@@ -205,11 +230,14 @@ function LogSnippetButton({ itemId }: { itemId: number }) {
     },
   });
 
+  const tipLabel = fetchSnippet.isPending ? "Loading…" : open ? "Hide Log Tail" : "Log Tail";
+
   return (
     <div className="attention-log-snippet">
-      <button
-        type="button"
-        className="btn btn--small"
+      <IconTipButton
+        label={tipLabel}
+        icon="logTail"
+        aria-pressed={open}
         disabled={fetchSnippet.isPending}
         onClick={(e) => {
           e.preventDefault();
@@ -220,9 +248,7 @@ function LogSnippetButton({ itemId }: { itemId: number }) {
           }
           fetchSnippet.mutate();
         }}
-      >
-        {fetchSnippet.isPending ? "Loading…" : open ? "Hide Log Tail" : "Log Tail"}
-      </button>
+      />
       {open && (
         <div
           className="attention-log-snippet__panel"
@@ -243,6 +269,82 @@ function LogSnippetButton({ itemId }: { itemId: number }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function AttentionTable({
+  list,
+  showForge,
+  forges,
+  onInvalidate,
+}: {
+  list: AttentionItem[];
+  showForge: boolean;
+  forges: ForgeStatusRow[];
+  onInvalidate: () => void;
+}) {
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(list, ATTENTION_SORT_ACCESSORS);
+
+  return (
+    <div className="panel">
+      <table>
+        <thead>
+          <tr>
+            <SortableTh label="Severity" columnKey="severity" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            <SortableTh label="Type" columnKey="type" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            <SortableTh label="Title" columnKey="title" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            <SortableTh
+              label="Repository"
+              columnKey="repository"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onToggle={toggle}
+            />
+            {showForge && (
+              <SortableTh label="Forge" columnKey="forge" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            )}
+            <SortableTh label="Age" columnKey="age" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((item) => {
+            const link = itemHref(item);
+            const title = link?.external ? (
+              <a href={link.href} target="_blank" rel="noreferrer">
+                {item.title}
+              </a>
+            ) : link ? (
+              <Link to={link.href}>{item.title}</Link>
+            ) : (
+              item.title
+            );
+            return (
+              <tr key={item.id}>
+                <td>
+                  <span className={`badge ${item.severity}`}>{item.severity}</span>
+                </td>
+                <td className="mono">{typeLabel(item.type)}</td>
+                <td>{title}</td>
+                <td className="mono">{repoLabel(item) || "—"}</td>
+                {showForge && (
+                  <td>
+                    <ForgeBadge {...itemBadge(item, forges)} />
+                  </td>
+                )}
+                <td className="muted col-age">{relativeAge(item.opened_at)}</td>
+                <td>
+                  <div className="attention-actions-row">
+                    {canFetchLogSnippet(item) && <LogSnippetButton itemId={item.id} />}
+                    <MuteMenu itemId={item.id} onDone={onInvalidate} />
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -270,57 +372,7 @@ export function AttentionCards({
 
   if (mode === "table") {
     return (
-      <div className="panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Severity</th>
-              <th>Type</th>
-              <th>Title</th>
-              <th>Repository</th>
-              {showForge && <th>Forge</th>}
-              <th>Age</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((item) => {
-              const link = itemHref(item);
-              const title = link?.external ? (
-                <a href={link.href} target="_blank" rel="noreferrer">
-                  {item.title}
-                </a>
-              ) : link ? (
-                <Link to={link.href}>{item.title}</Link>
-              ) : (
-                item.title
-              );
-              return (
-                <tr key={item.id}>
-                  <td>
-                    <span className={`badge ${item.severity}`}>{item.severity}</span>
-                  </td>
-                  <td className="mono">{typeLabel(item.type)}</td>
-                  <td>{title}</td>
-                  <td className="mono">{repoLabel(item) || "—"}</td>
-                  {showForge && (
-                    <td>
-                      <ForgeBadge {...itemBadge(item, forges)} />
-                    </td>
-                  )}
-                  <td className="muted">{relativeAge(item.opened_at)}</td>
-                  <td>
-                    <div className="attention-actions-row">
-                      {canFetchLogSnippet(item) && <LogSnippetButton itemId={item.id} />}
-                      <MuteMenu itemId={item.id} onDone={invalidate} />
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <AttentionTable list={list} showForge={showForge} forges={forges} onInvalidate={invalidate} />
     );
   }
 

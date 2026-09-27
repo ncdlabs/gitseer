@@ -9,13 +9,13 @@ import { jobProgress, parseSteps, stepProgress } from "../lib/actionProgress";
 import { ForgeBadge } from "./ForgeBadge";
 import { WorkflowWriteActions } from "./WorkflowWriteActions";
 
-function ProgressBar({ ratio, label }: { ratio: number; label: string }) {
+function ProgressBar({ ratio, label, asciiWidth = 10 }: { ratio: number; label: string; asciiWidth?: number }) {
   const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
   const terminal = useIsTerminalTheme();
   if (terminal) {
     return (
       <pre className="progress-bar progress-bar--ascii mono" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
-        {asciiBar(ratio)} {pct}%
+        {asciiBar(ratio, asciiWidth)} {pct}%
       </pre>
     );
   }
@@ -136,7 +136,7 @@ function ActiveRunRow({
               })}
             />
           )}
-          {item.run.name}
+          <span className="actions-flyout__run-name-text">{item.run.name}</span>
         </span>
         {jp.total > 0 && (
           <div className="actions-flyout__progress">
@@ -146,7 +146,7 @@ function ActiveRunRow({
                 {jp.completed}/{jp.total}
               </span>
             </div>
-            <ProgressBar ratio={jp.ratio} label={`Jobs ${jp.completed} of ${jp.total}`} />
+            <ProgressBar ratio={jp.ratio} label={`Jobs ${jp.completed} of ${jp.total}`} asciiWidth={8} />
           </div>
         )}
         {sp && sp.total > 0 && (
@@ -157,7 +157,7 @@ function ActiveRunRow({
                 {sp.completed}/{sp.total}
               </span>
             </div>
-            <ProgressBar ratio={sp.ratio} label={`Steps ${sp.completed} of ${sp.total}`} />
+            <ProgressBar ratio={sp.ratio} label={`Steps ${sp.completed} of ${sp.total}`} asciiWidth={8} />
           </div>
         )}
       </Link>

@@ -10,12 +10,16 @@ import {
   reviewBadgeClass,
   reviewLabel,
   safeExternalHref,
+  type PullRequest,
+  type Repository,
 } from "../api/client";
 import { ForgeBadge } from "../components/ForgeBadge";
 import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { HealthBadge } from "../components/HealthBadge";
 import { ListControls } from "../components/ListControls";
+import { SortableTh } from "../components/SortableTh";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
+import { useTableSort } from "../hooks/useTableSort";
 import { useURLQueryFilter } from "../hooks/useURLQueryFilter";
 import { useViewMode } from "../hooks/useViewMode";
 
@@ -26,6 +30,30 @@ function repoDetailPath(repo: { owner?: string; name?: string; full_name?: strin
   const q = repo.instance_id && repo.instance_id > 0 ? `?instance_id=${repo.instance_id}` : "";
   return `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${q}`;
 }
+
+function forgeSortValue(item: { forge_type?: string; instance_name?: string }) {
+  return `${item.forge_type || ""} ${item.instance_name || ""}`.trim() || null;
+}
+
+const REPO_SORT_ACCESSORS = {
+  repository: (repo: Repository) => repo.full_name,
+  forge: (repo: Repository) => forgeSortValue(repo),
+  health: (repo: Repository) => repo.health?.score ?? null,
+  default_branch: (repo: Repository) => repo.default_branch || null,
+  visibility: (repo: Repository) => {
+    const base = repo.private ? "private" : "public";
+    return repo.archived ? `${base} archived` : base;
+  },
+} as const;
+
+const PR_SORT_ACCESSORS = {
+  pr: (pr: PullRequest) => `#${pr.number} ${pr.title}`,
+  repository: (pr: PullRequest) => repoLabel(pr),
+  forge: (pr: PullRequest) => forgeSortValue(pr),
+  author: (pr: PullRequest) => pr.author_login || null,
+  ci: (pr: PullRequest) => (pr.ci_state || "").toLowerCase() || null,
+  review: (pr: PullRequest) => (pr.review_state || "").toLowerCase() || null,
+} as const;
 
 export function RepositoriesPage() {
   const { mode, setMode } = useViewMode();
@@ -39,6 +67,7 @@ export function RepositoriesPage() {
     placeholderData: keepPreviousData,
   });
   const items = q.data?.items ?? [];
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(items, REPO_SORT_ACCESSORS);
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading repositories…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
@@ -117,15 +146,47 @@ export function RepositoriesPage() {
           <table>
             <thead>
               <tr>
-                <th>Repository</th>
-                {showForge && <th>Forge</th>}
-                <th>Health</th>
-                <th>Default branch</th>
-                <th>Visibility</th>
+                <SortableTh
+                  label="Repository"
+                  columnKey="repository"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                {showForge && (
+                  <SortableTh
+                    label="Forge"
+                    columnKey="forge"
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onToggle={toggle}
+                  />
+                )}
+                <SortableTh
+                  label="Health"
+                  columnKey="health"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Default Branch"
+                  columnKey="default_branch"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Visibility"
+                  columnKey="visibility"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
               </tr>
             </thead>
             <tbody>
-              {items.map((repo) => {
+              {sorted.map((repo) => {
                 const forgeHref = safeExternalHref(repo.html_url);
                 const detail = repoDetailPath(repo);
                 return (
@@ -157,7 +218,7 @@ export function RepositoriesPage() {
                   </tr>
                 );
               })}
-              {items.length === 0 && (
+              {sorted.length === 0 && (
                 <tr>
                   <td colSpan={showForge ? 5 : 4} className="empty">
                     {empty}
@@ -184,6 +245,7 @@ export function PullRequestsPage() {
     placeholderData: keepPreviousData,
   });
   const items = q.data?.items ?? [];
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(items, PR_SORT_ACCESSORS);
 
   if (q.isPending && !q.isPlaceholderData) return <div className="loading">Loading pull requests…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
@@ -267,16 +329,54 @@ export function PullRequestsPage() {
           <table>
             <thead>
               <tr>
-                <th>PR</th>
-                <th>Repository</th>
-                {showForge && <th>Forge</th>}
-                <th>Author</th>
-                <th>CI</th>
-                <th>Review</th>
+                <SortableTh
+                  label="PR"
+                  columnKey="pr"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Repository"
+                  columnKey="repository"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                {showForge && (
+                  <SortableTh
+                    label="Forge"
+                    columnKey="forge"
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onToggle={toggle}
+                  />
+                )}
+                <SortableTh
+                  label="Author"
+                  columnKey="author"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="CI"
+                  columnKey="ci"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Review"
+                  columnKey="review"
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggle}
+                />
               </tr>
             </thead>
             <tbody>
-              {items.map((pr) => {
+              {sorted.map((pr) => {
                 const href = safeExternalHref(pr.html_url);
                 return (
                   <tr key={pr.id}>
@@ -315,7 +415,7 @@ export function PullRequestsPage() {
                   </tr>
                 );
               })}
-              {items.length === 0 && (
+              {sorted.length === 0 && (
                 <tr>
                   <td colSpan={showForge ? 6 : 5} className="empty">
                     {empty}

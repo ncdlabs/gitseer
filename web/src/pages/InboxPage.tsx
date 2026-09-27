@@ -13,23 +13,25 @@ import {
 import { AttentionCards } from "../components/AttentionCards";
 import { ForgeBadge } from "../components/ForgeBadge";
 import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
+import { InboxReasonFilter, inboxReasonLabel } from "../components/InboxReasonFilter";
+import { InboxSearch } from "../components/InboxSearch";
 import { ListControls } from "../components/ListControls";
 import { SavedFiltersBar } from "../components/SavedFiltersBar";
+import { SortableTh } from "../components/SortableTh";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
-import { useURLQueryFilter } from "../hooks/useURLQueryFilter";
+import { useTableSort, type TableSortAccessors } from "../hooks/useTableSort";
 import { useViewMode } from "../hooks/useViewMode";
 
-const REASON_OPTIONS: Array<{ id: "" | InboxReason; label: string }> = [
-  { id: "", label: "All" },
-  { id: "author", label: "Author" },
-  { id: "requested_reviewer", label: "Review Requests" },
-  { id: "failing_ci", label: "Failing CI" },
-  { id: "blocked_on_me", label: "Blocked On Me" },
-];
+type InboxPRRow = InboxItem & { pull_request: PullRequest };
 
-function reasonLabel(r: string) {
-  return r.replaceAll("_", " ");
-}
+type InboxPRSortKey = "pr" | "repository" | "reasons" | "ci";
+
+const INBOX_PR_SORT_ACCESSORS: TableSortAccessors<InboxPRRow, InboxPRSortKey> = {
+  pr: (it) => `#${it.pull_request.number} ${it.pull_request.title}`,
+  repository: (it) => repoLabel(it.pull_request) || null,
+  reasons: (it) => it.reasons.map(inboxReasonLabel).join(", ") || null,
+  ci: (it) => (it.pull_request.ci_state || "").toLowerCase() || null,
+};
 
 function ciBadgeClass(state?: string) {
   switch ((state || "").toLowerCase()) {
@@ -74,7 +76,7 @@ function InboxPRCard({
         )}
         {reasons.map((r) => (
           <span key={r} className="badge">
-            {reasonLabel(r)}
+            {inboxReasonLabel(r)}
           </span>
         ))}
         {pr.ci_state && <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{pr.ci_state}</span>}
@@ -99,18 +101,68 @@ function InboxPRCard({
   );
 }
 
+function InboxPRTable({ items }: { items: InboxPRRow[] }) {
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(items, INBOX_PR_SORT_ACCESSORS);
+
+  return (
+    <div className="panel">
+      <table>
+        <thead>
+          <tr>
+            <SortableTh label="PR" columnKey="pr" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            <SortableTh
+              label="Repository"
+              columnKey="repository"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onToggle={toggle}
+            />
+            <SortableTh label="Reasons" columnKey="reasons" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+            <SortableTh label="CI" columnKey="ci" sortKey={sortKey} sortDir={sortDir} onToggle={toggle} />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((it) => {
+            const pr = it.pull_request;
+            const href = safeExternalHref(pr.html_url);
+            return (
+              <tr key={pr.id}>
+                <td>
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer">
+                      #{pr.number} {pr.title}
+                    </a>
+                  ) : (
+                    <>
+                      #{pr.number} {pr.title}
+                    </>
+                  )}
+                </td>
+                <td className="mono">{repoLabel(pr)}</td>
+                <td>{it.reasons.map(inboxReasonLabel).join(", ")}</td>
+                <td>
+                  <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{pr.ci_state || "—"}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function InboxPage() {
   const { mode, setMode } = useViewMode();
   const { showForge, forges, chipOptions } = useForgeInventory();
-  const [filter, setFilter] = useURLQueryFilter();
   const [params, setParams] = useSearchParams();
   const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
   const reason = (params.get("reason") || "") as "" | InboxReason;
   const effectiveForge = showForge ? forgeFilter : "all";
 
   const q = useQuery({
-    queryKey: ["inbox", filter, reason, effectiveForge],
-    queryFn: () => api.inbox({ q: filter, reason: reason || undefined, forgeType: effectiveForge }),
+    queryKey: ["inbox", reason, effectiveForge],
+    queryFn: () => api.inbox({ reason: reason || undefined, forgeType: effectiveForge }),
     placeholderData: keepPreviousData,
   });
 
@@ -134,7 +186,7 @@ export function InboxPage() {
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
 
   const empty =
-    filter || reason || effectiveForge !== "all"
+    reason || effectiveForge !== "all"
       ? "No inbox items match this filter."
       : "Your inbox is empty — nothing authored by you, assigned for review, or blocked on you.";
 
@@ -157,25 +209,9 @@ export function InboxPage() {
         <ListControls
           mode={mode}
           onMode={setMode}
-          filter={filter}
-          onFilter={setFilter}
-          filterPlaceholder="Filter inbox…"
-          filterLabel="Filter inbox"
+          filterControl={<InboxSearch reason={reason} forgeType={effectiveForge} />}
         >
-          <div className="forge-filter" role="radiogroup" aria-label="Filter by reason">
-            {REASON_OPTIONS.map((opt) => (
-              <button
-                key={opt.id || "all"}
-                type="button"
-                role="radio"
-                className={`forge-filter__chip${reason === opt.id ? " is-active" : ""}`}
-                aria-checked={reason === opt.id}
-                onClick={() => setReason(opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+          <InboxReasonFilter value={reason} onChange={setReason} />
           {showForge && (
             <ForgeFilterChips value={forgeFilter} onChange={setForgeFilter} options={chipOptions} />
           )}
@@ -184,13 +220,11 @@ export function InboxPage() {
       <SavedFiltersBar
         page="inbox"
         currentQuery={{
-          q: filter || undefined,
           reason: reason || undefined,
           forge_type: effectiveForge !== "all" && !effectiveForge.startsWith("instance:") ? effectiveForge : undefined,
           page: "inbox",
         }}
         onApply={(query) => {
-          if (typeof query.q === "string") setFilter(query.q);
           if (typeof query.reason === "string") setReason((query.reason as InboxReason) || "");
         }}
       />
@@ -226,44 +260,7 @@ export function InboxPage() {
                   ))}
                 </div>
               ) : (
-                <div className="panel">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>PR</th>
-                        <th>Repository</th>
-                        <th>Reasons</th>
-                        <th>CI</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prItems.map((it) => {
-                        const pr = it.pull_request;
-                        const href = safeExternalHref(pr.html_url);
-                        return (
-                          <tr key={pr.id}>
-                            <td>
-                              {href ? (
-                                <a href={href} target="_blank" rel="noreferrer">
-                                  #{pr.number} {pr.title}
-                                </a>
-                              ) : (
-                                <>
-                                  #{pr.number} {pr.title}
-                                </>
-                              )}
-                            </td>
-                            <td className="mono">{repoLabel(pr)}</td>
-                            <td>{it.reasons.map(reasonLabel).join(", ")}</td>
-                            <td>
-                              <span className={`badge ${ciBadgeClass(pr.ci_state)}`}>{pr.ci_state || "—"}</span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <InboxPRTable items={prItems} />
               )}
             </section>
           )}

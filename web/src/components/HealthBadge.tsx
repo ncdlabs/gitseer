@@ -28,15 +28,10 @@ function gradeLabel(grade: string) {
 
 type Props = {
   health?: RepoHealth | null;
-  /** Show numeric score next to grade. */
-  showScore?: boolean;
 };
 
-export function HealthBadge({ health, showScore = true }: Props) {
+export function HealthBadge({ health }: Props) {
   if (!health) return null;
-  const label = showScore
-    ? `${gradeLabel(health.grade)} ${health.score}`
-    : gradeLabel(health.grade);
   const title = [
     `Score ${health.score}`,
     health.open_critical_attention ? `${health.open_critical_attention} critical attention` : null,
@@ -51,7 +46,7 @@ export function HealthBadge({ health, showScore = true }: Props) {
 
   return (
     <span className={`badge ${gradeClass(health.grade)}`} title={title || undefined}>
-      {label}
+      {gradeLabel(health.grade)}
     </span>
   );
 }

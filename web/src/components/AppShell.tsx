@@ -8,6 +8,7 @@ import { Brand } from "./Brand";
 import { Glyph, type ShellIconName } from "./Glyph";
 import { HeaderSearch } from "./HeaderSearch";
 import { ThemePicker } from "./ThemePicker";
+import { VisitBreadcrumbs } from "./VisitBreadcrumbs";
 
 type Props = {
   user: User;
@@ -130,6 +131,9 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
       </aside>
       <main className={`content${syncing ? " content--syncing" : ""}`}>
         <header className="app-header">
+          <div className="app-header__trail">
+            <VisitBreadcrumbs />
+          </div>
           <div className="app-header__actions">
             <HeaderSearch
               canSync={!!user.is_bootstrap_admin && !!onSync}
