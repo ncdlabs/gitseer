@@ -100,6 +100,7 @@ Pick one path. Detail: [docs/getting-started.md](docs/getting-started.md) · [do
 ```bash
 mkdir -p gitseer-data && cd gitseer-data
 podman run --rm -p 8090:8090 \
+  --platform linux/amd64 \
   -v "$PWD/data:/data" \
   -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
   -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
@@ -107,7 +108,7 @@ podman run --rm -p 8090:8090 \
   ghcr.io/ncdlabs/gitseer:1.0.1
 ```
 
-Open **http://127.0.0.1:8090**, complete **Setup** (Prepare → Choose Forge → Connect → Validate → Finish), sign in, then **Sync Now**.
+Open **http://127.0.0.1:8090**, complete **Setup** (Prepare → Choose Forge → Connect → Validate → Finish), sign in, then **Sync Now**. On Apple Silicon / ARM hosts, keep `--platform linux/amd64` (release images are amd64-only).
 
 ### B. Release binary
 
@@ -234,6 +235,7 @@ Tagged releases publish a **linux/amd64** binary on GitHub Releases and a contai
 ```bash
 podman pull ghcr.io/ncdlabs/gitseer:1.0.1
 # or :latest
+# Apple Silicon / ARM: add --platform linux/amd64
 ```
 
 Docker Hub (`docker.io/ncdlabs/gitseer`) publishes only when `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are set.
