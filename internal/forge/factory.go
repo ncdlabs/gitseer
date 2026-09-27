@@ -37,7 +37,7 @@ func Register(forgeType string, c Constructor) {
 	constructors[ft] = c
 }
 
-// New returns a Forge for the given forge_type (gitea | github).
+// New returns a Forge for the given forge_type (gitea | github | gitlab | bitbucket | forgejo).
 // Blank forge_type defaults to gitea. Callers must import the implementation
 // packages (or forge/all) so constructors are registered.
 func New(opts Options) (Forge, error) {

@@ -22,6 +22,27 @@
 - Link while signed in: `GET /api/v1/auth/github/login?link=1` attaches GitHub identity + token to the current user (account menu **Link GitHub**)
 - Users may hold both Gitea and GitHub identities on one GitSeer account; tokens are stored per forge `instance_id` in `user_tokens`
 
+### Forgejo OAuth
+
+- Same Authorization Code + PKCE shape as Gitea (`/login/oauth/authorize`)
+- Start: `GET /api/v1/auth/forgejo/login` · Callback: `GET /api/v1/auth/forgejo/callback`
+- Redirect URI: `{external_url}/api/v1/auth/forgejo/callback`
+- Primary Forgejo instance (OAuth configured preferred); identity stored in `gitea_user_id` + `instance_id` on that forgejo instance
+
+### GitLab OAuth
+
+- Authorization Code + PKCE (scopes: `read_api read_user read_repository`)
+- Start: `GET /api/v1/auth/gitlab/login` · Callback: `GET /api/v1/auth/gitlab/callback`
+- Redirect URI: `{external_url}/api/v1/auth/gitlab/callback`
+- Identity: `(gitlab_instance_id, gitlab_user_id)`; link with `?link=1`
+
+### Bitbucket OAuth
+
+- Authorization Code + PKCE (Cloud; Basic auth token exchange)
+- Start: `GET /api/v1/auth/bitbucket/login` · Callback: `GET /api/v1/auth/bitbucket/callback`
+- Redirect URI: `{external_url}/api/v1/auth/bitbucket/callback`
+- Identity: `(bitbucket_instance_id, bitbucket_user_id)` (stable hash of UUID/account_id); link with `?link=1`
+
 ### Bootstrap password (lab / first admin)
 
 - Enabled only when `GITSEER_AUTH_BOOTSTRAP_PASSWORD` (or file) is set
@@ -50,7 +71,7 @@ GitHub OAuth login prefers the lowest-id GitHub instance with OAuth client id+se
 
 - HTTP session cookie after successful login
 - TTL from `auth.session_ttl` (default 24h)
-- `GET /api/v1/auth/me` returns current user (and may include mapped Gitea theme when OAuth token is stored; also `has_gitea` / `has_github` / `github_oauth_enabled`)
+- `GET /api/v1/auth/me` returns current user (and may include mapped Gitea theme when OAuth token is stored; also `has_gitea` / `has_github` / `has_gitlab` / `has_bitbucket` and per-forge `*_oauth_enabled`)
 - `POST /api/v1/auth/logout` (CSRF)
 
 ## CSRF
@@ -65,7 +86,7 @@ Double-submit cookie `gitseer_csrf` (non-HttpOnly) + header `X-CSRF-Token` on st
 
 Issued via `/api/v1/ui-config` and rotated on session create / `/auth/me`.
 
-**Exempt:** OAuth GET callbacks (Gitea + GitHub), webhooks, `/health/*`, metrics, GETs (including `GET /setup/encryption`).
+**Exempt:** OAuth GET callbacks (Gitea / Forgejo / GitHub / GitLab / Bitbucket), webhooks, `/health/*`, metrics, GETs (including `GET /setup/encryption`).
 
 ## ACL
 
@@ -74,13 +95,13 @@ Issued via `/api/v1/ui-config` and rotated on session create / `/auth/me`.
 - **Never trust client-side repository filtering for authorization**
 - Bootstrap admins see all repos
 - Sync does **not** auto-grant ACL rows
-- ACL refresh: on OAuth login (Gitea and/or GitHub) and every `auth.acl_refresh_interval` (default **6h**) for users with decryptable OAuth tokens, **per forge instance that has a stored user token**
-- Instances **without** a per-user token are left alone on refresh — so bootstrap-admin **manual grants** (Settings → Access) for service-PAT-only GitHub setups are preserved when a Gitea-only user refreshes
-- When a GitHub user token exists, ACL for that GitHub instance is rebuilt from `ListAccessibleReposForUser`
-- OAuth access tokens are refreshed via `refresh_token` when expiry is within ~2 minutes (Gitea and GitHub when issued)
+- ACL refresh: on OAuth login (any forge) and every `auth.acl_refresh_interval` (default **6h**) for users with decryptable OAuth tokens, **per forge instance that has a stored user token**
+- Instances **without** a per-user token are left alone on refresh — so bootstrap-admin **manual grants** (Settings → Access) for service-PAT-only setups are preserved when another forge’s user refreshes
+- When a forge user token exists, ACL for that instance is rebuilt from `ListAccessibleReposForUser`
+- OAuth access tokens are refreshed via `refresh_token` when expiry is within ~2 minutes (where the forge issues refresh tokens)
 - Token / integration-secret persistence in the DB requires an encryption key (seal fail-closed without it). Env/config min length **16**; wizard paste min **24** — see [Configuration](configuration.md#encryption-key). The setup wizard **Prepare** step can generate or paste a key when env/config is unset.
 - Gitea login `bootstrap` is reserved; OAuth cannot inherit the bootstrap-admin row
-- GitSeer Gitea users are keyed by `(instance_id, gitea_user_id)`; GitHub by `(github_instance_id, github_user_id)`; orphaned users re-bind on next OAuth login
+- Identity keys: Gitea/Forgejo `(instance_id, gitea_user_id)`; GitHub `(github_instance_id, github_user_id)`; GitLab `(gitlab_instance_id, gitlab_user_id)`; Bitbucket `(bitbucket_instance_id, bitbucket_user_id)`; orphaned users re-bind on next OAuth login
 
 ### Bootstrap-admin grant fallback
 
@@ -93,10 +114,12 @@ Issued via `/api/v1/ui-config` and rotated on session create / `/auth/me`.
 
 In-process per-IP (no Redis):
 
-- Bootstrap login and OAuth login start (Gitea + GitHub): 20 / minute
+- Bootstrap login and OAuth login start (all forge providers): 20 / minute
 - Webhook POST: 120 / minute
 - Client IP from `X-Forwarded-For` / `X-Real-IP` only when the peer is in `server.trusted_proxies` / `GITSEER_SERVER_TRUSTED_PROXIES`; otherwise peer `RemoteAddr` only
 
 ## Metrics auth
 
-`GET /metrics` requires the same session cookie as the API, or `Authorization: Bearer <token>` when `server.metrics_token` / `GITSEER_METRICS_TOKEN` is set.
+When `server.metrics_token` / `GITSEER_METRICS_TOKEN` is unset, `GET /metrics` requires the same session cookie as the API.
+
+When a scrape token **is** set, auth is **Bearer-only** (`Authorization: Bearer <token>`) — session cookies are not accepted.

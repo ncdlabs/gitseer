@@ -99,6 +99,10 @@ type OnIntegrationChange func(Integration)
 // OnGitHubChange is invoked after GitHub integration/instance changes (OAuth live apply).
 type OnGitHubChange func(GitHubIntegration)
 
+// OnMultiForgeOAuthChange is invoked when instance OAuth credentials may have changed
+// (GitLab / Bitbucket / Forgejo). Callers re-read Auth*Integration helpers.
+type OnMultiForgeOAuthChange func()
+
 // OnExternalURLChange is invoked after server_external_url changes (live apply).
 type OnExternalURLChange func(externalURL string)
 
@@ -132,6 +136,7 @@ type Manager struct {
 	st         *store.Store
 	onInteg    OnIntegrationChange
 	onGitHub   OnGitHubChange
+	onMultiOAuth OnMultiForgeOAuthChange
 	onExt      OnExternalURLChange
 	onEnc      OnEncryptionChange
 }
@@ -197,6 +202,13 @@ func (m *Manager) SetOnGitHubChange(fn OnGitHubChange) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onGitHub = fn
+}
+
+// SetOnMultiForgeOAuthChange registers a live-apply callback for GitLab/Bitbucket/Forgejo OAuth.
+func (m *Manager) SetOnMultiForgeOAuthChange(fn OnMultiForgeOAuthChange) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onMultiOAuth = fn
 }
 
 // SetOnExternalURLChange registers a live-apply callback for the public GitSeer URL.
@@ -462,6 +474,16 @@ func (m *Manager) upsertGitHubInstance(ctx context.Context, name string, gh GitH
 // tryNormalizeGitHubAPI is set from an init in github_norm.go when linked;
 // default keeps the trimmed URL.
 var tryNormalizeGitHubAPI = func(raw string) (string, error) {
+	return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
+}
+
+// tryNormalizeGitLabAPI is set from gitlab_norm.go init.
+var tryNormalizeGitLabAPI = func(raw string) (string, error) {
+	return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
+}
+
+// tryNormalizeBitbucketAPI is set from bitbucket_norm.go init.
+var tryNormalizeBitbucketAPI = func(raw string) (string, error) {
 	return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
 }
 

@@ -22,6 +22,7 @@ gitseer serve [--config path]
 gitseer version
 gitseer backup --out DIR [--config path]
 gitseer restore --from DIR [--config path] [--force]
+gitseer rotate-encryption-key [--config path] (--new-key STR | --new-key-file PATH | --generate)
 gitseer install-ui --custom-path DIR --gitseer-url URL [--instance-id N]
 gitseer uninstall-ui --custom-path DIR
 ```
@@ -74,10 +75,11 @@ Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITSEER -->` / `<!-
 
 - [ ] `external_url` matches public scheme/host/path
 - [ ] Encryption key set (`GITSEER_ENCRYPTION_KEY` or wizard Prepare) before saving forge secrets
-- [ ] Per-instance webhook URLs registered (Gitea and/or GitHub) with matching secrets
+- [ ] Per-instance webhook URLs registered (Gitea / GitHub / GitLab / Bitbucket / Forgejo as used) with matching secrets
 - [ ] Config URL set ⇒ matching webhook secret present at startup (or lab unsigned flag for that forge)
-- [ ] OAuth app redirect matches `{external_url}/api/v1/auth/callback` (Gitea login)
+- [ ] OAuth app redirect matches `{external_url}/api/v1/auth/callback` (Gitea) and `/api/v1/auth/{github|gitlab|bitbucket|forgejo}/callback` when those providers are enabled
 - [ ] Bootstrap password set for first admin **or** OAuth ready
-- [ ] Private forge? `allow_private_network` / `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK` / `GITSEER_GITHUB_ALLOW_PRIVATE_NETWORK`
+- [ ] Private forge? `allow_private_network` / `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK` / `GITSEER_GITHUB_ALLOW_PRIVATE_NETWORK` (and per-instance flags for other forges)
+- [ ] `GITSEER_SERVER_TRUSTED_PROXIES` set to Traefik/Ingress CIDRs (never `0.0.0.0/0`); `replicaCount: 1` for SQLite
 - [ ] First sync completed
 - [ ] Probes: `/health/live`, `/health/ready`

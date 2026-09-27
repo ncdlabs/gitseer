@@ -14,6 +14,7 @@ import { InstanceSettingsPanel } from "../components/InstanceSettingsPanel";
 import { AttentionSeverityOverrides } from "../components/AttentionSeverityOverrides";
 import { AccessGrantPanel } from "../components/AccessGrantPanel";
 import { NotificationsPanel } from "../components/NotificationsPanel";
+import { WallboardTokensPanel } from "../components/WallboardTokensPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type SettingsTab = "preferences" | "integration" | "access" | "notifications" | "status";
@@ -743,6 +744,7 @@ export function SettingsPage() {
               })}
             </div>
           )}
+          {editable ? <WallboardTokensPanel /> : null}
         </>
       )}
 

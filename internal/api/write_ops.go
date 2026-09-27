@@ -50,12 +50,16 @@ func (h *Handler) forgeClientForWriteOps(ctx context.Context, user *models.User,
 				c, err := forge.NewFromInstance(*inst, gh.Token)
 				return c, true, err
 			}
-			integ := h.effectiveIntegration()
-			if integ.Token == "" {
-				return nil, false, fmt.Errorf("gitea not configured")
+			if ft == models.ForgeTypeGitea {
+				integ := h.effectiveIntegration()
+				if integ.Token == "" {
+					return nil, false, fmt.Errorf("gitea not configured")
+				}
+				c, err := forge.NewFromInstance(*inst, integ.Token)
+				return c, true, err
 			}
-			c, err := forge.NewFromInstance(*inst, integ.Token)
-			return c, true, err
+			// Never fall back to the Gitea integration token for GitLab/Bitbucket/Forgejo.
+			return nil, false, fmt.Errorf("%s instance sync token required for write operations", ft)
 		}
 		c, err := forge.NewFromInstance(*inst, tok)
 		return c, true, err
@@ -63,9 +67,9 @@ func (h *Handler) forgeClientForWriteOps(ctx context.Context, user *models.User,
 
 	ut, err := h.auth.UserAccessTokenForInstance(ctx, user.ID, repo.InstanceID)
 	if err != nil || ut == "" {
-		// Fall back to any stored token only for the same forge when instance-scoped miss
-		// (legacy single-token Gitea users). Never use a Gitea token against GitHub.
-		if ft != models.ForgeTypeGitHub {
+		// Legacy single-token Gitea users may lack a row keyed by instance_id.
+		// Never cross-forge: do not use a Gitea token against GitHub/GitLab/Bitbucket/Forgejo.
+		if ft == models.ForgeTypeGitea {
 			ut, err = h.auth.UserAccessToken(ctx, user.ID)
 		}
 	}

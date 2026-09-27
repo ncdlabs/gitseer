@@ -1,6 +1,6 @@
 # GitSeer documentation
 
-Operator and developer guides for GitSeer (Gitea + GitHub; technical IDs are `gitseer`). Quick start: root [README](../README.md).
+Operator and developer guides for GitSeer (multi-forge; technical IDs are `gitseer`). Quick start: root [README](../README.md).
 
 | Guide | Contents |
 |-------|----------|
@@ -14,6 +14,8 @@ Operator and developer guides for GitSeer (Gitea + GitHub; technical IDs are `gi
 | [API reference](api-reference.md) | `/api/v1` and webhooks |
 | [Webhooks and sync](webhooks-and-sync.md) | Near-realtime + reconcile |
 | [Deployment](deployment.md) | Compose, binary, Helm, proxy |
+| [Upgrade](upgrade.md) | Backup, Helm/binary upgrade, rollback, schema notes |
+| [Compatibility](compatibility.md) | Forge and runtime matrix for 1.0 |
 | [Operations](operations.md) | Metrics, retention, backup |
 | [Development](development.md) | Local toolchain and guidelines |
 | [Troubleshooting](troubleshooting.md) | Common failure modes |

@@ -21,14 +21,19 @@
 | `/pipelines/:id` | Run detail (jobs + graph) |
 | `/actions-popout` | Active Actions detached window |
 | `/settings` | Preferences / Integration / Access / Notifications / Status tabs |
+| `/wallboard` | Public read-only wallboard (token-gated; no session required) |
 | `/setup` | First-run wizard (bootstrap admin) |
-| Login | Gitea OAuth, GitHub OAuth, optional bootstrap |
+| Login | Gitea / Forgejo / GitHub / GitLab / Bitbucket OAuth (PKCE), optional bootstrap |
 
 ## Dashboard
 
 - Summary from `GET /api/v1/summary?days=` (allowlist **0 / 1 / 7 / 30 / 90**, default **0** / Now; remembered in `gitseer-dashboard-range-days`)
+- Optional org/owner scope via `?owner=` / `?org_id=` / `?team=` (team matches owner login/slug — forges do not expose durable team→repo membership in inventory); dashboard saved-filter presets
+- Runner utilization merges indexed job rollups with live forge `ListRunners` where `runners_api` is capable (GitLab / Gitea / Forgejo / GitHub org runners; Bitbucket unsupported)
 - Repo count is inventory (not time-ranged); open PRs, attention, failed, and running respect the window (`Now` = current open/running; failed = attention-linked only)
 - Stats from `GET /api/v1/stats?days=&section=` (`core` | `trends` | `duration` | `all`): breakdowns from `core`, charts from `trends`, run-duration from `duration`. `Now` skips trends/duration
+- **Runner utilization** (`GET /api/v1/runners/utilization`): indexed-job rollup by runner name; degrades when names missing / forge runners API not capable
+- **Releases & deployments** (`GET /api/v1/releases`): deploy/release-named workflow runs + open deploy attention flag
 - After the active range settles, other ranges precache in the background; SSE invalidation re-warms them
 - SVG/CSS charts (no chart library); day-series JSON field is `day` (not `date`)
 
@@ -46,7 +51,7 @@ Optional on-demand **Log Tail** on attention items linked to a job/run (forge fe
 ## Repositories
 
 - Inventory list/detail include a computed **health** rollup: open critical attention, failing latest default-branch run, stale open PRs (default 14d), CI fail rate over a window (default 7d), score/grade badge
-- Detail page shows health summary plus **Failure Clusters** (failed jobs grouped by workflow path + job name over N days)
+- Detail page shows health summary plus **Failure Clusters** (failed jobs grouped by workflow path + job name over N days) and **Flaky Jobs** (heuristic: same job both failed and succeeded in the window)
 
 ## Pull requests
 
@@ -76,9 +81,10 @@ Header search (⌘/Ctrl+K) is a command palette over:
 
 - Tabbed `/settings` UI: **Preferences**, **Integration**, **Access**, **Notifications**, **Status** (hash deep-links `#preferences` / `#integration` / `#access` / `#notifications` / `#status`)
 - Preferences: instance name, sync history days, long-running threshold, **Attention Severity Overrides**, retention windows, **Apply Lab Preset** / **Apply Prod Preset**, **Purge Now**, public URL
-- **Notifications** (bootstrap admin): SMTP + Slack/Discord/generic HTTPS webhooks; severity filter (default critical); immediate + optional daily digest; secrets write-only; **Send Test Notification**. Self-hosted only (no ncdLabs relay).
+- **Notifications** (bootstrap admin): SMTP + Slack/Discord/generic HTTPS webhooks + **incident** webhook (structured Opsgenie/PagerDuty-style payload); severity filter (default critical); immediate + optional daily digest; secrets write-only; **Send Test Notification**. Self-hosted only (no ncdLabs relay).
+- **Wallboard** (`/wallboard`): token-scoped read-only summary + attention (`GET /api/v1/wallboard/snapshot` with Bearer or `?token=`). Bootstrap admin creates/revokes tokens on Settings → Status. Threat model: token holders can read ops snapshot only — no writes, settings, or forge secrets.
 - Attention queue: **Mute** / **Snooze 24h** / **Snooze 7d** / **Mute Until Resolved** per item
-- Integration: multi-instance list (forge badge, URL, configured flags, webhook path `/api/webhooks/{gitea|github}/{id}`) with **Add Forge** / Edit / Remove; Gitea cards include **Download Gitea UI Snippets** (zip of marker-safe templates); Gitea and GitHub supported (GitLab / Bitbucket Coming Soon). Instance list/API is **bootstrap-admin only**; other users see forge summary on Status / `GET /settings`
+- Integration: multi-instance list (forge badge, URL, configured flags, webhook path `/api/webhooks/{gitea|github|gitlab|bitbucket|forgejo}/{id}`) with **Add Forge** / Edit / Remove; Gitea cards include **Download Gitea UI Snippets** (zip of marker-safe templates); supported forges: Gitea, GitHub, GitLab, Bitbucket, Forgejo. Instance list/API is **bootstrap-admin only**; other users see forge summary on Status / `GET /settings`
 - API: `GET/POST /api/v1/instances`, `PUT/DELETE /api/v1/instances/{id}` (bootstrap admin + CSRF); `GET/PUT /api/v1/settings` keeps preferences + a derived dual-forge snapshot for setup
 - Status: live summary including database size / warn thresholds; when multiple forges of the same type exist, labels include instance name / id
 - Inventory lists: forge filter chips are data-driven (All + types; per-instance chips when a type has multiple); badges show instance name when that type has more than one instance

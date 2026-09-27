@@ -23,8 +23,8 @@ func TestAuthzIsolation(t *testing.T) {
 	r1, _ := st.UpsertRepository(ctx, inst.ID, models.Repository{ExternalID: 1, Owner: "a", Name: "one", FullName: "a/one"})
 	r2, _ := st.UpsertRepository(ctx, inst.ID, models.Repository{ExternalID: 2, Owner: "b", Name: "two", FullName: "b/two"})
 
-	u1, _ := st.UpsertGiteaUser(ctx, &inst.ID, models.User{Login: "alice", GiteaUserID: int64Ptr(10)})
-	u2, _ := st.UpsertGiteaUser(ctx, &inst.ID, models.User{Login: "bob", GiteaUserID: int64Ptr(11)})
+	u1, _ := st.UpsertGiteaUser(ctx, &inst.ID, models.User{Login: "alice", GiteaUserID: int64Ptr(10)}, nil)
+	u2, _ := st.UpsertGiteaUser(ctx, &inst.ID, models.User{Login: "bob", GiteaUserID: int64Ptr(11)}, nil)
 	_ = az.RefreshFromRepoList(ctx, u1.ID, []models.Repository{*r1})
 	_ = az.RefreshFromRepoList(ctx, u2.ID, []models.Repository{*r2})
 

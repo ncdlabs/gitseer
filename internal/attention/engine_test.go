@@ -227,3 +227,84 @@ func TestUntilResolvedMuteClearedOnResolve(t *testing.T) {
 		t.Fatalf("expected until-resolved mute cleared, muted=%v err=%v", muted, err)
 	}
 }
+
+func TestRunnerUnavailableQueuedBestEffort(t *testing.T) {
+	ctx, st, eng, instID, repo := setup(t)
+	run, _ := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 77, Name: "CI", Branch: "main", Status: models.StatusQueued, RepoFull: "o/r",
+	})
+
+	// Queued without a positive signal must not open (no fake always-on alerts).
+	plain, _ := st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 1, Name: "build", Status: models.StatusQueued,
+	})
+	if err := eng.EvaluateJob(ctx, instID, plain, run); err != nil {
+		t.Fatal(err)
+	}
+	if openCount(t, st, TypeRunnerUnavailable) != 0 {
+		t.Fatal("expected no attention without positive signal")
+	}
+
+	msg := "No runners available matching labels"
+	labels := `["self-hosted","runner offline"]`
+	signaled, _ := st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 2, Name: "build-sh", Status: models.StatusQueued,
+		Message: msg, LabelsJSON: &labels,
+	})
+	if err := eng.EvaluateJob(ctx, instID, signaled, run); err != nil {
+		t.Fatal(err)
+	}
+	if openCount(t, st, TypeRunnerUnavailable) != 1 {
+		t.Fatal("expected open on positive message/label signal")
+	}
+
+	// Completing the job clears the attention.
+	signaled.Status = models.StatusCompleted
+	signaled.Conclusion = models.ConclusionCancelled
+	if err := eng.EvaluateJob(ctx, instID, signaled, run); err != nil {
+		t.Fatal(err)
+	}
+	if openCount(t, st, TypeRunnerUnavailable) != 0 {
+		t.Fatal("expected resolved after leave queued")
+	}
+
+	// Conclusion/steps text alone while queued also opens.
+	steps := `[{"name":"Set up job","conclusion":"failure","output":"The runner matching the labels was not found"}]`
+	viaSteps, _ := st.UpsertJob(ctx, repo.ID, run.ID, models.Job{
+		ExternalID: 3, Name: "test", Status: models.StatusWaiting, StepsJSON: &steps,
+	})
+	if err := eng.EvaluateJob(ctx, instID, viaSteps, run); err != nil {
+		t.Fatal(err)
+	}
+	if openCount(t, st, TypeRunnerUnavailable) != 1 {
+		t.Fatal("expected open from steps_json signal")
+	}
+
+	ok, reason := jobSignalsRunnerUnavailable(&models.Job{Status: models.StatusQueued, Message: "Waiting for a runner to pick up this job"})
+	if ok {
+		t.Fatalf("normal queue text must not match, got reason=%q", reason)
+	}
+}
+
+func TestJobSignalsRunnerUnavailablePhrases(t *testing.T) {
+	cases := []struct {
+		name string
+		job  models.Job
+		want bool
+	}{
+		{name: "empty", job: models.Job{Status: models.StatusQueued}, want: false},
+		{name: "message", job: models.Job{Message: "Runner is offline"}, want: true},
+		{name: "upstream", job: models.Job{UpstreamConclusion: "runner_system_failure"}, want: true},
+		{name: "labels", job: models.Job{LabelsJSON: strPtr(`["no online runners"]`)}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := jobSignalsRunnerUnavailable(&tc.job)
+			if got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }

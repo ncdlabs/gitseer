@@ -21,8 +21,11 @@ import (
 	"github.com/ncdlabs/gitseer/internal/config"
 	"github.com/ncdlabs/gitseer/internal/forge"
 	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	"github.com/ncdlabs/gitseer/internal/forge/bitbucket"
+	"github.com/ncdlabs/gitseer/internal/forge/forgejo"
 	"github.com/ncdlabs/gitseer/internal/forge/gitea"
 	"github.com/ncdlabs/gitseer/internal/forge/github"
+	"github.com/ncdlabs/gitseer/internal/forge/gitlab"
 	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
 	"github.com/ncdlabs/gitseer/internal/models"
 	"github.com/ncdlabs/gitseer/internal/notify"
@@ -163,6 +166,12 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/callback", h.oauthCallback)
 			r.With(authLimit.Middleware).Get("/github/login", h.githubOAuthLogin)
 			r.Get("/github/callback", h.githubOAuthCallback)
+			r.With(authLimit.Middleware).Get("/gitlab/login", h.forgeOAuthLogin("gitlab"))
+			r.Get("/gitlab/callback", h.forgeOAuthCallback("gitlab"))
+			r.With(authLimit.Middleware).Get("/bitbucket/login", h.forgeOAuthLogin("bitbucket"))
+			r.Get("/bitbucket/callback", h.forgeOAuthCallback("bitbucket"))
+			r.With(authLimit.Middleware).Get("/forgejo/login", h.forgeOAuthLogin("forgejo"))
+			r.Get("/forgejo/callback", h.forgeOAuthCallback("forgejo"))
 			r.With(authLimit.Middleware, h.requireCSRF).Post("/bootstrap/login", h.bootstrapLogin)
 			r.With(h.requireCSRF).Post("/logout", h.logout)
 			r.Get("/me", h.me)
@@ -182,6 +191,13 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/sync-repos", h.syncRepos)
 		r.With(h.requireAuth).Get("/summary", h.summary)
 		r.With(h.requireAuth).Get("/stats", h.stats)
+		r.With(h.requireAuth).Get("/runners/utilization", h.runnerUtilization)
+		r.With(h.requireAuth).Get("/flaky-jobs", h.listFlakyJobs)
+		r.With(h.requireAuth).Get("/releases", h.listReleases)
+		r.With(h.requireAuth).Get("/wallboard/tokens", h.listWallboardTokens)
+		r.With(h.requireAuth, h.requireCSRF).Post("/wallboard/tokens", h.createWallboardToken)
+		r.With(h.requireAuth, h.requireCSRF).Delete("/wallboard/tokens/{id}", h.revokeWallboardToken)
+		r.With(h.requireWallboardToken).Get("/wallboard/snapshot", h.wallboardSnapshot)
 		r.With(h.requireAuth).Get("/attention", h.listAttention)
 		r.With(h.requireAuth).Get("/attention/rule-overrides", h.getAttentionRuleOverrides)
 		r.With(h.requireAuth, h.requireCSRF).Put("/attention/rule-overrides", h.putAttentionRuleOverrides)
@@ -196,6 +212,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth).Get("/repositories", h.listRepositories)
 		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}/health", h.getRepositoryHealth)
 		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}/failure-clusters", h.getRepositoryFailureClusters)
+		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}/flaky-jobs", h.getRepositoryFlakyJobs)
 		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}", h.getRepository)
 		r.With(h.requireAuth).Get("/pull-requests", h.listPRs)
 		r.With(h.requireAuth).Get("/workflow-runs", h.listRuns)
@@ -212,6 +229,9 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea", h.wh.HandleHTTP)
 	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitea/{instanceID}", h.webhookByInstance)
 	r.With(webhookLimit.Middleware).Post("/api/webhooks/github/{instanceID}", h.webhookGitHubByInstance)
+	r.With(webhookLimit.Middleware).Post("/api/webhooks/gitlab/{instanceID}", h.webhookGitLabByInstance)
+	r.With(webhookLimit.Middleware).Post("/api/webhooks/bitbucket/{instanceID}", h.webhookBitbucketByInstance)
+	r.With(webhookLimit.Middleware).Post("/api/webhooks/forgejo/{instanceID}", h.webhookForgejoByInstance)
 }
 
 func (h *Handler) webhookByInstance(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +250,33 @@ func (h *Handler) webhookGitHubByInstance(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.wh.HandleGitHubHTTPForInstance(w, r, id)
+}
+
+func (h *Handler) webhookGitLabByInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "instanceID"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid instance", http.StatusBadRequest)
+		return
+	}
+	h.wh.HandleGitLabHTTPForInstance(w, r, id)
+}
+
+func (h *Handler) webhookBitbucketByInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "instanceID"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid instance", http.StatusBadRequest)
+		return
+	}
+	h.wh.HandleBitbucketHTTPForInstance(w, r, id)
+}
+
+func (h *Handler) webhookForgejoByInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "instanceID"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid instance", http.StatusBadRequest)
+		return
+	}
+	h.wh.HandleForgejoHTTPForInstance(w, r, id)
 }
 
 func (h *Handler) requireCSRF(next http.Handler) http.Handler {
@@ -545,6 +592,18 @@ func (h *Handler) refreshUserACLWithToken(ctx context.Context, user *models.User
 			if user.GitHubInstanceID != nil && *user.GitHubInstanceID != inst.ID {
 				continue
 			}
+		} else if ft == models.ForgeTypeGitLab {
+			if user.GitLabInstanceID != nil && *user.GitLabInstanceID != inst.ID {
+				continue
+			}
+		} else if ft == models.ForgeTypeBitbucket {
+			if user.BitbucketInstanceID != nil && *user.BitbucketInstanceID != inst.ID {
+				continue
+			}
+		} else if ft == models.ForgeTypeForgejo {
+			if user.InstanceID != nil && *user.InstanceID != inst.ID {
+				continue
+			}
 		}
 		if err := h.replaceACLForInstance(ctx, user.ID, inst, userToken); err != nil {
 			return err
@@ -672,16 +731,21 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		authzMode = "bootstrap_allow_all"
 	}
 	out := map[string]any{
-		"authenticated":      true,
-		"id":                 user.ID,
-		"login":              user.Login,
-		"display_name":       user.DisplayName,
-		"is_bootstrap_admin": user.IsBootstrapAdmin,
-		"authz":              authzMode,
-		"csrf_token":         csrf,
-		"has_gitea":          user.GiteaUserID != nil,
-		"has_github":         user.GitHubUserID != nil,
-		"github_oauth_enabled": h.auth.GitHubOAuthEnabled(),
+		"authenticated":         true,
+		"id":                    user.ID,
+		"login":                 user.Login,
+		"display_name":          user.DisplayName,
+		"is_bootstrap_admin":    user.IsBootstrapAdmin,
+		"authz":                 authzMode,
+		"csrf_token":            csrf,
+		"has_gitea":             user.GiteaUserID != nil,
+		"has_github":            user.GitHubUserID != nil,
+		"has_gitlab":            user.GitLabUserID != nil,
+		"has_bitbucket":         user.BitbucketUserID != nil,
+		"github_oauth_enabled":  h.auth.GitHubOAuthEnabled(),
+		"gitlab_oauth_enabled":  h.auth.GitLabOAuthEnabled(),
+		"bitbucket_oauth_enabled": h.auth.BitbucketOAuthEnabled(),
+		"forgejo_oauth_enabled": h.auth.ForgejoOAuthEnabled(),
 	}
 	if themeID, giteaName, ok := h.giteaThemeForUser(r.Context(), user); ok {
 		out["theme"] = string(themeID)
@@ -777,18 +841,24 @@ func (h *Handler) buildSystemStatus(ctx context.Context, redactSensitive bool) m
 		"gitea_configured":    giteaConfigured,
 		"github_configured":   githubConfigured,
 		"bootstrap_auth":      h.bootstrapAuthAvailable(),
-		"oauth_enabled":        h.auth.OAuthEnabled(),
-		"github_oauth_enabled": h.auth.GitHubOAuthEnabled(),
-		"path_prefix":          h.cfg.PathPrefix(),
-		"instance_connected":   len(instances) > 0,
-		"webhook_hmac":         webhookHMAC,
-		"github_webhook_hmac":  githubWebhookHMAC,
-		"setup_completed":         setupCompleted,
-		"encryption_configured":   h.settings != nil && h.settings.EncryptionConfigured(),
-		"oauth_redirect_uri":      h.auth.RedirectURI(),
+		"oauth_enabled":             h.auth.OAuthEnabled(),
+		"github_oauth_enabled":      h.auth.GitHubOAuthEnabled(),
+		"gitlab_oauth_enabled":      h.auth.GitLabOAuthEnabled(),
+		"bitbucket_oauth_enabled":   h.auth.BitbucketOAuthEnabled(),
+		"forgejo_oauth_enabled":     h.auth.ForgejoOAuthEnabled(),
+		"path_prefix":               h.cfg.PathPrefix(),
+		"instance_connected":        len(instances) > 0,
+		"webhook_hmac":              webhookHMAC,
+		"github_webhook_hmac":       githubWebhookHMAC,
+		"setup_completed":           setupCompleted,
+		"encryption_configured":     h.settings != nil && h.settings.EncryptionConfigured(),
+		"oauth_redirect_uri":        h.auth.RedirectURI(),
 		"github_oauth_redirect_uri": h.auth.GitHubRedirectURI(),
-		"server_external_url":     h.webhookDeliveryURLBase(),
-		"forges":                  forges,
+		"gitlab_oauth_redirect_uri": h.auth.GitLabRedirectURI(),
+		"bitbucket_oauth_redirect_uri": h.auth.BitbucketRedirectURI(),
+		"forgejo_oauth_redirect_uri":   h.auth.ForgejoRedirectURI(),
+		"server_external_url":       h.webhookDeliveryURLBase(),
+		"forges":                    forges,
 	}
 	encHealthy, encSource, encErr := h.encryptionHealth(ctx)
 	status["encryption_source"] = encSource
@@ -914,7 +984,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type setupTestConnectionBody struct {
-	ForgeType string `json:"forge_type"` // gitea | github; default gitea
+	ForgeType string `json:"forge_type"` // gitea | github | gitlab | bitbucket | forgejo
 
 	GiteaURL                 string `json:"gitea_url"`
 	GiteaToken               string `json:"gitea_token"`
@@ -923,6 +993,11 @@ type setupTestConnectionBody struct {
 	GitHubURL                 string `json:"github_url"`
 	GitHubToken               string `json:"github_token"`
 	GitHubAllowPrivateNetwork *bool  `json:"github_allow_private_network"`
+
+	// Generic fields used by gitlab / bitbucket / forgejo (and accepted as aliases).
+	BaseURL             string `json:"base_url"`
+	Token               string `json:"token"`
+	AllowPrivateNetwork *bool  `json:"allow_private_network"`
 }
 
 type setupWebhookBody struct {
@@ -939,14 +1014,14 @@ type setupWebhookBody struct {
 }
 
 func normalizeSetupForgeType(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case models.ForgeTypeGitHub:
-		return models.ForgeTypeGitHub
-	case "", models.ForgeTypeGitea:
-		return models.ForgeTypeGitea
-	default:
-		return ""
+	ft := strings.ToLower(strings.TrimSpace(raw))
+	if models.IsSupportedForgeType(ft) {
+		return ft
 	}
+	if ft == "" {
+		return models.ForgeTypeGitea
+	}
+	return ""
 }
 
 func (h *Handler) webhookDeliveryURLBase() string {
@@ -984,6 +1059,21 @@ func (h *Handler) githubWebhookDeliveryURL(instanceID int64) string {
 	}
 	// Never advertise an unscoped GitHub route (none is registered). Preview uses a placeholder.
 	return base + "/api/webhooks/github/{instance_id}"
+}
+
+func (h *Handler) forgeWebhookDeliveryURL(forgeType string, instanceID int64) string {
+	base := h.webhookDeliveryURLBase()
+	if base == "" {
+		return ""
+	}
+	ft := strings.ToLower(strings.TrimSpace(forgeType))
+	if ft == "" {
+		ft = models.ForgeTypeGitea
+	}
+	if instanceID > 0 {
+		return fmt.Sprintf("%s/api/webhooks/%s/%d", base, ft, instanceID)
+	}
+	return fmt.Sprintf("%s/api/webhooks/%s/{instance_id}", base, ft)
 }
 
 func (h *Handler) setupClientFromBody(body setupTestConnectionBody) (*gitea.Client, error) {
@@ -1047,7 +1137,7 @@ func (h *Handler) setupCheckGiteaURL(w http.ResponseWriter, r *http.Request) {
 	}
 	ft := normalizeSetupForgeType(body.ForgeType)
 	if ft == "" {
-		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		writeError(w, http.StatusBadRequest, "forge_type must be a supported forge (gitea, github, gitlab, bitbucket, forgejo)")
 		return
 	}
 	if ft == models.ForgeTypeGitHub {
@@ -1100,7 +1190,7 @@ func (h *Handler) setupTestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	ft := normalizeSetupForgeType(body.ForgeType)
 	if ft == "" {
-		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		writeError(w, http.StatusBadRequest, "forge_type must be a supported forge (gitea, github, gitlab, bitbucket, forgejo)")
 		return
 	}
 	if ft == models.ForgeTypeGitHub {
@@ -1119,6 +1209,61 @@ func (h *Handler) setupTestConnection(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, probe)
 		return
+	}
+	if ft == models.ForgeTypeGitLab || ft == models.ForgeTypeBitbucket || ft == models.ForgeTypeForgejo {
+		baseURL := strings.TrimSpace(body.BaseURL)
+		token := strings.TrimSpace(body.Token)
+		if baseURL == "" {
+			baseURL = strings.TrimSpace(body.GiteaURL)
+		}
+		if token == "" {
+			token = strings.TrimSpace(body.GiteaToken)
+		}
+		allowPrivate := false
+		if body.AllowPrivateNetwork != nil {
+			allowPrivate = *body.AllowPrivateNetwork
+		} else if body.GiteaAllowPrivateNetwork != nil {
+			allowPrivate = *body.GiteaAllowPrivateNetwork
+		}
+		if baseURL == "" || token == "" {
+			writeError(w, http.StatusBadRequest, "base_url and token are required")
+			return
+		}
+		client, err := forge.New(forge.Options{ForgeType: ft, BaseURL: baseURL, Token: token, AllowPrivateNetwork: allowPrivate})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		delivery := h.forgeWebhookDeliveryURL(ft, 0)
+		switch c := client.(type) {
+		case *forgejo.Client:
+			probe, err := c.ProbeConnection(r.Context(), delivery, h.auth.RedirectURI())
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "connection probe failed")
+				return
+			}
+			writeJSON(w, http.StatusOK, probe)
+			return
+		case *gitlab.Client:
+			probe, err := c.ProbeConnection(r.Context(), delivery)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "connection probe failed")
+				return
+			}
+			writeJSON(w, http.StatusOK, probe)
+			return
+		case *bitbucket.Client:
+			probe, err := c.ProbeConnection(r.Context(), delivery)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "connection probe failed")
+				return
+			}
+			writeJSON(w, http.StatusOK, probe)
+			return
+		default:
+			writeError(w, http.StatusInternalServerError, "unexpected forge client type")
+			return
+		}
 	}
 	client, err := h.setupClientFromBody(body)
 	if err != nil {
@@ -1163,7 +1308,7 @@ func (h *Handler) setupCreateOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	ft := normalizeSetupForgeType(body.ForgeType)
 	if ft == "" {
-		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		writeError(w, http.StatusBadRequest, "forge_type must be a supported forge (gitea, github, gitlab, bitbucket, forgejo)")
 		return
 	}
 	if ft == models.ForgeTypeGitHub {
@@ -1263,7 +1408,7 @@ func (h *Handler) setupCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	ft := normalizeSetupForgeType(body.ForgeType)
 	if ft == "" {
-		writeError(w, http.StatusBadRequest, "forge_type must be gitea or github")
+		writeError(w, http.StatusBadRequest, "forge_type must be a supported forge (gitea, github, gitlab, bitbucket, forgejo)")
 		return
 	}
 	if ft == models.ForgeTypeGitHub {
@@ -1586,7 +1731,8 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 		since := time.Now().UTC().AddDate(0, 0, -days)
 		sincePtr = &since
 	}
-	sum, err := h.store.Summary(r.Context(), sc.UserID, sc.BootstrapAll, sincePtr, snapshot)
+	scope := h.dashboardScopeFromQuery(r)
+	sum, err := h.store.SummaryScoped(r.Context(), sc.UserID, sc.BootstrapAll, sincePtr, snapshot, scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -1613,7 +1759,8 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 	if !snapshot {
 		since = since.AddDate(0, 0, -days)
 	}
-	rep, err := h.store.StatsBySection(r.Context(), sc.UserID, sc.BootstrapAll, since, snapshot, section)
+	scope := h.dashboardScopeFromQuery(r)
+	rep, err := h.store.StatsBySectionScoped(r.Context(), sc.UserID, sc.BootstrapAll, since, snapshot, section, scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

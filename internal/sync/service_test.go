@@ -104,6 +104,10 @@ func (m *mockForge) GetAuthenticatedUser(context.Context, string) (*models.User,
 	return nil, fmt.Errorf("not found")
 }
 
+func (m *mockForge) ListRunners(context.Context) ([]models.ForgeRunner, error) {
+	return nil, forge.ErrUnsupported
+}
+
 func setupSync(t *testing.T) (*sync.Service, *store.Store) {
 	t.Helper()
 	ctx := context.Background()

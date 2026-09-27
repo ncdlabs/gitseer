@@ -16,7 +16,7 @@ Thanks for contributing to GitSeer (repository / Go module path `gitseer`).
 - Enforce repository authorization server-side via `user_repository_access` (or bootstrap allow-all).
 - Prefer `.yaml` for new config files.
 - Do not add Redis or WebSocket dependencies for V1.
-- Ask before implementing GitLab/Bitbucket forge clients (Coming Soon) or removing documented product features.
+- Ask before removing documented product features. GitLab and Bitbucket forge clients are implemented (not Coming Soon).
 
 ## Pull requests
 

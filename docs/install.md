@@ -17,7 +17,7 @@ Goals:
 Constraints:
 - Do not commit secrets, .env, config.yaml, or install.yaml.
 - Prefer .yaml over .yml for new config files.
-- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or GitLab/Bitbucket clients (Coming Soon).
+- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or undocumented forge types.
 - Ask before destructive changes or removing existing services.
 
 My values (replace or leave blank to prompt me):

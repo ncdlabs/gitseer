@@ -1,0 +1,13 @@
+-- +goose Up
+ALTER TABLE organizations ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE repositories ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE pull_requests ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE workflow_runs ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE jobs ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+
+-- +goose Down
+ALTER TABLE jobs DROP COLUMN IF EXISTS node_id;
+ALTER TABLE workflow_runs DROP COLUMN IF EXISTS node_id;
+ALTER TABLE pull_requests DROP COLUMN IF EXISTS node_id;
+ALTER TABLE repositories DROP COLUMN IF EXISTS node_id;
+ALTER TABLE organizations DROP COLUMN IF EXISTS node_id;

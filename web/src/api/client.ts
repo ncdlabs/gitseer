@@ -12,7 +12,12 @@ export type User = {
   gitea_theme?: string | null;
   has_gitea?: boolean;
   has_github?: boolean;
+  has_gitlab?: boolean;
+  has_bitbucket?: boolean;
   github_oauth_enabled?: boolean;
+  gitlab_oauth_enabled?: boolean;
+  bitbucket_oauth_enabled?: boolean;
+  forgejo_oauth_enabled?: boolean;
 };
 
 export type ACLUser = {
@@ -23,16 +28,21 @@ export type ACLUser = {
   is_bootstrap_admin: boolean;
   has_gitea?: boolean;
   has_github?: boolean;
+  has_gitlab?: boolean;
+  has_bitbucket?: boolean;
   gitea_instance_id?: number;
   github_instance_id?: number;
+  gitlab_instance_id?: number;
+  bitbucket_instance_id?: number;
   token_instance_ids?: number[];
 };
 
-export type ForgeType = "gitea" | "github";
+export type ForgeType = "gitea" | "github" | "gitlab" | "bitbucket" | "forgejo";
 
 export type Repository = {
   id: number;
   external_id: number;
+  node_id?: string;
   owner: string;
   name: string;
   full_name: string;
@@ -88,6 +98,8 @@ export type PullRequest = {
   state: string;
   draft: boolean;
   author_login: string;
+  external_id?: number;
+  node_id?: string;
   ci_state?: string;
   review_state?: string;
   repo_owner?: string;
@@ -107,6 +119,8 @@ export type WorkflowRun = {
   branch: string;
   event?: string;
   actor_login: string;
+  external_id?: number;
+  node_id?: string;
   repo_full?: string;
   workflow_path?: string;
   started_at?: string;
@@ -122,6 +136,8 @@ export type Job = {
   name: string;
   status: string;
   conclusion: string;
+  external_id?: number;
+  node_id?: string;
   steps_json?: string;
   started_at?: string;
   completed_at?: string;
@@ -168,7 +184,10 @@ export type SavedFilterQuery = {
   forge_type?: string;
   instance_id?: number;
   reason?: InboxReason | string;
-  page?: "attention" | "inbox" | "pull-requests" | string;
+  page?: "attention" | "inbox" | "pull-requests" | "dashboard" | string;
+  org_id?: number;
+  owner?: string;
+  team?: string;
 };
 
 export type SavedFilter = {
@@ -199,6 +218,85 @@ export type Summary = {
   running_runs: number;
   days: number;
   since?: string;
+  org_id?: number;
+  owner?: string;
+  team?: string;
+};
+
+export type DashboardScope = {
+  org_id?: number;
+  owner?: string;
+  team?: string;
+};
+
+export type RunnerUtilizationRow = {
+  runner_name: string;
+  runner_id?: number;
+  busy_jobs: number;
+  queued_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  instance_id?: number;
+  instance_name?: string;
+  forge_type?: string;
+};
+
+export type RunnerUtilizationReport = {
+  days: number;
+  since?: string;
+  source: string;
+  degraded: boolean;
+  degraded_reason?: string;
+  runners_api_capable: boolean;
+  items: RunnerUtilizationRow[];
+};
+
+export type FlakyJob = {
+  repo_id: number;
+  repo_full?: string;
+  workflow_path: string;
+  job_name: string;
+  failure_count: number;
+  success_count: number;
+  flip_count: number;
+  last_failed_at?: string;
+  last_success_at?: string;
+  sample_run_id?: number;
+};
+
+export type ReleaseRun = {
+  id: number;
+  repo_id: number;
+  repo_full: string;
+  name: string;
+  workflow_path: string;
+  event: string;
+  branch: string;
+  status: string;
+  conclusion: string;
+  html_url?: string;
+  started_at?: string;
+  completed_at?: string;
+  forge_type?: string;
+  instance_id?: number;
+  attention_open: boolean;
+};
+
+export type WallboardToken = {
+  id: number;
+  name: string;
+  token_prefix: string;
+  created_by_user_id?: number;
+  created_at?: string;
+  last_used_at?: string;
+  revoked_at?: string;
+};
+
+export type WallboardSnapshot = {
+  generated_at: string;
+  summary: Summary;
+  attention: AttentionItem[];
+  attention_by_severity: CountBucket[];
 };
 
 export type DayRunBucket = {
@@ -337,6 +435,9 @@ export type UIConfig = {
   base_path?: string;
   oauth_enabled?: boolean;
   github_oauth_enabled?: boolean;
+  gitlab_oauth_enabled?: boolean;
+  bitbucket_oauth_enabled?: boolean;
+  forgejo_oauth_enabled?: boolean;
   bootstrap_enabled?: boolean;
   allow_skip_setup?: boolean;
   /** Present only when allow_skip_setup is true (local npm start). */
@@ -374,6 +475,8 @@ export type NotificationSettings = {
   discord_webhook_configured: boolean;
   webhook_enabled: boolean;
   webhook_url_configured: boolean;
+  incident_enabled: boolean;
+  incident_webhook_configured: boolean;
 };
 
 export type NotificationSettingsPatch = {
@@ -400,6 +503,9 @@ export type NotificationSettingsPatch = {
   webhook_enabled?: boolean;
   webhook_url?: string;
   clear_webhook_url?: boolean;
+  incident_enabled?: boolean;
+  incident_webhook_url?: string;
+  clear_incident_webhook?: boolean;
 };
 
 export type IntegrationPublic = {
@@ -789,11 +895,51 @@ export const api = {
         body: JSON.stringify({ instance_id: instanceId, repo_ids: repoIds }),
       },
     ),
-  summary: (days = 0) => request<Summary>(`/api/v1/summary?days=${days}`),
-  stats: (days = 0, section?: StatsSection) => {
-    let url = `/api/v1/stats?days=${days}`;
-    if (section) url += `&section=${encodeURIComponent(section)}`;
-    return request<StatsReport>(url);
+  summary: (days = 0, scope?: DashboardScope) => {
+    const params = new URLSearchParams({ days: String(days) });
+    if (scope?.org_id && scope.org_id > 0) params.set("org_id", String(scope.org_id));
+    if (scope?.owner) params.set("owner", scope.owner);
+    if (scope?.team) params.set("team", scope.team);
+    return request<Summary>(`/api/v1/summary?${params}`);
+  },
+  stats: (days = 0, section?: StatsSection, scope?: DashboardScope) => {
+    const params = new URLSearchParams({ days: String(days) });
+    if (section) params.set("section", section);
+    if (scope?.org_id && scope.org_id > 0) params.set("org_id", String(scope.org_id));
+    if (scope?.owner) params.set("owner", scope.owner);
+    if (scope?.team) params.set("team", scope.team);
+    return request<StatsReport>(`/api/v1/stats?${params}`);
+  },
+  runnerUtilization: (days = 7) =>
+    request<RunnerUtilizationReport>(`/api/v1/runners/utilization?days=${days}`),
+  flakyJobs: (days = 14) => request<{ items: FlakyJob[]; days: number }>(`/api/v1/flaky-jobs?days=${days}`),
+  releases: (days = 30) => request<{ items: ReleaseRun[]; days: number }>(`/api/v1/releases?days=${days}`),
+  wallboardTokens: (all = false) =>
+    request<{ items: WallboardToken[] }>(`/api/v1/wallboard/tokens${all ? "?all=1" : ""}`),
+  createWallboardToken: (name: string) =>
+    request<{ token: WallboardToken; secret: string; warning: string }>("/api/v1/wallboard/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeWallboardToken: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/wallboard/tokens/${id}`, { method: "DELETE" }),
+  wallboardSnapshot: (token: string) => {
+    const base = (typeof window !== "undefined" && window.__GITSEER_BASE__) || "";
+    return fetch(`${base}/api/v1/wallboard/snapshot`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(async (res) => {
+      if (!res.ok) {
+        let msg = res.statusText;
+        try {
+          const body = await res.json();
+          msg = body.error || msg;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg || "wallboard failed");
+      }
+      return res.json() as Promise<WallboardSnapshot>;
+    });
   },
   systemStatus: () => request<SystemStatus>("/api/v1/system/status"),
   notificationSettings: () =>
@@ -855,6 +1001,14 @@ export const api = {
     if (instanceId && instanceId > 0) params.set("instance_id", String(instanceId));
     return request<{ items: FailureCluster[]; days: number }>(
       `/api/v1/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/failure-clusters?${params}`,
+    );
+  },
+  repositoryFlakyJobs: (owner: string, repo: string, instanceId?: number, days = 14) => {
+    const params = new URLSearchParams();
+    params.set("days", String(days));
+    if (instanceId && instanceId > 0) params.set("instance_id", String(instanceId));
+    return request<{ items: FlakyJob[]; days: number; repo_id: number }>(
+      `/api/v1/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/flaky-jobs?${params}`,
     );
   },
   attentionLogSnippet: (id: number, maxBytes?: number) => {
@@ -1045,6 +1199,8 @@ export function forgeLabel(forgeType?: string | null): string {
       return "GitLab";
     case "bitbucket":
       return "Bitbucket";
+    case "forgejo":
+      return "Forgejo";
     default:
       return forgeType ? forgeType : "Forge";
   }

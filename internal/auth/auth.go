@@ -21,7 +21,9 @@ import (
 	"time"
 
 	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
+	"github.com/ncdlabs/gitseer/internal/forge/bitbucket"
 	"github.com/ncdlabs/gitseer/internal/forge/gitea"
+	"github.com/ncdlabs/gitseer/internal/forge/gitlab"
 	"github.com/ncdlabs/gitseer/internal/models"
 	"github.com/ncdlabs/gitseer/internal/store"
 )
@@ -44,10 +46,22 @@ type Config struct {
 	GiteaBaseURL      string
 	OAuthClientID     string
 	OAuthClientSecret string
-	GitHubBaseURL     string
+	GitHubBaseURL           string
 	GitHubOAuthClientID     string
 	GitHubOAuthClientSecret string
 	GitHubAllowPrivateNet   bool
+	GitLabBaseURL             string
+	GitLabOAuthClientID       string
+	GitLabOAuthClientSecret   string
+	GitLabAllowPrivateNet     bool
+	BitbucketBaseURL             string
+	BitbucketOAuthClientID       string
+	BitbucketOAuthClientSecret   string
+	BitbucketAllowPrivateNet     bool
+	ForgejoBaseURL             string
+	ForgejoOAuthClientID       string
+	ForgejoOAuthClientSecret   string
+	ForgejoAllowPrivateNet     bool
 	ExternalURL       string // public GitSeer URL (used for redirect_uri)
 	AllowPrivateNet   bool
 	EncryptionKey     string
@@ -55,12 +69,15 @@ type Config struct {
 
 // Service manages login and sessions.
 type Service struct {
-	mu           sync.RWMutex
-	store        *store.Store
-	cfg          Config
-	client       *http.Client
-	githubClient *http.Client
-	encKey       []byte
+	mu              sync.RWMutex
+	store           *store.Store
+	cfg             Config
+	client          *http.Client
+	githubClient    *http.Client
+	gitlabClient    *http.Client
+	bitbucketClient *http.Client
+	forgejoClient   *http.Client
+	encKey          []byte
 }
 
 // New creates an auth service.
@@ -82,11 +99,14 @@ func New(st *store.Store, cfg Config) *Service {
 		}
 	}
 	return &Service{
-		store:        st,
-		cfg:          cfg,
-		client:       gitea.NewHTTPClient(cfg.AllowPrivateNet, 30*time.Second),
-		githubClient: newGitHubHTTPClient(cfg.GitHubAllowPrivateNet),
-		encKey:       encKey,
+		store:           st,
+		cfg:             cfg,
+		client:          gitea.NewHTTPClient(cfg.AllowPrivateNet, 30*time.Second),
+		githubClient:    newGitHubHTTPClient(cfg.GitHubAllowPrivateNet),
+		gitlabClient:    gitlab.NewHTTPClient(cfg.GitLabAllowPrivateNet, 30*time.Second),
+		bitbucketClient: bitbucket.NewHTTPClient(cfg.BitbucketAllowPrivateNet, 30*time.Second),
+		forgejoClient:   gitea.NewHTTPClient(cfg.ForgejoAllowPrivateNet, 30*time.Second),
+		encKey:          encKey,
 	}
 }
 
@@ -292,7 +312,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.Res
 		id := inst.ID
 		instanceID = &id
 	}
-	user, err := s.store.UpsertGiteaUser(ctx, instanceID, *gu)
+	user, err := s.store.UpsertGiteaUser(ctx, instanceID, *gu, nil)
 	if err != nil {
 		if errors.Is(err, store.ErrReservedLogin) || errors.Is(err, store.ErrBootstrapClash) {
 			return nil, "", "", "", fmt.Errorf("oauth login %q is reserved for the GitSeer bootstrap admin", gu.Login)
@@ -307,8 +327,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.Res
 		tokenInstanceID = *instanceID
 	}
 	if err := s.persistUserToken(ctx, user.ID, tokenInstanceID, tok); err != nil {
-		// Non-fatal for session creation (login still succeeds), but ACL refresh needs the token.
-		slog.Warn("oauth token persist failed", "err", err, "user_id", user.ID, "login", user.Login)
+		return nil, "", "", "", fmt.Errorf("persist oauth token: %w", err)
 	}
 	sessionToken, err := s.createSession(ctx, user.ID, ip, ua)
 	if err != nil {
@@ -529,8 +548,15 @@ func (s *Service) refreshAccessTokenForInstance(ctx context.Context, instanceID 
 			if ft == "" {
 				ft = models.ForgeTypeGitea
 			}
-			if ft == models.ForgeTypeGitHub {
+			switch ft {
+			case models.ForgeTypeGitHub:
 				return s.refreshGitHubAccessToken(ctx, refreshToken)
+			case models.ForgeTypeGitLab:
+				return s.refreshGitLabAccessToken(ctx, refreshToken)
+			case models.ForgeTypeBitbucket:
+				return s.refreshBitbucketAccessToken(ctx, refreshToken)
+			case models.ForgeTypeForgejo:
+				return s.refreshForgejoAccessToken(ctx, refreshToken)
 			}
 		}
 	}

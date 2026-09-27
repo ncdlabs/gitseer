@@ -49,8 +49,8 @@ func (h *Handler) createInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ft := strings.ToLower(strings.TrimSpace(body.ForgeType))
-	if ft == "gitlab" || ft == "bitbucket" {
-		writeError(w, http.StatusBadRequest, "forge_type "+ft+" is coming soon")
+	if ft != "" && !models.IsSupportedForgeType(ft) {
+		writeError(w, http.StatusBadRequest, "forge_type must be a supported forge (gitea, github, gitlab, bitbucket, forgejo)")
 		return
 	}
 	pub, err := h.settings.CreateInstance(r.Context(), body)
@@ -82,8 +82,8 @@ func (h *Handler) updateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ft := strings.ToLower(strings.TrimSpace(body.ForgeType))
-	if ft == "gitlab" || ft == "bitbucket" {
-		writeError(w, http.StatusBadRequest, "forge_type "+ft+" is coming soon")
+	if ft != "" && !models.IsSupportedForgeType(ft) {
+		writeError(w, http.StatusBadRequest, "forge_type must be a supported forge (gitea, github, gitlab, bitbucket, forgejo)")
 		return
 	}
 	pub, err := h.settings.UpdateInstance(r.Context(), id, body)

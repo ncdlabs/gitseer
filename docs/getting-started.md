@@ -16,7 +16,7 @@ In-repo detail: [docs/install.md](install.md).
 
 - Go **1.26+** and Node **22+** (binary / local builds)
 - Podman Compose or Docker Compose (installer default)
-- At least one forge: a Gitea instance (~1.25+) and/or GitHub / GitHub Enterprise with an API token that can list repos, PRs, and Actions/workflows
+- At least one forge: Gitea (~1.25+), Forgejo, GitHub / GitHub Enterprise, GitLab, and/or Bitbucket Cloud with an API token that can list repos, PRs/MRs, and CI/workflows
 - Public URL for GitSeer (needed for OAuth redirect and webhook delivery)
 
 ## 2. Run the installer
@@ -43,7 +43,7 @@ The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, t
 On first bootstrap-admin visit (when `setup_completed` is false), GitSeer opens **`/setup`**:
 
 1. **Prepare** — public GitSeer URL + generate or paste encryption key (required to store secrets)
-2. **Forge picker** — Gitea or GitHub (GitLab / Bitbucket Coming Soon)
+2. **Forge picker** — Gitea, GitHub, GitLab, Bitbucket, or Forgejo
 3. **Connect** — forge URL, service token / PAT
 4. **Validate** — connectivity/permission checks; create or paste webhook (+ Gitea OAuth when applicable)  
 5. **Finish** — mark setup complete when at least one forge is configured  

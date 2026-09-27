@@ -125,14 +125,14 @@ func (m *Manager) UpdateInstance(ctx context.Context, id int64, patch InstancePa
 	if strings.TrimSpace(patch.ForgeType) != "" {
 		requested := normalizeSupportedForgeType(patch.ForgeType)
 		if requested == "" {
-			return InstancePublic{}, fmt.Errorf("forge_type must be gitea or github")
+			return InstancePublic{}, fmt.Errorf("forge_type must be gitea, github, gitlab, bitbucket, or forgejo")
 		}
 		if requested != ft {
 			return InstancePublic{}, fmt.Errorf("forge_type cannot be changed after create")
 		}
 	}
 	if ft == "" {
-		return InstancePublic{}, fmt.Errorf("forge_type must be gitea or github")
+		return InstancePublic{}, fmt.Errorf("forge_type must be gitea, github, gitlab, bitbucket, or forgejo")
 	}
 	baseURL := strings.TrimSpace(patch.BaseURL)
 	if baseURL == "" {
@@ -141,6 +141,18 @@ func (m *Manager) UpdateInstance(ctx context.Context, id int64, patch InstancePa
 	if ft == models.ForgeTypeGitHub {
 		if norm, nerr := tryNormalizeGitHubAPI(baseURL); nerr == nil {
 			baseURL = norm
+		}
+	} else if ft == models.ForgeTypeGitLab {
+		if norm, nerr := tryNormalizeGitLabAPI(baseURL); nerr == nil {
+			baseURL = norm
+		} else {
+			baseURL = strings.TrimRight(baseURL, "/")
+		}
+	} else if ft == models.ForgeTypeBitbucket {
+		if norm, nerr := tryNormalizeBitbucketAPI(baseURL); nerr == nil {
+			baseURL = norm
+		} else {
+			baseURL = strings.TrimRight(baseURL, "/")
 		}
 	} else {
 		baseURL = strings.TrimRight(baseURL, "/")
@@ -251,6 +263,34 @@ func (m *Manager) AuthGitHubIntegration(ctx context.Context) GitHubIntegration {
 	return gh
 }
 
+// AuthOAuthFromForge returns decrypted OAuth client credentials for the primary instance of forgeType.
+func (m *Manager) AuthOAuthFromForge(ctx context.Context, forgeType string) Integration {
+	inst, err := m.st.GetPrimaryInstanceForForge(ctx, forgeType)
+	if err != nil || inst == nil {
+		return Integration{}
+	}
+	integ, err := m.integrationFromGiteaInstance(inst)
+	if err != nil {
+		return Integration{}
+	}
+	return integ
+}
+
+// AuthGitLabIntegration is the primary GitLab OAuth connection.
+func (m *Manager) AuthGitLabIntegration(ctx context.Context) Integration {
+	return m.AuthOAuthFromForge(ctx, models.ForgeTypeGitLab)
+}
+
+// AuthBitbucketIntegration is the primary Bitbucket OAuth connection.
+func (m *Manager) AuthBitbucketIntegration(ctx context.Context) Integration {
+	return m.AuthOAuthFromForge(ctx, models.ForgeTypeBitbucket)
+}
+
+// AuthForgejoIntegration is the primary Forgejo OAuth connection.
+func (m *Manager) AuthForgejoIntegration(ctx context.Context) Integration {
+	return m.AuthOAuthFromForge(ctx, models.ForgeTypeForgejo)
+}
+
 // refreshSnapshotsFromInstances sets Integration/GitHub from the first instance of
 // each forge type (by id) for setup-path compatibility, then live-applies primary
 // Gitea OAuth credentials to the auth callback.
@@ -333,6 +373,7 @@ func (m *Manager) refreshSnapshotsFromInstances(ctx context.Context) error {
 	}
 	onChange := m.onInteg
 	onGitHub := m.onGitHub
+	onMulti := m.onMultiOAuth
 	m.mu.Unlock()
 
 	if onChange != nil {
@@ -346,6 +387,9 @@ func (m *Manager) refreshSnapshotsFromInstances(ctx context.Context) error {
 			}
 		}
 		onGitHub(authGH)
+	}
+	if onMulti != nil {
+		onMulti()
 	}
 	return nil
 }
@@ -450,17 +494,30 @@ func (m *Manager) effectiveExternalURL() string {
 func normalizeInstancePatch(patch InstancePatch, creating bool) (ft, baseURL, name string, err error) {
 	ft = normalizeSupportedForgeType(patch.ForgeType)
 	if ft == "" {
-		return "", "", "", fmt.Errorf("forge_type must be gitea or github")
+		return "", "", "", fmt.Errorf("forge_type must be gitea, github, gitlab, bitbucket, or forgejo")
 	}
 	baseURL = strings.TrimSpace(patch.BaseURL)
 	if baseURL == "" {
 		return "", "", "", fmt.Errorf("base_url is required")
 	}
-	if ft == models.ForgeTypeGitHub {
+	switch ft {
+	case models.ForgeTypeGitHub:
 		if norm, nerr := tryNormalizeGitHubAPI(baseURL); nerr == nil {
 			baseURL = norm
 		}
-	} else {
+	case models.ForgeTypeGitLab:
+		if norm, nerr := tryNormalizeGitLabAPI(baseURL); nerr == nil {
+			baseURL = norm
+		} else {
+			baseURL = strings.TrimRight(baseURL, "/")
+		}
+	case models.ForgeTypeBitbucket:
+		if norm, nerr := tryNormalizeBitbucketAPI(baseURL); nerr == nil {
+			baseURL = norm
+		} else {
+			baseURL = strings.TrimRight(baseURL, "/")
+		}
+	default:
 		baseURL = strings.TrimRight(baseURL, "/")
 	}
 	name = strings.TrimSpace(patch.Name)
@@ -472,25 +529,23 @@ func normalizeInstancePatch(patch InstancePatch, creating bool) (ft, baseURL, na
 }
 
 func normalizeSupportedForgeType(ft string) string {
-	switch strings.ToLower(strings.TrimSpace(ft)) {
-	case models.ForgeTypeGitea:
-		return models.ForgeTypeGitea
-	case models.ForgeTypeGitHub:
-		return models.ForgeTypeGitHub
-	case "gitlab", "bitbucket":
-		return ""
-	default:
-		if strings.TrimSpace(ft) == "" {
-			return ""
-		}
-		return ""
+	ft = strings.ToLower(strings.TrimSpace(ft))
+	if models.IsSupportedForgeType(ft) {
+		return ft
 	}
+	return ""
 }
 
 func defaultInstanceName(ft string) string {
 	switch ft {
 	case models.ForgeTypeGitHub:
 		return "GitHub"
+	case models.ForgeTypeGitLab:
+		return "GitLab"
+	case models.ForgeTypeBitbucket:
+		return "Bitbucket"
+	case models.ForgeTypeForgejo:
+		return "Forgejo"
 	default:
 		return "Gitea"
 	}
@@ -531,7 +586,7 @@ func instancePublicFrom(inst *models.Instance) InstancePublic {
 		CreatedAt:                   inst.CreatedAt,
 		UpdatedAt:                   inst.UpdatedAt,
 	}
-	if ft != models.ForgeTypeGitea {
+	if ft != models.ForgeTypeGitea && ft != models.ForgeTypeForgejo && ft != models.ForgeTypeGitLab {
 		out.OAuthClientID = ""
 		out.OAuthClientSecretConfigured = false
 	}

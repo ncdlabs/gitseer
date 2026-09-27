@@ -3,7 +3,7 @@
 **Status:** Execution-ready blueprint (amended for dual-forge / GitSeer branding)  
 **Source of truth:** [`./docs/prd-spec.md`](./prd-spec.md)  
 **Repository state at planning:** greenfield (PRD only; no commits; no application code)  
-**Date:** 2026-09-20 (ADR-029 dual-forge amendment 2026-09-24; ADR-031 GitHub OAuth 2026-09-26; ADR-032 notifications 2026-09-26)  
+**Date:** 2026-09-20 (ADR-029 multi-forge amendment 2026-09-27; prior dual-forge 2026-09-24; ADR-031 GitHub OAuth 2026-09-26; ADR-032 notifications 2026-09-26)  
 **License target:** Apache-2.0  
 
 This document is the implementation blueprint future Cursor Agent sessions should follow. Do not silently reinterpret major PRD requirements. If repository reality later conflicts with this plan, update both this file and `PROJECT_SHARED_STATE.md`.
@@ -36,7 +36,7 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 
 ### What not to do
 
-- Do not invent GitLab/Bitbucket adapters until approved (Coming Soon in the forge picker only). Gitea + GitHub are in scope (ADR-029).
+- Forge adapters: Gitea, GitHub, GitLab, Bitbucket, Forgejo (ADR-029). Ask before adding further forge types.
 - Do not add Redis for V1 (PRD ADR-011).
 - Do not use WebSockets unless SSE is proven insufficient (PRD §24).
 - Do not fork or patch Gitea source.
@@ -96,7 +96,7 @@ Browser (React SPA, embedded in binary)
 │  Sync · Webhooks · Attention · Workflows  │
 │  Forge adapter boundary                   │
 │       └── forge/gitea + forge/github      │
-│           (GitLab/Bitbucket Coming Soon)  │
+│           (GitLab/Bitbucket/Forgejo in scope)  │
 └───────────────────┬───────────────────────┘
                     │ encrypted secrets, normalized rows
                     ▼
@@ -127,7 +127,7 @@ Browser (React SPA, embedded in binary)
 
 - No Redis / message broker
 - No WebSocket gateway (unless a later ADR overturns)
-- No GitLab / Bitbucket forge clients (Coming Soon UI only — see ADR-029)
+- GitLab / Bitbucket / Forgejo forge clients are in-scope (ADR-029 amendment 2026-09-27)
 - No CI log blob store by default
 
 ---
@@ -145,19 +145,19 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 | ADR-019 | **Config:** YAML file + env overrides (`GITSEER_*`); secrets via `_FILE` suffix pattern | Foundation |
 | ADR-020 | **Frontend:** Vite + React 18/19 + TS; TanStack Query + TanStack Table; React Flow for DAGs; CSS variables + small primitives (no heavy UI kit) | Foundation |
 | ADR-021 | **Session store:** server-side sessions in DB (SQLite/PG); signed cookie session ID; no JWT-as-session for V1 | Auth phase |
-| ADR-022 | **Credential encryption:** AES-256-GCM; passphrase via `GITSEER_ENCRYPTION_KEY` (min 16 at config load; wizard paste min 24) hashed with SHA-256 to a 32-byte AES key; rotate via re-encrypt command later | Auth/sync |
+| ADR-022 | **Credential encryption:** AES-256-GCM; passphrase via `GITSEER_ENCRYPTION_KEY` (min 16 at config load; wizard paste min 24) hashed with SHA-256 to a 32-byte AES key; rotate via `gitseer rotate-encryption-key` (re-seal DB secrets, update on-disk key file when used) | Auth/sync |
 | ADR-023 | **User repo ACL cache:** table `user_repository_access` refreshed on login + periodic + webhook-driven invalidation; **every** list/aggregate query joins/filters by it | Authz — critical |
 | ADR-024 | **Webhook processing:** accept → persist raw envelope → `202`/`200` quickly → in-process worker pool (no Redis) | Sync |
 | ADR-025 | **SSE:** one stream per authenticated session; events are opaque entity refs (`type`, `id`, `repo_id`); clients refetch via Query | Realtime |
 | ADR-026 | **Minimum Gitea version:** declare after capability matrix spike (see Open Questions); degrade Actions features when APIs missing | Before M1 exit |
 | ADR-027 | **Module path:** `github.com/ncdlabs/gitseer` (binary `gitseer`, Helm chart/namespace `gitseer`, env `GITSEER_*`) | Foundation |
 | ADR-028 | **Compose filename:** `compose.yaml` (project preference for `.yaml`) while keeping `docker-compose.yaml` symlink or doc alias if useful | Packaging |
-| ADR-029 | **Dual-forge:** Gitea + GitHub are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). GitLab and Bitbucket remain **Coming Soon** (picker only) until explicitly approved. Service PAT remains required for GitHub sync; per-user GitHub OAuth is ADR-031. | Dual-forge slice |
+| ADR-029 | **Multi-forge:** Gitea, GitHub, GitLab, Bitbucket, and Forgejo are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). Forgejo is a thin adapter over the Gitea client with distinct `forge_type` and webhook path. Service PAT remains required for sync on forges without user OAuth; per-user GitHub OAuth is ADR-031. Amended 2026-09-27 to implement GitLab/Bitbucket/Forgejo (previously Coming Soon). | Dual-forge → multi-forge |
 | ADR-030 | **Write ops:** `RerunWorkflowRun` / `CancelWorkflowRun` on `forge.Forge` with API + UI. Non-admin users must use their per-instance forge token (`UserAccessTokenForInstance`); never silent service-PAT fallback. Bootstrap admin may use service PAT with explicit UI warning when no user GitHub token exists. | Stream 4 |
 | ADR-031 | **GitHub OAuth identity parity:** GitHub Authorization Code + PKCE login (`/api/v1/auth/github/login` + callback), tokens in `user_tokens` keyed by `(user_id, instance_id)`, optional link of both forge identities on one user, ACL refresh only for instances with a user token (preserves admin manual grants). Amends ADR-029 “no GitHub OAuth login”. | Stream 6 |
 | ADR-032 | **Outbound notifications:** SMTP digests + Slack/Discord/generic HTTPS webhooks via self-hosted `notification_outbox` worker (`internal/notify`). Secrets sealed with encryption key. No ncdLabs-hosted relay (reaffirms ADR-015). Triggers: attention open matching min severity (default critical); optional daily digest at `digest_hour_utc`. | Stream 7 |
 
-**No ADR needed yet for:** Forgejo, GitLab/Bitbucket clients.
+**No ADR needed yet for:** additional forge types beyond ADR-029.
 
 ---
 

@@ -33,6 +33,20 @@ func Encrypt(key []byte, plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(out), nil
 }
 
+// Reencrypt decrypts ciphertext with oldKey and seals it with newKey.
+// Empty ciphertext is a no-op (returns empty). Fail-closed on decrypt errors.
+func Reencrypt(oldKey, newKey []byte, ciphertext string) (string, error) {
+	ciphertext = strings.TrimSpace(ciphertext)
+	if ciphertext == "" {
+		return "", nil
+	}
+	pt, err := Decrypt(oldKey, ciphertext)
+	if err != nil {
+		return "", err
+	}
+	return Encrypt(newKey, pt)
+}
+
 // Decrypt reverses Encrypt.
 func Decrypt(key []byte, encoded string) (string, error) {
 	if len(key) != 32 {

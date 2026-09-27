@@ -7,10 +7,12 @@ type Draft = NotificationSettings & {
   slack_webhook_url: string;
   discord_webhook_url: string;
   webhook_url: string;
+  incident_webhook_url: string;
   clear_smtp_password: boolean;
   clear_slack_webhook: boolean;
   clear_discord_webhook: boolean;
   clear_webhook_url: boolean;
+  clear_incident_webhook: boolean;
 };
 
 function emptyDraft(): Draft {
@@ -34,14 +36,18 @@ function emptyDraft(): Draft {
     discord_webhook_configured: false,
     webhook_enabled: false,
     webhook_url_configured: false,
+    incident_enabled: false,
+    incident_webhook_configured: false,
     smtp_password: "",
     slack_webhook_url: "",
     discord_webhook_url: "",
     webhook_url: "",
+    incident_webhook_url: "",
     clear_smtp_password: false,
     clear_slack_webhook: false,
     clear_discord_webhook: false,
     clear_webhook_url: false,
+    clear_incident_webhook: false,
   };
 }
 
@@ -53,6 +59,7 @@ function fromSettings(s: NotificationSettings): Draft {
     slack_webhook_url: "",
     discord_webhook_url: "",
     webhook_url: "",
+    incident_webhook_url: "",
   };
 }
 
@@ -73,6 +80,7 @@ function dirty(a: Draft, b: Draft): boolean {
     "slack_enabled",
     "discord_enabled",
     "webhook_enabled",
+    "incident_enabled",
   ];
   for (const k of keys) {
     if (a[k] !== b[k]) return true;
@@ -82,10 +90,12 @@ function dirty(a: Draft, b: Draft): boolean {
     a.slack_webhook_url !== "" ||
     a.discord_webhook_url !== "" ||
     a.webhook_url !== "" ||
+    a.incident_webhook_url !== "" ||
     a.clear_smtp_password ||
     a.clear_slack_webhook ||
     a.clear_discord_webhook ||
-    a.clear_webhook_url
+    a.clear_webhook_url ||
+    a.clear_incident_webhook
   );
 }
 
@@ -133,6 +143,7 @@ export function NotificationsPanel({ editable }: Props) {
         slack_enabled: draft.slack_enabled,
         discord_enabled: draft.discord_enabled,
         webhook_enabled: draft.webhook_enabled,
+        incident_enabled: draft.incident_enabled,
       };
       if (draft.clear_smtp_password) body.clear_smtp_password = true;
       else if (draft.smtp_password) body.smtp_password = draft.smtp_password;
@@ -142,6 +153,8 @@ export function NotificationsPanel({ editable }: Props) {
       else if (draft.discord_webhook_url) body.discord_webhook_url = draft.discord_webhook_url;
       if (draft.clear_webhook_url) body.clear_webhook_url = true;
       else if (draft.webhook_url) body.webhook_url = draft.webhook_url;
+      if (draft.clear_incident_webhook) body.clear_incident_webhook = true;
+      else if (draft.incident_webhook_url) body.incident_webhook_url = draft.incident_webhook_url;
       return api.updateNotificationSettings(body);
     },
     onSuccess: (data) => {
@@ -496,6 +509,48 @@ export function NotificationsPanel({ editable }: Props) {
           )}
           <p className="settings-form__hint">
             POSTs JSON with title, severity, repo, and deep_link. Secrets are write-only and sealed with the encryption key.
+          </p>
+        </div>
+        <div className="settings-form__field">
+          <label>
+            <input
+              type="checkbox"
+              checked={draft.incident_enabled}
+              onChange={(e) => setField("incident_enabled", e.target.checked)}
+            />{" "}
+            Incident webhook
+          </label>
+          <input
+            type="password"
+            value={draft.incident_webhook_url}
+            onChange={(e) => {
+              setField("incident_webhook_url", e.target.value);
+              setField("clear_incident_webhook", false);
+            }}
+            placeholder={
+              draft.incident_webhook_configured && !draft.clear_incident_webhook
+                ? "Incident URL configured (leave blank to keep)"
+                : "Incident HTTPS webhook URL"
+            }
+            aria-label="Incident webhook URL"
+            autoComplete="off"
+          />
+          {draft.incident_webhook_configured && (
+            <label>
+              <input
+                type="checkbox"
+                checked={draft.clear_incident_webhook}
+                onChange={(e) => {
+                  setField("clear_incident_webhook", e.target.checked);
+                  if (e.target.checked) setField("incident_webhook_url", "");
+                }}
+              />{" "}
+              Clear incident webhook
+            </label>
+          )}
+          <p className="settings-form__hint">
+            Structured payload for Opsgenie/PagerDuty-style receivers (source, priority, deep_link). Self-hosted
+            only — no ncdLabs relay.
           </p>
         </div>
       </fieldset>

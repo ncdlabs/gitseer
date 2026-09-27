@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	postgressqlc "github.com/ncdlabs/gitseer/internal/store/sqlc/postgres"
+	sqlitesqlc "github.com/ncdlabs/gitseer/internal/store/sqlc/sqlite"
 )
 
 // SavedFilter is a per-user named query preset (Attention / Inbox / list pages).
@@ -22,6 +25,28 @@ type SavedFilter struct {
 func (s *Store) ListSavedFilters(ctx context.Context, userID int64) ([]SavedFilter, error) {
 	if userID <= 0 {
 		return nil, fmt.Errorf("user_id required")
+	}
+	if s.driver == "postgres" && s.pg != nil {
+		rows, err := s.pg.ListSavedFilters(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]SavedFilter, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, mapSavedFilterSQLC(r.ID, r.UserID, r.Name, r.QueryJson, r.CreatedAt, r.UpdatedAt))
+		}
+		return out, nil
+	}
+	if s.sqlite != nil {
+		rows, err := s.sqlite.ListSavedFilters(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]SavedFilter, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, mapSavedFilterSQLC(r.ID, r.UserID, r.Name, r.QueryJson, r.CreatedAt, r.UpdatedAt))
+		}
+		return out, nil
 	}
 	rows, err := s.query(ctx, `
 SELECT id, user_id, name, query_json, created_at, updated_at
@@ -47,10 +72,41 @@ ORDER BY LOWER(name) ASC, id ASC`, userID)
 }
 
 func (s *Store) GetSavedFilter(ctx context.Context, userID, id int64) (*SavedFilter, error) {
+	if s.driver == "postgres" && s.pg != nil {
+		r, err := s.pg.GetSavedFilter(ctx, postgressqlc.GetSavedFilterParams{ID: id, UserID: userID})
+		if err != nil {
+			return nil, err
+		}
+		f := mapSavedFilterSQLC(r.ID, r.UserID, r.Name, r.QueryJson, r.CreatedAt, r.UpdatedAt)
+		return &f, nil
+	}
+	if s.sqlite != nil {
+		r, err := s.sqlite.GetSavedFilter(ctx, sqlitesqlc.GetSavedFilterParams{ID: id, UserID: userID})
+		if err != nil {
+			return nil, err
+		}
+		f := mapSavedFilterSQLC(r.ID, r.UserID, r.Name, r.QueryJson, r.CreatedAt, r.UpdatedAt)
+		return &f, nil
+	}
 	row := s.queryRow(ctx, `
 SELECT id, user_id, name, query_json, created_at, updated_at
 FROM saved_filters WHERE id=? AND user_id=?`, id, userID)
 	return scanSavedFilter(row)
+}
+
+func mapSavedFilterSQLC(id, userID int64, name, queryJSON, created, updated string) SavedFilter {
+	f := SavedFilter{ID: id, UserID: userID, Name: name}
+	if queryJSON == "" {
+		queryJSON = "{}"
+	}
+	f.Query = json.RawMessage(queryJSON)
+	if t, err := parseTime(created); err == nil {
+		f.CreatedAt = t
+	}
+	if t, err := parseTime(updated); err == nil {
+		f.UpdatedAt = t
+	}
+	return f
 }
 
 func (s *Store) InsertSavedFilter(ctx context.Context, userID int64, name string, query json.RawMessage) (*SavedFilter, error) {

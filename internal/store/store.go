@@ -1,4 +1,8 @@
+//go:generate sqlc generate -f ../../sqlc.yaml
+
 // Package store provides SQL persistence for GitSeer models.
+// Critical-path queries are sqlc-generated (see sqlc.yaml + internal/store/sqlc/);
+// dynamic/list/upsert SQL remains hand-written in this package.
 package store
 
 import (
@@ -10,11 +14,15 @@ import (
 	"time"
 
 	"github.com/ncdlabs/gitseer/internal/models"
+	postgressqlc "github.com/ncdlabs/gitseer/internal/store/sqlc/postgres"
+	sqlitesqlc "github.com/ncdlabs/gitseer/internal/store/sqlc/sqlite"
 )
 
 type Store struct {
 	db     *sql.DB
 	driver string
+	sqlite *sqlitesqlc.Queries
+	pg     *postgressqlc.Queries
 }
 
 func New(db *sql.DB) *Store { return NewWithDriver(db, "sqlite") }
@@ -27,7 +35,9 @@ func NewWithDriver(db *sql.DB, driver string) *Store {
 	if d == "" {
 		d = "sqlite"
 	}
-	return &Store{db: db, driver: d}
+	s := &Store{db: db, driver: d}
+	s.initSQLC()
+	return s
 }
 
 func (s *Store) DB() *sql.DB { return s.db }
@@ -156,33 +166,67 @@ ON CONFLICT(base_url) DO UPDATE SET
 }
 
 func (s *Store) GetInstanceByURL(ctx context.Context, baseURL string) (*models.Instance, error) {
-	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances WHERE base_url = ?`, baseURL)
-	return scanInstance(row)
+	return s.getInstanceSQLCByURL(ctx, baseURL)
 }
 
 func (s *Store) GetInstanceByID(ctx context.Context, id int64) (*models.Instance, error) {
-	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances WHERE id = ?`, id)
-	return scanInstance(row)
+	return s.getInstanceSQLCByID(ctx, id)
 }
 
 // GetInstanceByForgeAndURL returns the instance for forge_type + base_url, or nil if missing.
 func (s *Store) GetInstanceByForgeAndURL(ctx context.Context, forgeType, baseURL string) (*models.Instance, error) {
-	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances WHERE forge_type = ? AND base_url = ?`,
-		normalizeForgeType(forgeType), baseURL)
-	inst, err := scanInstance(row)
+	ft := normalizeForgeType(forgeType)
+	if s.driver == "postgres" {
+		r, err := s.pg.GetInstanceByForgeAndURL(ctx, postgressqlc.GetInstanceByForgeAndURLParams{ForgeType: ft, BaseUrl: baseURL})
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return mapInstanceFields(r.ID, r.Name, r.ForgeType, r.BaseUrl, r.Version, r.CapabilitiesJson,
+			r.SyncTokenCiphertext, r.WebhookSecretCiphertext, r.OauthClientID, r.OauthClientSecretCiphertext, r.ExternalUrl,
+			r.AllowPrivateNetwork, r.AllowUnsignedWebhooks, r.WebhookVerifiedAt, r.WebhookEnsureAt, r.WebhookEnsureError, r.WebhookVerifyToken,
+			r.CreatedAt, r.UpdatedAt), nil
+	}
+	r, err := s.sqlite.GetInstanceByForgeAndURL(ctx, sqlitesqlc.GetInstanceByForgeAndURLParams{ForgeType: ft, BaseUrl: baseURL})
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return inst, err
+	if err != nil {
+		return nil, err
+	}
+	return mapInstanceFields(r.ID, r.Name, r.ForgeType, r.BaseUrl, r.Version, r.CapabilitiesJson,
+		r.SyncTokenCiphertext, r.WebhookSecretCiphertext, r.OauthClientID, r.OauthClientSecretCiphertext, r.ExternalUrl,
+		r.AllowPrivateNetwork, r.AllowUnsignedWebhooks, r.WebhookVerifiedAt, r.WebhookEnsureAt, r.WebhookEnsureError, r.WebhookVerifyToken,
+		r.CreatedAt, r.UpdatedAt), nil
 }
 
 func (s *Store) GetPrimaryInstance(ctx context.Context) (*models.Instance, error) {
-	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances ORDER BY id ASC LIMIT 1`)
-	inst, err := scanInstance(row)
+	if s.driver == "postgres" {
+		r, err := s.pg.GetPrimaryInstance(ctx)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return mapInstanceFields(r.ID, r.Name, r.ForgeType, r.BaseUrl, r.Version, r.CapabilitiesJson,
+			r.SyncTokenCiphertext, r.WebhookSecretCiphertext, r.OauthClientID, r.OauthClientSecretCiphertext, r.ExternalUrl,
+			r.AllowPrivateNetwork, r.AllowUnsignedWebhooks, r.WebhookVerifiedAt, r.WebhookEnsureAt, r.WebhookEnsureError, r.WebhookVerifyToken,
+			r.CreatedAt, r.UpdatedAt), nil
+	}
+	r, err := s.sqlite.GetPrimaryInstance(ctx)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return inst, err
+	if err != nil {
+		return nil, err
+	}
+	return mapInstanceFields(r.ID, r.Name, r.ForgeType, r.BaseUrl, r.Version, r.CapabilitiesJson,
+		r.SyncTokenCiphertext, r.WebhookSecretCiphertext, r.OauthClientID, r.OauthClientSecretCiphertext, r.ExternalUrl,
+		r.AllowPrivateNetwork, r.AllowUnsignedWebhooks, r.WebhookVerifiedAt, r.WebhookEnsureAt, r.WebhookEnsureError, r.WebhookVerifyToken,
+		r.CreatedAt, r.UpdatedAt), nil
 }
 
 // GetPrimaryGiteaInstance returns the Gitea instance preferred for OAuth and legacy
@@ -234,6 +278,47 @@ ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitHub)
 	}
 	return inst, err
 }
+// GetPrimaryInstanceForForge returns the instance preferred for OAuth for forgeType:
+// OAuth client id+secret configured first, else lowest id.
+func (s *Store) GetPrimaryInstanceForForge(ctx context.Context, forgeType string) (*models.Instance, error) {
+	forgeType = strings.TrimSpace(strings.ToLower(forgeType))
+	if forgeType == "" {
+		forgeType = models.ForgeTypeGitea
+	}
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
+WHERE forge_type = ?
+  AND TRIM(COALESCE(oauth_client_id, '')) != ''
+  AND TRIM(COALESCE(oauth_client_secret_ciphertext, '')) != ''
+ORDER BY id ASC LIMIT 1`, forgeType)
+	inst, err := scanInstance(row)
+	if err == nil {
+		return inst, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	row = s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
+WHERE forge_type = ?
+ORDER BY id ASC LIMIT 1`, forgeType)
+	inst, err = scanInstance(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return inst, err
+}
+
+func (s *Store) GetPrimaryGitLabInstance(ctx context.Context) (*models.Instance, error) {
+	return s.GetPrimaryInstanceForForge(ctx, models.ForgeTypeGitLab)
+}
+
+func (s *Store) GetPrimaryBitbucketInstance(ctx context.Context) (*models.Instance, error) {
+	return s.GetPrimaryInstanceForForge(ctx, models.ForgeTypeBitbucket)
+}
+
+func (s *Store) GetPrimaryForgejoInstance(ctx context.Context) (*models.Instance, error) {
+	return s.GetPrimaryInstanceForForge(ctx, models.ForgeTypeForgejo)
+}
+
 
 func scanInstance(row scanner) (*models.Instance, error) {
 	var inst models.Instance
@@ -276,39 +361,38 @@ func scanInstance(row scanner) (*models.Instance, error) {
 }
 
 func normalizeForgeType(ft string) string {
-	switch strings.ToLower(strings.TrimSpace(ft)) {
-	case models.ForgeTypeGitHub:
-		return models.ForgeTypeGitHub
-	default:
-		return models.ForgeTypeGitea
+	ft = strings.ToLower(strings.TrimSpace(ft))
+	if models.IsSupportedForgeType(ft) {
+		return ft
 	}
+	return models.ForgeTypeGitea
 }
 
 // parseListForgeType returns a forge_type filter value, or empty when unset/invalid (no filter).
 func parseListForgeType(ft string) string {
-	switch strings.ToLower(strings.TrimSpace(ft)) {
-	case models.ForgeTypeGitea, models.ForgeTypeGitHub:
-		return strings.ToLower(strings.TrimSpace(ft))
-	default:
-		return ""
+	ft = strings.ToLower(strings.TrimSpace(ft))
+	if models.IsSupportedForgeType(ft) {
+		return ft
 	}
+	return ""
 }
 
 func (s *Store) UpsertOrganization(ctx context.Context, instanceID int64, org models.Organization) (*models.Organization, error) {
 	now := formatTime(time.Now().UTC())
 	_, err := s.exec(ctx, `
-INSERT INTO organizations (instance_id, external_id, name, full_name, avatar_url, synced_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO organizations (instance_id, external_id, node_id, name, full_name, avatar_url, synced_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(instance_id, external_id) DO UPDATE SET
+  node_id=CASE WHEN excluded.node_id != '' THEN excluded.node_id ELSE organizations.node_id END,
   name=excluded.name, full_name=excluded.full_name, avatar_url=excluded.avatar_url, synced_at=excluded.synced_at
-`, instanceID, org.ExternalID, org.Name, org.FullName, org.AvatarURL, now)
+`, instanceID, org.ExternalID, org.NodeID, org.Name, org.FullName, org.AvatarURL, now)
 	if err != nil {
 		return nil, err
 	}
-	row := s.queryRow(ctx, `SELECT id, instance_id, external_id, name, full_name, avatar_url, synced_at FROM organizations WHERE instance_id=? AND external_id=?`, instanceID, org.ExternalID)
+	row := s.queryRow(ctx, `SELECT id, instance_id, external_id, node_id, name, full_name, avatar_url, synced_at FROM organizations WHERE instance_id=? AND external_id=?`, instanceID, org.ExternalID)
 	var o models.Organization
 	var synced sql.NullString
-	if err := row.Scan(&o.ID, &o.InstanceID, &o.ExternalID, &o.Name, &o.FullName, &o.AvatarURL, &synced); err != nil {
+	if err := row.Scan(&o.ID, &o.InstanceID, &o.ExternalID, &o.NodeID, &o.Name, &o.FullName, &o.AvatarURL, &synced); err != nil {
 		return nil, err
 	}
 	o.SyncedAt = nullTime(synced)
@@ -319,15 +403,16 @@ func (s *Store) UpsertRepository(ctx context.Context, instanceID int64, repo mod
 	now := formatTime(time.Now().UTC())
 	_, err := s.exec(ctx, `
 INSERT INTO repositories (
-  instance_id, external_id, owner, name, full_name, default_branch,
+  instance_id, external_id, node_id, owner, name, full_name, default_branch,
   private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
 ON CONFLICT(instance_id, external_id) DO UPDATE SET
+  node_id=CASE WHEN excluded.node_id != '' THEN excluded.node_id ELSE repositories.node_id END,
   owner=excluded.owner, name=excluded.name, full_name=excluded.full_name,
   default_branch=excluded.default_branch, private=excluded.private, archived=excluded.archived,
   empty=excluded.empty, fork=excluded.fork, html_url=excluded.html_url,
   last_synced_at=excluded.last_synced_at, deleted_at=NULL, updated_at=excluded.updated_at
-`, instanceID, repo.ExternalID, repo.Owner, repo.Name, repo.FullName, repo.DefaultBranch,
+`, instanceID, repo.ExternalID, repo.NodeID, repo.Owner, repo.Name, repo.FullName, repo.DefaultBranch,
 		boolToInt(repo.Private), boolToInt(repo.Archived), boolToInt(repo.Empty), boolToInt(repo.Fork),
 		repo.HTMLURL, now, now, now)
 	if err != nil {
@@ -337,19 +422,24 @@ ON CONFLICT(instance_id, external_id) DO UPDATE SET
 }
 
 func (s *Store) GetRepositoryByExternalID(ctx context.Context, instanceID, externalID int64) (*models.Repository, error) {
-	row := s.queryRow(ctx, `
-SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
-       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-FROM repositories WHERE instance_id = ? AND external_id = ?`, instanceID, externalID)
-	return scanRepo(row)
+	if s.driver == "postgres" {
+		r, err := s.pg.GetRepositoryByExternalID(ctx, postgressqlc.GetRepositoryByExternalIDParams{InstanceID: instanceID, ExternalID: externalID})
+		if err != nil {
+			return nil, err
+		}
+		return mapRepoFields(r.ID, r.InstanceID, r.OrgID, r.ExternalID, r.NodeID, r.Owner, r.Name, r.FullName, r.DefaultBranch,
+			r.Private, r.Archived, r.Empty, r.Fork, r.HtmlUrl, r.LastSyncedAt, r.DeletedAt, r.CreatedAt, r.UpdatedAt), nil
+	}
+	r, err := s.sqlite.GetRepositoryByExternalID(ctx, sqlitesqlc.GetRepositoryByExternalIDParams{InstanceID: instanceID, ExternalID: externalID})
+	if err != nil {
+		return nil, err
+	}
+	return mapRepoFields(r.ID, r.InstanceID, r.OrgID, r.ExternalID, r.NodeID, r.Owner, r.Name, r.FullName, r.DefaultBranch,
+		r.Private, r.Archived, r.Empty, r.Fork, r.HtmlUrl, r.LastSyncedAt, r.DeletedAt, r.CreatedAt, r.UpdatedAt), nil
 }
 
 func (s *Store) GetRepositoryByID(ctx context.Context, id int64) (*models.Repository, error) {
-	row := s.queryRow(ctx, `
-SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
-       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-FROM repositories WHERE id = ?`, id)
-	return scanRepo(row)
+	return s.getRepoSQLCByID(ctx, id)
 }
 
 func (s *Store) GetRepositoryByOwnerName(ctx context.Context, owner, name string) (*models.Repository, error) {
@@ -358,23 +448,28 @@ func (s *Store) GetRepositoryByOwnerName(ctx context.Context, owner, name string
 
 // ListRepositoriesByOwnerName returns all alive repos matching owner/name (any instance).
 func (s *Store) ListRepositoriesByOwnerName(ctx context.Context, owner, name string) ([]models.Repository, error) {
-	rows, err := s.query(ctx, `
-SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
-       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-FROM repositories WHERE owner = ? AND name = ? AND deleted_at IS NULL ORDER BY id ASC`, owner, name)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []models.Repository
-	for rows.Next() {
-		repo, err := scanRepo(rows)
+	if s.driver == "postgres" {
+		rows, err := s.pg.ListRepositoriesByOwnerName(ctx, postgressqlc.ListRepositoriesByOwnerNameParams{Owner: owner, Name: name})
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *repo)
+		out := make([]models.Repository, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, *mapRepoFields(r.ID, r.InstanceID, r.OrgID, r.ExternalID, r.NodeID, r.Owner, r.Name, r.FullName, r.DefaultBranch,
+				r.Private, r.Archived, r.Empty, r.Fork, r.HtmlUrl, r.LastSyncedAt, r.DeletedAt, r.CreatedAt, r.UpdatedAt))
+		}
+		return out, nil
 	}
-	return out, rows.Err()
+	rows, err := s.sqlite.ListRepositoriesByOwnerName(ctx, sqlitesqlc.ListRepositoriesByOwnerNameParams{Owner: owner, Name: name})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.Repository, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, *mapRepoFields(r.ID, r.InstanceID, r.OrgID, r.ExternalID, r.NodeID, r.Owner, r.Name, r.FullName, r.DefaultBranch,
+			r.Private, r.Archived, r.Empty, r.Fork, r.HtmlUrl, r.LastSyncedAt, r.DeletedAt, r.CreatedAt, r.UpdatedAt))
+	}
+	return out, nil
 }
 
 // ErrAmbiguousRepository is returned when owner/name matches multiple alive repos
@@ -386,11 +481,24 @@ var ErrAmbiguousRepository = fmt.Errorf("repository owner/name is ambiguous acro
 // When instanceID is 0 and multiple instances share the same owner/name, returns ErrAmbiguousRepository.
 func (s *Store) GetRepositoryByOwnerNameInInstance(ctx context.Context, owner, name string, instanceID int64) (*models.Repository, error) {
 	if instanceID > 0 {
-		row := s.queryRow(ctx, `
-SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
-       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-FROM repositories WHERE instance_id = ? AND owner = ? AND name = ? AND deleted_at IS NULL`, instanceID, owner, name)
-		return scanRepo(row)
+		if s.driver == "postgres" {
+			r, err := s.pg.GetRepositoryByOwnerNameInInstance(ctx, postgressqlc.GetRepositoryByOwnerNameInInstanceParams{
+				InstanceID: instanceID, Owner: owner, Name: name,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return mapRepoFields(r.ID, r.InstanceID, r.OrgID, r.ExternalID, r.NodeID, r.Owner, r.Name, r.FullName, r.DefaultBranch,
+				r.Private, r.Archived, r.Empty, r.Fork, r.HtmlUrl, r.LastSyncedAt, r.DeletedAt, r.CreatedAt, r.UpdatedAt), nil
+		}
+		r, err := s.sqlite.GetRepositoryByOwnerNameInInstance(ctx, sqlitesqlc.GetRepositoryByOwnerNameInInstanceParams{
+			InstanceID: instanceID, Owner: owner, Name: name,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return mapRepoFields(r.ID, r.InstanceID, r.OrgID, r.ExternalID, r.NodeID, r.Owner, r.Name, r.FullName, r.DefaultBranch,
+			r.Private, r.Archived, r.Empty, r.Fork, r.HtmlUrl, r.LastSyncedAt, r.DeletedAt, r.CreatedAt, r.UpdatedAt), nil
 	}
 	repos, err := s.ListRepositoriesByOwnerName(ctx, owner, name)
 	if err != nil {
@@ -411,7 +519,7 @@ func scanRepo(row scanner) (*models.Repository, error) {
 	var private, archived, empty, fork int
 	var lastSynced, deleted, created, updated sql.NullString
 	if err := row.Scan(
-		&r.ID, &r.InstanceID, &orgID, &r.ExternalID, &r.Owner, &r.Name, &r.FullName, &r.DefaultBranch,
+		&r.ID, &r.InstanceID, &orgID, &r.ExternalID, &r.NodeID, &r.Owner, &r.Name, &r.FullName, &r.DefaultBranch,
 		&private, &archived, &empty, &fork, &r.HTMLURL, &lastSynced, &deleted, &created, &updated,
 	); err != nil {
 		return nil, err
@@ -439,7 +547,7 @@ func scanRepoWithForge(row scanner) (*models.Repository, error) {
 	var forgeType string
 	var instanceName string
 	if err := row.Scan(
-		&r.ID, &r.InstanceID, &orgID, &r.ExternalID, &r.Owner, &r.Name, &r.FullName, &r.DefaultBranch,
+		&r.ID, &r.InstanceID, &orgID, &r.ExternalID, &r.NodeID, &r.Owner, &r.Name, &r.FullName, &r.DefaultBranch,
 		&private, &archived, &empty, &fork, &r.HTMLURL, &lastSynced, &deleted, &created, &updated,
 		&forgeType, &instanceName,
 	); err != nil {
@@ -518,7 +626,7 @@ func (s *Store) ListRepositories(ctx context.Context, opts ListRepositoriesOpts)
 	listJoin := join + instJoin
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := s.query(ctx, `
-SELECT r.id, r.instance_id, r.org_id, r.external_id, r.owner, r.name, r.full_name, r.default_branch,
+SELECT r.id, r.instance_id, r.org_id, r.external_id, r.node_id, r.owner, r.name, r.full_name, r.default_branch,
        r.private, r.archived, r.empty, r.fork, r.html_url, r.last_synced_at, r.deleted_at, r.created_at, r.updated_at,
        COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), COALESCE(i.name, '')
 FROM repositories r `+listJoin+`
@@ -541,12 +649,7 @@ LIMIT ? OFFSET ?`, args...)
 }
 
 func (s *Store) SoftDeleteRepository(ctx context.Context, id int64) error {
-	now := formatTime(time.Now().UTC())
-	_, err := s.exec(ctx, `UPDATE repositories SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL`, now, now, id)
-	if err != nil {
-		return err
-	}
-	return s.DeleteAccessForRepo(ctx, id)
+	return s.softDeleteRepoSQLC(ctx, id)
 }
 
 // SoftDeleteMissing soft-deletes repos not in seenExternalIDs whose last_synced_at
@@ -587,7 +690,7 @@ WHERE repo_id IN (
 
 func (s *Store) ListAllAliveRepos(ctx context.Context, instanceID int64) ([]models.Repository, error) {
 	rows, err := s.query(ctx, `
-SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
+SELECT id, instance_id, org_id, external_id, node_id, owner, name, full_name, default_branch,
        private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
 FROM repositories WHERE instance_id=? AND deleted_at IS NULL ORDER BY id`, instanceID)
 	if err != nil {
@@ -639,4 +742,13 @@ WHERE sync_leases.expires_at < ? OR sync_leases.holder = ?`, leaseID, holder, ex
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// ReleaseSyncLease clears a lease held by holder so another process can acquire it.
+func (s *Store) ReleaseSyncLease(ctx context.Context, leaseID int64, holder string) error {
+	if leaseID <= 0 || strings.TrimSpace(holder) == "" {
+		return nil
+	}
+	_, err := s.exec(ctx, `DELETE FROM sync_leases WHERE id = ? AND holder = ?`, leaseID, holder)
+	return err
 }

@@ -22,7 +22,7 @@ Legacy fingerprints (e.g. blanket `open_pull_request`) are resolved on evaluate.
 | `awaiting_review` | waiting | Open PR waiting for required review |
 | `approved_behind_target` | warning | Approved PR behind target branch |
 | `merge_conflict` | warning | Open PR with merge conflict |
-| `runner_unavailable_queued` | warning (stub) | **No-op** — forge runners API may list runners, but job payloads do not expose a reliable “queued because runner offline” signal (see Status capability matrix) |
+| `runner_unavailable_queued` | warning | Best-effort: queued/waiting job whose conclusion, message, labels, or steps contain a positive offline/unavailable runner signal. Ordinary queued jobs do **not** open attention (forges often cannot signal this; see Status capability matrix) |
 
 ## Mutes / snooze
 
@@ -44,7 +44,7 @@ APIs: `POST/DELETE /api/v1/attention/{id}/mute`, `GET/PUT /api/v1/attention/rule
 
 - `EvaluateRun` — default-branch failure, deploy failure, awaiting manual, long-running
 - `EvaluatePullRequest` — CI failure, required check, approved-blocked, awaiting review, behind target, merge conflict
-- `EvaluateJob` — awaiting manual (job), runner unavailable (stub)
+- `EvaluateJob` — awaiting manual (job), runner unavailable (best-effort positive signal)
 
 Items are upserted by fingerprint and resolved when the condition clears. Global mutes short-circuit `open()`.
 

@@ -107,6 +107,39 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
                     <span>Link GitHub</span>
                   </a>
                 )}
+                {!user.is_bootstrap_admin && user.gitlab_oauth_enabled && !user.has_gitlab && (
+                  <a
+                    className="user-menu__item"
+                    href={`${typeof window !== "undefined" ? window.__GITSEER_BASE__ || "" : ""}/api/v1/auth/gitlab/login?link=1&redirect=${encodeURIComponent("/settings#access")}`}
+                    role="menuitem"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Glyph name="settings" />
+                    <span>Link GitLab</span>
+                  </a>
+                )}
+                {!user.is_bootstrap_admin && user.bitbucket_oauth_enabled && !user.has_bitbucket && (
+                  <a
+                    className="user-menu__item"
+                    href={`${typeof window !== "undefined" ? window.__GITSEER_BASE__ || "" : ""}/api/v1/auth/bitbucket/login?link=1&redirect=${encodeURIComponent("/settings#access")}`}
+                    role="menuitem"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Glyph name="settings" />
+                    <span>Link Bitbucket</span>
+                  </a>
+                )}
+                {!user.is_bootstrap_admin && user.forgejo_oauth_enabled && !user.has_gitea && (
+                  <a
+                    className="user-menu__item"
+                    href={`${typeof window !== "undefined" ? window.__GITSEER_BASE__ || "" : ""}/api/v1/auth/forgejo/login?link=1&redirect=${encodeURIComponent("/settings#access")}`}
+                    role="menuitem"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Glyph name="settings" />
+                    <span>Link Forgejo</span>
+                  </a>
+                )}
                 <button className="user-menu__item user-menu__item--danger" type="button" role="menuitem" onClick={onLogout}>
                   <Glyph name="logout" />
                   <span>Log Out</span>

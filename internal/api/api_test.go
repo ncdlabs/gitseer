@@ -903,6 +903,41 @@ func TestInstancesCRUDAndStatusForges(t *testing.T) {
 		t.Fatalf("create github status=%d body=%s", ghRec.Code, ghRec.Body.String())
 	}
 
+	for _, tc := range []struct {
+		ft, name, url string
+	}{
+		{"gitlab", "GitLab", "https://gitlab.com"},
+		{"bitbucket", "Bitbucket", "https://bitbucket.org"},
+		{"forgejo", "Forgejo", "https://forgejo.example.com"},
+	} {
+		body, _ := json.Marshal(map[string]any{
+			"forge_type":              tc.ft,
+			"name":                    tc.name,
+			"base_url":                tc.url,
+			"token":                   "tok-" + tc.ft,
+			"webhook_secret":          "hook-" + tc.ft,
+			"allow_unsigned_webhooks": false,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/instances", bytes.NewReader(body))
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		req.Header.Set(auth.CSRFHeaderName, csrfToken)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s status=%d body=%s", tc.ft, rec.Code, rec.Body.String())
+		}
+		var pub settings.InstancePublic
+		if err := json.Unmarshal(rec.Body.Bytes(), &pub); err != nil {
+			t.Fatal(err)
+		}
+		if pub.ForgeType != tc.ft {
+			t.Fatalf("%s forge_type=%q", tc.ft, pub.ForgeType)
+		}
+	}
+
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/instances", nil)
 	for _, c := range cookies {
 		listReq.AddCookie(c)
@@ -918,8 +953,8 @@ func TestInstancesCRUDAndStatusForges(t *testing.T) {
 	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Items) < 2 {
-		t.Fatalf("items=%d", len(list.Items))
+	if len(list.Items) < 5 {
+		t.Fatalf("items=%d want >=5", len(list.Items))
 	}
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/system/status", nil)

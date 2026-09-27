@@ -6,17 +6,21 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ncdlabs/gitseer/internal/config"
+	"github.com/ncdlabs/gitseer/internal/database"
 	_ "github.com/ncdlabs/gitseer/internal/forge/all"
 	applog "github.com/ncdlabs/gitseer/internal/log"
 	"github.com/ncdlabs/gitseer/internal/backup"
 	"github.com/ncdlabs/gitseer/internal/server"
+	"github.com/ncdlabs/gitseer/internal/settings"
+	"github.com/ncdlabs/gitseer/internal/store"
 	"github.com/ncdlabs/gitseer/internal/uiinstall"
 )
 
-var version = "0.1.0-dev"
+var version = "1.0.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -35,6 +39,8 @@ func main() {
 		backupCmd(os.Args[2:])
 	case "restore":
 		restoreCmd(os.Args[2:])
+	case "rotate-encryption-key":
+		rotateEncryptionKeyCmd(os.Args[2:])
 	case "help", "-h", "--help":
 		printHelp()
 	default:
@@ -52,10 +58,89 @@ Usage:
   gitseer version
   gitseer backup --out DIR [--config path]
   gitseer restore --from DIR [--config path] [--force]
+  gitseer rotate-encryption-key [--config path] (--new-key STR | --new-key-file PATH | --generate)
   gitseer install-ui --custom-path DIR --gitseer-url URL
   gitseer uninstall-ui --custom-path DIR
 
 `)
+}
+
+func rotateEncryptionKeyCmd(args []string) {
+	fs := flag.NewFlagSet("rotate-encryption-key", flag.ExitOnError)
+	cfgPath := fs.String("config", envOr("GITSEER_CONFIG", ""), "path to config.yaml")
+	newKey := fs.String("new-key", "", "new encryption passphrase (≥24 chars)")
+	newKeyFile := fs.String("new-key-file", "", "read new passphrase from file")
+	generate := fs.Bool("generate", false, "generate a new high-entropy passphrase")
+	_ = fs.Parse(args)
+
+	sources := 0
+	if strings.TrimSpace(*newKey) != "" {
+		sources++
+	}
+	if strings.TrimSpace(*newKeyFile) != "" {
+		sources++
+	}
+	if *generate {
+		sources++
+	}
+	if sources != 1 {
+		fmt.Fprintf(os.Stderr, "rotate-encryption-key: provide exactly one of --new-key, --new-key-file, or --generate\n")
+		os.Exit(2)
+	}
+
+	passphrase := strings.TrimSpace(*newKey)
+	if *newKeyFile != "" {
+		raw, err := os.ReadFile(*newKeyFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "rotate-encryption-key: read --new-key-file: %v\n", err)
+			os.Exit(1)
+		}
+		passphrase = strings.TrimSpace(string(raw))
+	}
+	if *generate {
+		var err error
+		passphrase, err = settings.RandomEncryptionPassphrase()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "rotate-encryption-key: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	ctx := context.Background()
+	db, err := database.Open(ctx, cfg.Database.Driver, cfg.Database.Path, cfg.Database.DSN)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	st := store.NewWithDriver(db, cfg.Database.Driver)
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "settings: %v\n", err)
+		os.Exit(1)
+	}
+
+	result, err := mgr.RotateEncryptionKey(ctx, passphrase)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rotate-encryption-key: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("re-sealed %d secret field(s)\n", result.FieldsUpdated)
+	if result.KeyFileUpdated {
+		fmt.Printf("updated encryption key file: %s\n", result.KeyFilePath)
+	}
+	if result.Note != "" {
+		fmt.Printf("note: %s\n", result.Note)
+	}
+	if *generate {
+		fmt.Printf("generated passphrase (store securely; shown once):\n%s\n", passphrase)
+	}
 }
 
 func backupCmd(args []string) {

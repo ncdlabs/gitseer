@@ -155,12 +155,29 @@ func (h *Handler) ensureInstanceWebhook(w http.ResponseWriter, r *http.Request) 
 		if org != "" {
 			hint = fmt.Sprintf("GitHub webhook ensured on org %s", org)
 		}
+	case models.ForgeTypeGitLab, models.ForgeTypeBitbucket:
+		// No reliable system-hook API for typical PATs; return manual preview.
+		delivery = h.forgeWebhookDeliveryURL(ft, inst.ID)
+		manual = true
+		hint = ft + " webhooks are configured per project/workspace in the forge UI (no system-hook ensure API)"
+		_ = h.store.SetWebhookEnsureMeta(r.Context(), inst.ID, now, hint)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":           false,
+			"created":      false,
+			"updated":      false,
+			"manual":       true,
+			"delivery_url": delivery,
+			"hint":         hint,
+			"instance_id":  inst.ID,
+		})
+		return
 	default:
-		delivery = h.giteaWebhookDeliveryURL(inst.ID)
+		// Gitea + Forgejo share the admin system-hooks API.
+		delivery = h.forgeWebhookDeliveryURL(ft, inst.ID)
 		client, cerr := gitea.New(inst.BaseURL, token, inst.AllowPrivateNetwork)
 		if cerr != nil {
 			_ = h.store.SetWebhookEnsureMeta(r.Context(), inst.ID, now, cerr.Error())
-			writeError(w, http.StatusBadGateway, "gitea client: "+cerr.Error())
+			writeError(w, http.StatusBadGateway, "forge client: "+cerr.Error())
 			return
 		}
 		hook, wasCreated, ensureErr := client.EnsureSystemWebhook(r.Context(), delivery, secret)
@@ -173,7 +190,11 @@ func (h *Handler) ensureInstanceWebhook(w http.ResponseWriter, r *http.Request) 
 		if hook != nil {
 			hookID = hook.ID
 		}
-		hint = "Gitea system webhook ensured"
+		if ft == models.ForgeTypeForgejo {
+			hint = "Forgejo system webhook ensured"
+		} else {
+			hint = "Gitea system webhook ensured"
+		}
 	}
 
 	_ = h.store.SetWebhookEnsureMeta(r.Context(), inst.ID, now, "")
@@ -439,16 +460,28 @@ func capabilityMatrix(capsJSON, forgeType string) []map[string]any {
 		row("cancel_workflow", "Cancel Workflow", caps.CancelWorkflowAPI,
 			"POST cancel available", "Cancel Workflow unavailable on this forge"),
 		row("runners", "Runners API", caps.RunnersAPI,
-			"Runner listing available — runner_unavailable_queued attention stays stubbed (no offline/queued signal)",
-			"Runner-unavailable attention rule stays inactive (no runners API)"),
+			"Runner listing available — runner_unavailable_queued opens only on positive job conclusion/message/label signals (forges often omit these)",
+			"Runner-unavailable attention uses best-effort job signals when present; runners API unavailable"),
 		row("workflow_webhooks", "Workflow Webhooks", caps.WorkflowRunWebhook || caps.WorkflowJobWebhook,
 			"workflow_run / workflow_job events supported", "Rely on reconcile for run updates"),
 	}
-	if ft == models.ForgeTypeGitea {
+	if ft == models.ForgeTypeGitea || ft == models.ForgeTypeForgejo {
 		out = append(out, row("system_hooks", "System Hooks", caps.SystemHooksAPI,
 			"Admin system hooks available", "Ensure Webhook may fail — create hook manually"))
 		out = append(out, row("oauth_provider", "OAuth Provider", caps.OAuthProvider,
 			"Forge can host OAuth apps", "OAuth login unavailable on this forge"))
+	} else if ft == models.ForgeTypeGitLab {
+		out = append(out, row("oauth_provider", "OAuth Provider", caps.OAuthProvider,
+			"GitLab OAuth apps supported", "Configure OAuth app on the GitLab instance"))
+		out = append(out, map[string]any{
+			"id": "pipelines", "label": "CI Pipelines", "status": "pass",
+			"detail": "GitLab pipelines map to workflow runs/jobs",
+		})
+	} else if ft == models.ForgeTypeBitbucket {
+		out = append(out, map[string]any{
+			"id": "pipelines", "label": "Pipelines", "status": "pass",
+			"detail": "Bitbucket Pipelines map to workflow runs/steps",
+		})
 	} else {
 		out = append(out, map[string]any{
 			"id":     "checks_vs_status",

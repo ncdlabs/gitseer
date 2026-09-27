@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -201,5 +202,142 @@ func TestGitHubWebhookRejectsUnsignedWhenGlobalAllowUnsigned(t *testing.T) {
 	p.HandleGitHubHTTPForInstance(rr, req, inst.ID)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s want 401", rr.Code, rr.Body.String())
+	}
+}
+
+func TestNormalizeGitLabPipelineAndJobFixtures(t *testing.T) {
+	pipelineBody := []byte(`{
+		"object_kind": "pipeline",
+		"object_attributes": {
+			"id": 55,
+			"ref": "main",
+			"sha": "abc123",
+			"status": "success",
+			"source": "push",
+			"created_at": "2026-09-21T10:00:00Z",
+			"finished_at": "2026-09-21T10:05:00Z",
+			"url": "https://gitlab.example/acme/widgets/-/pipelines/55"
+		},
+		"project": {
+			"id": 9,
+			"name": "widgets",
+			"path_with_namespace": "acme/widgets"
+		}
+	}`)
+	norm, ok := normalizeWebhookPayload(models.ForgeTypeGitLab, "workflow_run", pipelineBody)
+	if !ok {
+		t.Fatal("expected pipeline normalize")
+	}
+	var runPayload struct {
+		WorkflowRun struct {
+			ID     int64  `json:"id"`
+			Status string `json:"status"`
+		} `json:"workflow_run"`
+		Repository struct {
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+			Name string `json:"name"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(norm, &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	if runPayload.WorkflowRun.ID != 55 {
+		t.Fatalf("run id=%d", runPayload.WorkflowRun.ID)
+	}
+	if runPayload.Repository.Owner.Login != "acme" || runPayload.Repository.Name != "widgets" {
+		t.Fatalf("repo=%+v", runPayload.Repository)
+	}
+
+	jobBody := []byte(`{
+		"object_kind": "build",
+		"build_id": 9001,
+		"build_name": "test",
+		"build_status": "running",
+		"pipeline_id": 55,
+		"project_id": 9,
+		"project": {
+			"id": 9,
+			"name": "widgets",
+			"path_with_namespace": "acme/widgets",
+			"web_url": "https://gitlab.example/acme/widgets"
+		}
+	}`)
+	jnorm, ok := normalizeWebhookPayload(models.ForgeTypeGitLab, "workflow_job", jobBody)
+	if !ok {
+		t.Fatal("expected job normalize")
+	}
+	var jobPayload struct {
+		WorkflowJob struct {
+			ID    int64 `json:"id"`
+			RunID int64 `json:"run_id"`
+		} `json:"workflow_job"`
+	}
+	if err := json.Unmarshal(jnorm, &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+	if jobPayload.WorkflowJob.ID != 9001 || jobPayload.WorkflowJob.RunID != 55 {
+		t.Fatalf("job=%+v", jobPayload.WorkflowJob)
+	}
+
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "gl-wh.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	inst, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeGitLab, "gl", "https://gitlab.example", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewProcessor(st, nil, nil, nil)
+	if err := p.apply(ctx, store.WebhookEvent{InstanceID: inst.ID, EventType: "workflow_run", Payload: string(norm)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.apply(ctx, store.WebhookEvent{InstanceID: inst.ID, EventType: "workflow_job", Payload: string(jnorm)}); err != nil {
+		t.Fatal(err)
+	}
+
+	zeroRun := `{"workflow_run":{"id":0,"name":"x"},"repository":{"id":1,"name":"n","owner":{"login":"o"}}}`
+	if err := p.apply(ctx, store.WebhookEvent{InstanceID: inst.ID, EventType: "workflow_run", Payload: zeroRun}); err == nil {
+		t.Fatal("expected reject external_id=0")
+	}
+	emptyOwner := `{"workflow_run":{"id":1,"name":"x"},"repository":{"id":1,"name":"n","owner":{"login":""}}}`
+	if err := p.apply(ctx, store.WebhookEvent{InstanceID: inst.ID, EventType: "workflow_run", Payload: emptyOwner}); err == nil {
+		t.Fatal("expected reject empty owner")
+	}
+}
+
+func TestNormalizeBitbucketCommitStatus(t *testing.T) {
+	uuid := "{11111111-2222-3333-4444-555555555555}"
+	body := []byte(fmt.Sprintf(`{
+		"repository": {"uuid": %q, "name": "widgets", "full_name": "acme/widgets"},
+		"commit_status": {
+			"state": "SUCCESSFUL",
+			"key": "ci",
+			"commit": {"hash": "deadbeef"}
+		}
+	}`, uuid))
+	norm, ok := normalizeWebhookPayload(models.ForgeTypeBitbucket, "status", body)
+	if !ok {
+		t.Fatal("expected bitbucket status normalize")
+	}
+	var payload struct {
+		SHA        string `json:"sha"`
+		State      string `json:"state"`
+		Repository struct {
+			ID int64 `json:"id"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(norm, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.SHA != "deadbeef" || payload.State != "success" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if payload.Repository.ID == 0 {
+		t.Fatal("expected stable repo id")
 	}
 }

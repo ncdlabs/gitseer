@@ -23,6 +23,16 @@ jobs:
       - run: go mod tidy
       - run: go test ./...
       - run: go build -o bin/gitseer ./cmd/gitseer
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: gitseer-sbom.spdx.json
+          upload-artifact: true
+          upload-artifact-name: gitseer-sbom
 
   frontend:
     runs-on: ubuntu-latest

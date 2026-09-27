@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -151,4 +152,98 @@ func (m *Manager) GenerateEncryptionKey() (string, error) {
 		return "", err
 	}
 	return passphrase, nil
+}
+
+// RotateResult summarizes a successful encryption key rotation.
+type RotateResult struct {
+	FieldsUpdated int
+	KeyFileUpdated bool
+	KeyFilePath    string
+	PreviousSource string
+	Note           string
+}
+
+// RotateEncryptionKey re-seals all DB secrets under newPassphrase and, when the
+// current key came from (or can be written to) the on-disk key file, updates that
+// file. Fail-closed: DB is unchanged if any field cannot be re-sealed; the key
+// file is not updated if the DB commit fails.
+func (m *Manager) RotateEncryptionKey(ctx context.Context, newPassphrase string) (*RotateResult, error) {
+	newPassphrase = strings.TrimSpace(newPassphrase)
+	if len(newPassphrase) < 24 {
+		return nil, fmt.Errorf("new encryption key must be at least 24 characters")
+	}
+	newKey, err := gitseercrypto.KeyFromString(newPassphrase)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	oldKey := append([]byte(nil), m.encKey...)
+	src := m.encSource
+	path := m.encKeyPath
+	onEnc := m.onEnc
+	m.mu.RUnlock()
+
+	if len(oldKey) != 32 {
+		return nil, fmt.Errorf("current encryption key is not configured")
+	}
+	if string(oldKey) == string(newKey) {
+		return nil, fmt.Errorf("new encryption key derives to the same AES key as the current key")
+	}
+	if m.st == nil {
+		return nil, fmt.Errorf("settings store is not configured")
+	}
+
+	n, err := m.st.RotateSealedSecrets(ctx, oldKey, newKey)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RotateResult{
+		FieldsUpdated:  n,
+		PreviousSource: src,
+		KeyFilePath:    path,
+	}
+
+	updateFile := src == EncryptionSourceFile || (src == "" && path != "")
+	if src == EncryptionSourceConfig {
+		result.Note = "GITSEER_ENCRYPTION_KEY / auth.encryption_key is set from config; update that secret to the new passphrase and restart. On-disk key file was not modified."
+	} else if path == "" {
+		result.Note = "no encryption key file path configured; update GITSEER_ENCRYPTION_KEY to the new passphrase"
+	} else if updateFile {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, fmt.Errorf("secrets re-sealed (%d fields) but failed to prepare key directory: %w — set GITSEER_ENCRYPTION_KEY to the new passphrase immediately", n, err)
+		}
+		tmp := path + ".rotating"
+		if err := os.WriteFile(tmp, []byte(newPassphrase+"\n"), 0o600); err != nil {
+			return nil, fmt.Errorf("secrets re-sealed (%d fields) but failed to write new key file: %w — set GITSEER_ENCRYPTION_KEY to the new passphrase immediately", n, err)
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			_ = os.Remove(tmp)
+			return nil, fmt.Errorf("secrets re-sealed (%d fields) but failed to replace key file: %w — set GITSEER_ENCRYPTION_KEY to the new passphrase immediately", n, err)
+		}
+		result.KeyFileUpdated = true
+		src = EncryptionSourceFile
+	}
+
+	m.mu.Lock()
+	m.encKey = newKey
+	if result.KeyFileUpdated {
+		m.encSource = EncryptionSourceFile
+	}
+	m.mu.Unlock()
+	if onEnc != nil {
+		onEnc(append([]byte(nil), newKey...))
+	}
+	_ = src
+	return result, nil
+}
+
+// RandomEncryptionPassphrase returns a high-entropy passphrase suitable for --generate.
+func RandomEncryptionPassphrase() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate encryption key: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

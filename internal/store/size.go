@@ -20,10 +20,15 @@ type DatabaseSizeInfo struct {
 // sqlitePath is used only for the sqlite driver; pass cfg.Database.Path.
 func (s *Store) DatabaseSize(ctx context.Context, sqlitePath string) (DatabaseSizeInfo, error) {
 	info := DatabaseSizeInfo{Driver: s.driver}
+	var err error
 	switch s.driver {
 	case "postgres":
 		var n int64
-		err := s.queryRow(ctx, `SELECT pg_database_size(current_database())`).Scan(&n)
+		if s.pg != nil {
+			n, err = s.pg.GetPostgresDatabaseSize(ctx)
+		} else {
+			err = s.queryRow(ctx, `SELECT pg_database_size(current_database())`).Scan(&n)
+		}
 		if err != nil {
 			return info, err
 		}

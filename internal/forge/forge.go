@@ -79,6 +79,10 @@ type Forge interface {
 
 	ListAccessibleReposForUser(ctx context.Context, userToken string, opts ListReposOpts) (Page[models.Repository], error)
 	GetAuthenticatedUser(ctx context.Context, userToken string) (*models.User, error)
+
+	// ListRunners returns live forge runner inventory when Capabilities.RunnersAPI is true.
+	// Returns ErrUnsupported when the forge does not expose a runners listing API.
+	ListRunners(ctx context.Context) ([]models.ForgeRunner, error)
 }
 
 // NormalizeStatus maps upstream execution status strings into GitSeer vocabulary.

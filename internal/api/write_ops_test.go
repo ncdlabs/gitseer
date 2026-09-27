@@ -234,7 +234,7 @@ func TestRerunOAuthUserRequiresUserToken(t *testing.T) {
 	instID := inst.ID
 	oauthUser, err := st.UpsertGiteaUser(ctx, &instID, models.User{
 		Login: "alice", DisplayName: "Alice", GiteaUserID: ptrInt64(99),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestRerunOAuthUserUsesUserToken(t *testing.T) {
 	instID := inst.ID
 	oauthUser, err := st.UpsertGiteaUser(ctx, &instID, models.User{
 		Login: "bob", DisplayName: "Bob", GiteaUserID: ptrInt64(100),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,6 +363,80 @@ func TestRerunOAuthUserUsesUserToken(t *testing.T) {
 	}
 }
 
+func TestRerunGitLabNonAdminDoesNotFallBackToGiteaToken(t *testing.T) {
+	h, st, authsvc := setupAPI(t)
+	ctx := context.Background()
+
+	glInst, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeGitLab, "gl", "https://gitlab.com", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, glInst.ID, models.Repository{
+		ExternalID: 1, Owner: "acme", Name: "widgets", FullName: "acme/widgets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 11, Name: "ci", Status: models.StatusCompleted, Conclusion: models.ConclusionFailure,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	giteaInst, err := st.UpsertInstanceByURL(ctx, "gitea", "https://git.example.com", "1.25", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	giteaID := giteaInst.ID
+	oauthUser, err := st.UpsertGiteaUser(ctx, &giteaID, models.User{
+		Login: "dave", DisplayName: "Dave", GiteaUserID: ptrInt64(202),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceUserRepoAccess(ctx, oauthUser.ID, []int64{repo.ID}); err != nil {
+		t.Fatal(err)
+	}
+	// Store a Gitea user token only — must not be used against GitLab.
+	key, err := gitseercrypto.KeyFromString("test-encryption-key-24chars!!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authsvc.SetEncryptionKey(key)
+	cipher, err := gitseercrypto.Encrypt(key, "gitea-only-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveUserToken(ctx, oauthUser.ID, giteaInst.ID, cipher, "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	sessCookie := sessionCookieForUser(t, st, oauthUser.ID)
+	probe := httptest.NewRecorder()
+	csrf, err := authsvc.IssueCSRFToken(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := chi.NewRouter()
+	h.Routes(r)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflow-runs/"+strconv.FormatInt(run.ID, 10)+"/rerun", nil)
+	req.AddCookie(sessCookie)
+	for _, c := range probe.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	req.Header.Set(auth.CSRFHeaderName, csrf)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "forge user token") {
+		t.Fatalf("body=%s", rec.Body.String())
+	}
+}
+
 func TestCancelGitHubNonAdminForbidden(t *testing.T) {
 	h, st, authsvc := setupAPI(t)
 	ctx := context.Background()
@@ -391,7 +465,7 @@ func TestCancelGitHubNonAdminForbidden(t *testing.T) {
 	instID := giteaInst.ID
 	oauthUser, err := st.UpsertGiteaUser(ctx, &instID, models.User{
 		Login: "carol", DisplayName: "Carol", GiteaUserID: ptrInt64(101),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,6 +494,45 @@ func TestCancelGitHubNonAdminForbidden(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "GitHub") {
+		t.Fatalf("body=%s", rec.Body.String())
+	}
+}
+
+func TestBootstrapWriteOpsFailClosedWithoutSyncTokenForGitLab(t *testing.T) {
+	h, st, authsvc := setupAPI(t)
+	ctx := context.Background()
+
+	glInst, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeGitLab, "gl", "https://gitlab.example.com", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, glInst.ID, models.Repository{
+		ExternalID: 1, Owner: "acme", Name: "widgets", FullName: "acme/widgets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 11, Name: "ci", Status: models.StatusCompleted, Conclusion: models.ConclusionFailure,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := chi.NewRouter()
+	h.Routes(r)
+	cookies, csrf := loginBootstrap(t, r, authsvc)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflow-runs/"+strconv.FormatInt(run.ID, 10)+"/rerun", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	req.Header.Set(auth.CSRFHeaderName, csrf)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "sync token") {
 		t.Fatalf("body=%s", rec.Body.String())
 	}
 }

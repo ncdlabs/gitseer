@@ -333,7 +333,7 @@ func inboxReasonsForAttention(ident InboxIdentity, a *models.AttentionItem, pr *
 // GetPullRequestByID loads a single PR by primary key (no ACL — caller must scope).
 func (s *Store) GetPullRequestByID(ctx context.Context, id int64) (*models.PullRequest, error) {
 	row := s.queryRow(ctx, `
-SELECT pr.id, pr.repo_id, pr.external_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
+SELECT pr.id, pr.repo_id, pr.external_id, pr.node_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
        pr.source_branch, pr.target_branch, pr.head_sha, pr.base_sha, pr.state, pr.draft, pr.mergeable, pr.mergeable_state,
        pr.review_state, pr.ci_state, pr.html_url, pr.created_at, pr.updated_at, pr.closed_at, pr.merged_at,
        r.owner, r.name, r.full_name,

@@ -1,13 +1,38 @@
 // Package models holds GitSeer domain types (no raw forge payloads).
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Forge type values persisted on instances.forge_type.
 const (
-	ForgeTypeGitea  = "gitea"
-	ForgeTypeGitHub = "github"
+	ForgeTypeGitea     = "gitea"
+	ForgeTypeGitHub    = "github"
+	ForgeTypeGitLab    = "gitlab"
+	ForgeTypeBitbucket = "bitbucket"
+	ForgeTypeForgejo   = "forgejo"
 )
+
+// SupportedForgeTypes lists forge_type values that have registered clients.
+var SupportedForgeTypes = []string{
+	ForgeTypeGitea,
+	ForgeTypeGitHub,
+	ForgeTypeGitLab,
+	ForgeTypeBitbucket,
+	ForgeTypeForgejo,
+}
+
+// IsSupportedForgeType reports whether ft is a registered forge implementation.
+func IsSupportedForgeType(ft string) bool {
+	switch strings.ToLower(strings.TrimSpace(ft)) {
+	case ForgeTypeGitea, ForgeTypeGitHub, ForgeTypeGitLab, ForgeTypeBitbucket, ForgeTypeForgejo:
+		return true
+	default:
+		return false
+	}
+}
 
 type Instance struct {
 	ID                      int64
@@ -54,6 +79,7 @@ type Organization struct {
 	ID           int64      `json:"id"`
 	InstanceID   int64      `json:"instance_id"`
 	ExternalID   int64      `json:"external_id"`
+	NodeID       string     `json:"node_id,omitempty"` // GitHub GraphQL node id (REST node_id); empty for Gitea
 	Name         string     `json:"name"`
 	FullName     string     `json:"full_name"`
 	AvatarURL    string     `json:"avatar_url,omitempty"`
@@ -67,6 +93,7 @@ type Repository struct {
 	InstanceID    int64      `json:"instance_id"`
 	OrgID         *int64     `json:"org_id,omitempty"`
 	ExternalID    int64      `json:"external_id"`
+	NodeID        string     `json:"node_id,omitempty"` // GitHub GraphQL node id; empty for Gitea
 	Owner         string     `json:"owner"`
 	Name          string     `json:"name"`
 	FullName      string     `json:"full_name"`
@@ -93,6 +120,7 @@ type PullRequest struct {
 	ID               int64      `json:"id"`
 	RepoID           int64      `json:"repo_id"`
 	ExternalID       int64      `json:"external_id"`
+	NodeID           string     `json:"node_id,omitempty"` // GitHub GraphQL node id; empty for Gitea
 	Number           int64      `json:"number"`
 	Title            string     `json:"title"`
 	BodyExcerpt      string     `json:"body_excerpt"`
@@ -151,6 +179,7 @@ type WorkflowRun struct {
 	RepoID             int64      `json:"repo_id"`
 	WorkflowID         *int64     `json:"workflow_id,omitempty"`
 	ExternalID         int64      `json:"external_id"`
+	NodeID             string     `json:"node_id,omitempty"` // GitHub GraphQL node id; empty for Gitea
 	Name               string     `json:"name"`
 	Event              string     `json:"event"`
 	Branch             string     `json:"branch"`
@@ -200,6 +229,7 @@ type Job struct {
 	RunID              int64      `json:"run_id"`
 	RepoID             int64      `json:"repo_id"`
 	ExternalID         int64      `json:"external_id"`
+	NodeID             string     `json:"node_id,omitempty"` // GitHub GraphQL node id; empty for Gitea
 	Name               string     `json:"name"`
 	Status             string     `json:"status"`
 	Conclusion         string     `json:"conclusion"`
@@ -211,21 +241,27 @@ type Job struct {
 	StartedAt          *time.Time `json:"started_at,omitempty"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 	StepsJSON          *string    `json:"steps_json,omitempty"`
+	LabelsJSON         *string    `json:"labels_json,omitempty"` // forge runner labels / label bag when present
+	Message            string     `json:"message,omitempty"`     // optional forge freeform job message
 }
 
 type User struct {
-	ID               int64
-	InstanceID       *int64
-	GiteaUserID      *int64
-	GitHubUserID     *int64
-	GitHubInstanceID *int64
-	Login            string
-	Email            string
-	DisplayName      string
-	AvatarURL        string
-	IsBootstrapAdmin bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                   int64
+	InstanceID           *int64
+	GiteaUserID          *int64
+	GitHubUserID         *int64
+	GitHubInstanceID     *int64
+	GitLabUserID         *int64
+	GitLabInstanceID     *int64
+	BitbucketUserID      *int64
+	BitbucketInstanceID  *int64
+	Login                string
+	Email                string
+	DisplayName          string
+	AvatarURL            string
+	IsBootstrapAdmin     bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type Session struct {
@@ -245,6 +281,86 @@ type Summary struct {
 	RunningRuns  int    `json:"running_runs"`
 	Days         int    `json:"days"`
 	Since        string `json:"since,omitempty"`
+	OrgID        int64  `json:"org_id,omitempty"`
+	Owner        string `json:"owner,omitempty"`
+	Team         string `json:"team,omitempty"`
+}
+
+// RunnerUtilizationRow is a per-runner rollup from indexed jobs (and optional forge listing).
+type RunnerUtilizationRow struct {
+	RunnerName     string `json:"runner_name"`
+	RunnerID       *int64 `json:"runner_id,omitempty"`
+	BusyJobs       int    `json:"busy_jobs"`
+	QueuedJobs     int    `json:"queued_jobs"`
+	CompletedJobs  int    `json:"completed_jobs"`
+	FailedJobs     int    `json:"failed_jobs"`
+	InstanceID     int64  `json:"instance_id,omitempty"`
+	InstanceName   string `json:"instance_name,omitempty"`
+	ForgeType      string `json:"forge_type,omitempty"`
+}
+
+// RunnerUtilizationReport is the dashboard/status runner rollup.
+type RunnerUtilizationReport struct {
+	Days               int                    `json:"days"`
+	Since              string                 `json:"since,omitempty"`
+	Source             string                 `json:"source"` // indexed_jobs | forge_live | mixed
+	Degraded           bool                   `json:"degraded"`
+	DegradedReason     string                 `json:"degraded_reason,omitempty"`
+	RunnersAPICapable  bool                   `json:"runners_api_capable"`
+	LiveForgeRunners   int                    `json:"live_forge_runners,omitempty"`
+	Items              []RunnerUtilizationRow `json:"items"`
+}
+
+// ForgeRunner is a live runner inventory row from a forge ListRunners call.
+type ForgeRunner struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status,omitempty"` // online | offline | unknown
+	Busy       bool   `json:"busy,omitempty"`
+	LabelsJSON string `json:"labels_json,omitempty"`
+	InstanceID int64  `json:"instance_id,omitempty"`
+	ForgeType  string `json:"forge_type,omitempty"`
+}
+
+// FlakyJob is a heuristic flip detection for a job name within a workflow.
+type FlakyJob struct {
+	RepoID         int64      `json:"repo_id"`
+	RepoFull       string     `json:"repo_full,omitempty"`
+	WorkflowPath   string     `json:"workflow_path"`
+	JobName        string     `json:"job_name"`
+	FailureCount   int        `json:"failure_count"`
+	SuccessCount   int        `json:"success_count"`
+	FlipCount      int        `json:"flip_count"`
+	LastFailedAt   *time.Time `json:"last_failed_at,omitempty"`
+	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
+	SampleRunID    *int64     `json:"sample_run_id,omitempty"`
+}
+
+// ReleaseRun is a release/deploy-like workflow run for visibility surfaces.
+type ReleaseRun struct {
+	ID           int64      `json:"id"`
+	RepoID       int64      `json:"repo_id"`
+	RepoFull     string     `json:"repo_full"`
+	Name         string     `json:"name"`
+	WorkflowPath string     `json:"workflow_path"`
+	Event        string     `json:"event"`
+	Branch       string     `json:"branch"`
+	Status       string     `json:"status"`
+	Conclusion   string     `json:"conclusion"`
+	HTMLURL      string     `json:"html_url,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	ForgeType    string     `json:"forge_type,omitempty"`
+	InstanceID   int64      `json:"instance_id,omitempty"`
+	AttentionOpen bool      `json:"attention_open"`
+}
+
+// WallboardSnapshot is the read-only public wallboard payload.
+type WallboardSnapshot struct {
+	GeneratedAt string            `json:"generated_at"`
+	Summary     Summary           `json:"summary"`
+	Attention   []AttentionItem   `json:"attention"`
+	AttentionBySeverity []CountBucket `json:"attention_by_severity"`
 }
 
 // StatsReport is the authz-scoped dashboard time-series / breakdown payload.

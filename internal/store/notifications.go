@@ -16,6 +16,7 @@ const (
 	NotifyChannelSlack    = "slack"
 	NotifyChannelDiscord  = "discord"
 	NotifyChannelWebhook  = "webhook"
+	NotifyChannelIncident = "incident"
 
 	NotifyKindImmediate = "immediate"
 	NotifyKindDigest    = "digest"
@@ -57,6 +58,9 @@ type NotificationSettings struct {
 	WebhookEnabled      bool
 	WebhookURLCiphertext string
 
+	IncidentEnabled           bool
+	IncidentWebhookCiphertext string
+
 	UpdatedAt time.Time
 }
 
@@ -85,6 +89,7 @@ SELECT enabled, min_severity, immediate_enabled, digest_enabled, digest_hour_utc
        slack_enabled, slack_webhook_ciphertext,
        discord_enabled, discord_webhook_ciphertext,
        webhook_enabled, webhook_url_ciphertext,
+       incident_enabled, incident_webhook_ciphertext,
        updated_at
 FROM notification_settings WHERE id=1`)
 	ns, err := scanNotificationSettings(row)
@@ -123,10 +128,12 @@ INSERT INTO notification_settings (
   slack_enabled, slack_webhook_ciphertext,
   discord_enabled, discord_webhook_ciphertext,
   webhook_enabled, webhook_url_ciphertext,
+  incident_enabled, incident_webhook_ciphertext,
   updated_at
 ) VALUES (
   1, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?,
+  ?, ?,
   ?, ?,
   ?, ?,
   ?, ?,
@@ -153,6 +160,8 @@ ON CONFLICT(id) DO UPDATE SET
   discord_webhook_ciphertext=excluded.discord_webhook_ciphertext,
   webhook_enabled=excluded.webhook_enabled,
   webhook_url_ciphertext=excluded.webhook_url_ciphertext,
+  incident_enabled=excluded.incident_enabled,
+  incident_webhook_ciphertext=excluded.incident_webhook_ciphertext,
   updated_at=excluded.updated_at
 `,
 		boolToInt(in.Enabled), minSev, boolToInt(in.ImmediateEnabled), boolToInt(in.DigestEnabled), hour, formatTimePtr(in.LastDigestAt),
@@ -160,6 +169,7 @@ ON CONFLICT(id) DO UPDATE SET
 		boolToInt(in.SlackEnabled), in.SlackWebhookCiphertext,
 		boolToInt(in.DiscordEnabled), in.DiscordWebhookCiphertext,
 		boolToInt(in.WebhookEnabled), in.WebhookURLCiphertext,
+		boolToInt(in.IncidentEnabled), in.IncidentWebhookCiphertext,
 		now,
 	)
 	return err
@@ -176,9 +186,9 @@ UPDATE notification_settings SET last_digest_at=?, updated_at=? WHERE id=1`,
 
 func scanNotificationSettings(row scanner) (*NotificationSettings, error) {
 	var ns NotificationSettings
-	var enabled, imm, dig, smtpEn, slackEn, discEn, whEn int
+	var enabled, imm, dig, smtpEn, slackEn, discEn, whEn, incEn int
 	var lastDigest, updated sql.NullString
-	var minSev, host, tlsMode, from, to, user, smtpCipher, slackCipher, discCipher, whCipher sql.NullString
+	var minSev, host, tlsMode, from, to, user, smtpCipher, slackCipher, discCipher, whCipher, incCipher sql.NullString
 	var port sql.NullInt64
 	var hour sql.NullInt64
 	if err := row.Scan(
@@ -187,6 +197,7 @@ func scanNotificationSettings(row scanner) (*NotificationSettings, error) {
 		&slackEn, &slackCipher,
 		&discEn, &discCipher,
 		&whEn, &whCipher,
+		&incEn, &incCipher,
 		&updated,
 	); err != nil {
 		return nil, err
@@ -225,6 +236,8 @@ func scanNotificationSettings(row scanner) (*NotificationSettings, error) {
 	ns.DiscordWebhookCiphertext = discCipher.String
 	ns.WebhookEnabled = whEn != 0
 	ns.WebhookURLCiphertext = whCipher.String
+	ns.IncidentEnabled = incEn != 0
+	ns.IncidentWebhookCiphertext = incCipher.String
 	if t := nullTime(updated); t != nil {
 		ns.UpdatedAt = *t
 	}

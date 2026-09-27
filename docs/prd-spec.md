@@ -1850,13 +1850,13 @@ Forgejo support,
 
 ~~GitHub support,~~ *(superseded: GitHub is in-scope dual-forge — ADR-029 in [implementation-plan.md](implementation-plan.md))*
 
-GitLab support *(Coming Soon — ask before implementing)*,
+GitLab support,
 
-Bitbucket support *(Coming Soon — ask before implementing)*.
+Bitbucket support.
 
 These should not contaminate the original MVP architecture.
 
-The forge abstraction supports multiple providers. **In scope now:** Gitea + GitHub. **Coming Soon:** GitLab, Bitbucket.
+The forge abstraction supports multiple providers. **In scope:** Gitea, GitHub, GitLab, Bitbucket, and Forgejo (ADR-029).
 
 ---
 
@@ -1892,7 +1892,7 @@ The forge abstraction supports multiple providers. **In scope now:** Gitea + Git
 
 **ADR-015:** All externally visible functionality must remain usable without an ncdLabs-hosted service.
 
-**ADR-029 (amendment):** Dual-forge Gitea + GitHub is in scope for product GitSeer; GitLab/Bitbucket remain Coming Soon. See [implementation-plan.md](implementation-plan.md) §4. Product branding is GitSeer; technical IDs are `gitseer` / `GITSEER_*`.
+**ADR-029 (amendment):** Multi-forge Gitea + GitHub + GitLab + Bitbucket + Forgejo is in scope for product GitSeer. See [implementation-plan.md](implementation-plan.md) §4. Product branding is GitSeer; technical IDs are `gitseer` / `GITSEER_*`.
 
 ---
 

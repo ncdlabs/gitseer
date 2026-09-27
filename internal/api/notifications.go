@@ -32,6 +32,9 @@ type NotificationSettingsPublic struct {
 	DiscordWebhookConfigured bool `json:"discord_webhook_configured"`
 	WebhookEnabled          bool `json:"webhook_enabled"`
 	WebhookURLConfigured    bool `json:"webhook_url_configured"`
+
+	IncidentEnabled          bool `json:"incident_enabled"`
+	IncidentWebhookConfigured bool `json:"incident_webhook_configured"`
 }
 
 type notificationSettingsPatch struct {
@@ -60,6 +63,10 @@ type notificationSettingsPatch struct {
 	WebhookEnabled     *bool   `json:"webhook_enabled"`
 	WebhookURL         *string `json:"webhook_url"`
 	ClearWebhookURL    bool    `json:"clear_webhook_url"`
+
+	IncidentEnabled       *bool   `json:"incident_enabled"`
+	IncidentWebhookURL    *string `json:"incident_webhook_url"`
+	ClearIncidentWebhook  bool    `json:"clear_incident_webhook"`
 }
 
 func publicNotificationSettings(ns *store.NotificationSettings) NotificationSettingsPublic {
@@ -86,6 +93,8 @@ func publicNotificationSettings(ns *store.NotificationSettings) NotificationSett
 		DiscordWebhookConfigured: strings.TrimSpace(ns.DiscordWebhookCiphertext) != "",
 		WebhookEnabled:           ns.WebhookEnabled,
 		WebhookURLConfigured:     strings.TrimSpace(ns.WebhookURLCiphertext) != "",
+		IncidentEnabled:          ns.IncidentEnabled,
+		IncidentWebhookConfigured: strings.TrimSpace(ns.IncidentWebhookCiphertext) != "",
 	}
 }
 
@@ -229,6 +238,19 @@ func (h *Handler) putNotificationSettings(w http.ResponseWriter, r *http.Request
 			return
 		}
 		next.WebhookURLCiphertext = sealed
+	}
+	if body.IncidentEnabled != nil {
+		next.IncidentEnabled = *body.IncidentEnabled
+	}
+	if body.ClearIncidentWebhook {
+		next.IncidentWebhookCiphertext = ""
+	} else if body.IncidentWebhookURL != nil && strings.TrimSpace(*body.IncidentWebhookURL) != "" {
+		sealed, err := notify.SealSecret(h.settings, strings.TrimSpace(*body.IncidentWebhookURL))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		next.IncidentWebhookCiphertext = sealed
 	}
 
 	if err := h.store.UpsertNotificationSettings(r.Context(), next); err != nil {

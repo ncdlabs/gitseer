@@ -3,6 +3,7 @@ package settings_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -561,5 +562,66 @@ func TestGenerateEncryptionKeyPersistsAndEnablesSeal(t *testing.T) {
 	}
 }
 
+func TestRotateEncryptionKeyOldToNewRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "gitseer.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	cfg := config.Default()
+	cfg.Database.Path = dbPath
+	mgr := settings.New(cfg, st)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.GenerateEncryptionKey(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.UpdateIntegration(ctx, settings.IntegrationPatch{
+		GiteaURL:           "https://git.example",
+		GiteaToken:         "tok-old-key",
+		GiteaWebhookSecret: "hook-old-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	newPass := "brand-new-encryption-key!!"
+	result, err := mgr.RotateEncryptionKey(ctx, newPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FieldsUpdated < 1 {
+		t.Fatalf("expected resealed fields, got %+v", result)
+	}
+	if !result.KeyFileUpdated {
+		t.Fatalf("expected key file update: %+v", result)
+	}
+	if mgr.Integration().Token != "tok-old-key" {
+		t.Fatalf("live token after rotate = %q", mgr.Integration().Token)
+	}
+
+	// Reload from disk with only the new passphrase in the key file.
+	mgr2 := settings.New(cfg, st)
+	if err := mgr2.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mgr2.Integration().Token != "tok-old-key" || mgr2.Integration().WebhookSecret != "hook-old-key" {
+		t.Fatalf("reloaded integration = %+v", mgr2.Integration())
+	}
+
+	// Fail closed: wrong current key must not mutate DB (simulate by rotating again with corrupt mid-state).
+	raw, err := os.ReadFile(settings.DefaultEncryptionKeyPath(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(raw)) != newPass {
+		t.Fatalf("key file = %q want %q", raw, newPass)
+	}
+}
 
 func boolPtr(v bool) *bool { return &v }

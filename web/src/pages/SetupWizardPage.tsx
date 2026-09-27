@@ -94,10 +94,9 @@ const STEPS: { id: Step; label: string; description: string }[] = [
 ];
 
 type ForgePickerOption = {
-  id: WizardForge | "gitlab" | "bitbucket";
+  id: WizardForge;
   label: string;
   description: string;
-  comingSoon?: boolean;
 };
 
 const FORGE_OPTIONS: ForgePickerOption[] = [
@@ -114,14 +113,17 @@ const FORGE_OPTIONS: ForgePickerOption[] = [
   {
     id: "gitlab",
     label: "GitLab",
-    description: "GitLab.com and self-hosted.",
-    comingSoon: true,
+    description: "GitLab.com and self-hosted. Token sync and webhooks.",
   },
   {
     id: "bitbucket",
     label: "Bitbucket",
-    description: "Bitbucket Cloud and Data Center.",
-    comingSoon: true,
+    description: "Bitbucket Cloud workspaces. Token sync and webhooks.",
+  },
+  {
+    id: "forgejo",
+    label: "Forgejo",
+    description: "Gitea-compatible forge. Sync, webhooks, and OAuth login.",
   },
 ];
 
@@ -183,10 +185,11 @@ function validateConnectFields(
   integ: IntegrationPublic | undefined,
 ): { ok: boolean; errors: FieldErrors; firstInvalid?: FieldKey } {
   const errors: FieldErrors = {};
-  if (forge === "gitea") {
+  const usesGiteaFields = forge === "gitea" || forge === "forgejo";
+  if (usesGiteaFields) {
     const url = draft.gitea_url.trim();
     if (!url) {
-      errors.gitea_url = "Gitea URL is required.";
+      errors.gitea_url = `${forge === "forgejo" ? "Forgejo" : "Gitea"} URL is required.`;
     } else if (!isValidHTTPURL(url)) {
       errors.gitea_url = "Enter a valid http:// or https:// URL.";
     }
@@ -195,8 +198,9 @@ function validateConnectFields(
     }
   } else {
     const url = draft.github_url.trim();
+    const label = forge === "gitlab" ? "GitLab" : forge === "bitbucket" ? "Bitbucket" : "GitHub";
     if (!url) {
-      errors.github_url = "GitHub URL is required.";
+      errors.github_url = `${label} URL is required.`;
     } else if (!isValidHTTPURL(url)) {
       errors.github_url = "Enter a valid http:// or https:// URL.";
     }
@@ -210,10 +214,9 @@ function validateConnectFields(
   } else if (!isValidHTTPURL(publicURL)) {
     errors.server_external_url = "Enter a valid http:// or https:// URL.";
   }
-  const order: FieldKey[] =
-    forge === "gitea"
-      ? ["gitea_url", "gitea_token", "gitea_allow_private_network", "server_external_url"]
-      : ["github_url", "github_token", "github_allow_private_network", "server_external_url"];
+  const order: FieldKey[] = usesGiteaFields
+    ? ["gitea_url", "gitea_token", "gitea_allow_private_network", "server_external_url"]
+    : ["github_url", "github_token", "github_allow_private_network", "server_external_url"];
   const firstInvalid = order.find((k) => errors[k]);
   return { ok: !firstInvalid, errors, firstInvalid };
 }
@@ -313,7 +316,19 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   const integ = settingsQuery.data?.integration;
   const isBusy = busy !== null;
   const checksPassed = Boolean(testResult?.ok);
-  const forgeLabel = forge === "github" ? "GitHub" : "Gitea";
+  const forgeLabel =
+    forge === "github"
+      ? "GitHub"
+      : forge === "gitlab"
+        ? "GitLab"
+        : forge === "bitbucket"
+          ? "Bitbucket"
+          : forge === "forgejo"
+            ? "Forgejo"
+            : "Gitea";
+  const usesGiteaFields = forge === "gitea" || forge === "forgejo";
+  const usesManualWebhook =
+    forge === "github" || forge === "gitlab" || forge === "bitbucket" || forge === "forgejo";
 
   function focusField(key: FieldKey) {
     const el = document.getElementById(FIELD_INPUT_IDS[key]);
@@ -617,6 +632,42 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
       if (draft.github_token) body.github_token = draft.github_token;
       return body;
     }
+    if (forge === "gitlab" || forge === "bitbucket") {
+      const body: {
+        forge_type: ForgeType;
+        base_url?: string;
+        token?: string;
+        allow_private_network?: boolean;
+      } = {
+        forge_type: forge,
+        base_url: draft.github_url.trim() || undefined,
+        allow_private_network: draft.github_allow_private_network,
+      };
+      if (draft.github_token) body.token = draft.github_token;
+      return body;
+    }
+    if (forge === "forgejo") {
+      const body: {
+        forge_type: ForgeType;
+        base_url?: string;
+        token?: string;
+        allow_private_network?: boolean;
+        gitea_url?: string;
+        gitea_token?: string;
+        gitea_allow_private_network?: boolean;
+      } = {
+        forge_type: "forgejo",
+        base_url: draft.gitea_url.trim() || undefined,
+        gitea_url: draft.gitea_url.trim() || undefined,
+        allow_private_network: draft.gitea_allow_private_network,
+        gitea_allow_private_network: draft.gitea_allow_private_network,
+      };
+      if (draft.gitea_token) {
+        body.token = draft.gitea_token;
+        body.gitea_token = draft.gitea_token;
+      }
+      return body;
+    }
     const body: {
       forge_type: ForgeType;
       gitea_url?: string;
@@ -676,8 +727,8 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
 
   function openWebhookFlow() {
     if (!testResult?.ok || !testResult.webhook_preview) return;
-    if (forge === "github") {
-      // GitHub webhooks are always manual; persist credentials + generated secret first.
+    if (usesManualWebhook) {
+      // Manual webhook forges: persist credentials + generated secret first.
       void finishWebhook(false);
       return;
     }
@@ -762,6 +813,54 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     setBusy("webhook");
     setWebhookError(null);
     try {
+      if (forge === "gitlab" || forge === "bitbucket" || forge === "forgejo") {
+        const secret =
+          (typeof crypto !== "undefined" && "getRandomValues" in crypto
+            ? Array.from(crypto.getRandomValues(new Uint8Array(24)))
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("")
+            : `whsec_${Date.now()}`);
+        const baseURL =
+          forge === "forgejo" ? draft.gitea_url.trim() : draft.github_url.trim();
+        const token = forge === "forgejo" ? draft.gitea_token : draft.github_token;
+        const allowPrivate =
+          forge === "forgejo"
+            ? draft.gitea_allow_private_network
+            : draft.github_allow_private_network;
+        const created = await api.createInstance({
+          forge_type: forge,
+          name: forgeLabel,
+          base_url: baseURL,
+          token: token || undefined,
+          webhook_secret: secret,
+          allow_private_network: allowPrivate,
+        });
+        // Forgejo can auto-ensure system hooks (Gitea-compatible). GitLab/Bitbucket are manual.
+        if (forge === "forgejo" && created?.id) {
+          try {
+            await api.ensureWebhook(created.id);
+          } catch {
+            /* manual fallback below */
+          }
+        }
+        setWebhookPreview({
+          ...(typeof testResult?.webhook_preview === "object" && testResult?.webhook_preview
+            ? testResult.webhook_preview
+            : { active: true, events: [], config: {} }),
+          config: {
+            ...(testResult?.webhook_preview?.config || {}),
+            secret,
+            url: testResult?.webhook_preview?.config?.url || "",
+          },
+        } as WebhookPreview);
+        await queryClient.invalidateQueries({ queryKey: ["settings"] });
+        await queryClient.invalidateQueries({ queryKey: ["instances"] });
+        setCheckOpen(false);
+        setCanCreateWebhook(false);
+        setWebhookPhase("manual");
+        setWebhookOpen(true);
+        return;
+      }
       const res = await api.createWebhook({ ...connectionBody(), create });
       const secret = res.webhook?.config?.secret ?? "";
       applyWebhookResult(secret, res.integration);
@@ -782,7 +881,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
       }
     } catch (err) {
       setWebhookError(err instanceof Error ? err.message : "webhook setup failed");
-      if (forge === "github") {
+      if (usesManualWebhook) {
         setWebhookOpen(true);
         setWebhookPhase("manual");
       }
@@ -795,7 +894,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     setWebhookOpen(false);
     setWebhookPhase("confirm");
     setCheckOpen(false);
-    if (forge === "github") {
+    if (usesManualWebhook) {
       setStep("finish");
       return;
     }
@@ -1153,22 +1252,15 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
             <div className="settings-form__section">
               <div className="forge-picker" role="list">
                 {FORGE_OPTIONS.map((opt) => {
-                  const disabled = Boolean(opt.comingSoon);
                   return (
                     <button
                       key={opt.id}
                       type="button"
                       role="listitem"
-                      className={`forge-picker__card${disabled ? " is-disabled" : ""}`}
-                      disabled={disabled}
-                      onClick={() => {
-                        if (opt.id === "gitea" || opt.id === "github") selectForge(opt.id);
-                      }}
+                      className="forge-picker__card"
+                      onClick={() => selectForge(opt.id)}
                     >
                       <span className="forge-picker__title">{opt.label}</span>
-                      {opt.comingSoon ? (
-                        <span className="forge-picker__badge">Coming Soon</span>
-                      ) : null}
                       <span className="forge-picker__desc muted">{opt.description}</span>
                     </button>
                   );
@@ -1177,10 +1269,10 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
             </div>
           )}
 
-          {step === "connect" && forge === "gitea" && (
+          {step === "connect" && usesGiteaFields && forge && (
             <form onSubmit={advance} noValidate>
               <fieldset className="settings-form__section" disabled={isBusy}>
-                <legend>Connect Gitea</legend>
+                <legend>Connect {forgeLabel}</legend>
                 <div className="setup-wizard__connect-row">
                   <div className="setup-wizard__connect-col">
                     <div className="settings-form__field">
@@ -1289,10 +1381,10 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
             </form>
           )}
 
-          {step === "connect" && forge === "github" && (
+          {step === "connect" && !usesGiteaFields && forge && (
             <form onSubmit={advance} noValidate>
               <fieldset className="settings-form__section" disabled={isBusy}>
-                <legend>Connect GitHub</legend>
+                <legend>Connect {forgeLabel}</legend>
                 <div className="setup-wizard__connect-row">
                   <div className="setup-wizard__connect-col">
                     <div className="settings-form__field">
@@ -1419,7 +1511,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                 {checkRunning || busy === "test"
                   ? "Running connectivity and permission checks…"
                   : checksPassed
-                    ? forge === "github"
+                    ? usesManualWebhook
                       ? "Checks passed. Continue for manual webhook instructions."
                       : "Checks passed. Continue to install the webhook and set up OAuth."
                     : "Fix any failed checks, then retry."}
@@ -1523,7 +1615,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
         error={webhookError}
         canCreate={canCreateWebhook}
         forgeLabel={forgeLabel}
-        manualOnly={forge === "github"}
+        manualOnly={usesManualWebhook}
         onBack={backFromWebhook}
         onManual={() => void finishWebhook(false)}
         onCreate={() => void finishWebhook(true)}

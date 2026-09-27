@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -29,47 +28,8 @@ type AppSettings struct {
 	UpdatedAt time.Time
 }
 
-// GetAppSettings returns the settings row, or nil when unset.
 func (s *Store) GetAppSettings(ctx context.Context) (*AppSettings, error) {
-	var row AppSettings
-	var updated string
-	var setup int
-	err := s.queryRow(ctx, `
-SELECT instance_name, sync_history_days, attention_long_running_after,
-       retention_runs_days, retention_webhooks_days, retention_attention_days,
-       server_external_url,
-       gitea_url, gitea_token_cipher, gitea_webhook_secret_cipher,
-       gitea_allow_private_network, gitea_allow_unsigned_webhooks,
-       oauth_client_id, oauth_client_secret_cipher, setup_completed, updated_at
-FROM app_settings WHERE id = 1`).Scan(
-		&row.InstanceName,
-		&row.SyncHistoryDays,
-		&row.AttentionLongRunningAfter,
-		&row.RetentionRunsDays,
-		&row.RetentionWebhooksDays,
-		&row.RetentionAttentionDays,
-		&row.ServerExternalURL,
-		&row.GiteaURL,
-		&row.GiteaTokenCipher,
-		&row.GiteaWebhookSecretCipher,
-		&row.GiteaAllowPrivateNetwork,
-		&row.GiteaAllowUnsignedWebhooks,
-		&row.OAuthClientID,
-		&row.OAuthClientSecretCipher,
-		&setup,
-		&updated,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	row.SetupCompleted = setup != 0
-	if t, err := parseTime(updated); err == nil {
-		row.UpdatedAt = t
-	}
-	return &row, nil
+	return s.getAppSettingsSQLC(ctx)
 }
 
 // UpsertAppSettings writes the single settings row (values + integration).

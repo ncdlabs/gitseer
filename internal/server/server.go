@@ -87,8 +87,18 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 	applyGitHub := func(gh settings.GitHubIntegration) {
 		authsvc.UpdateGitHubAuth(gh.URL, gh.OAuthClientID, gh.OAuthClientSecret, gh.AllowPrivateNetwork)
 	}
+	applyMultiForgeOAuth := func() {
+		ctx := context.Background()
+		gl := settingsMgr.AuthGitLabIntegration(ctx)
+		authsvc.UpdateGitLabAuth(gl.URL, gl.OAuthClientID, gl.OAuthClientSecret, gl.AllowPrivateNetwork)
+		bb := settingsMgr.AuthBitbucketIntegration(ctx)
+		authsvc.UpdateBitbucketAuth(bb.URL, bb.OAuthClientID, bb.OAuthClientSecret, bb.AllowPrivateNetwork)
+		fj := settingsMgr.AuthForgejoIntegration(ctx)
+		authsvc.UpdateForgejoAuth(fj.URL, fj.OAuthClientID, fj.OAuthClientSecret, fj.AllowPrivateNetwork)
+	}
 	settingsMgr.SetOnIntegrationChange(applyIntegration)
 	settingsMgr.SetOnGitHubChange(applyGitHub)
+	settingsMgr.SetOnMultiForgeOAuthChange(applyMultiForgeOAuth)
 	settingsMgr.SetOnExternalURLChange(authsvc.UpdateExternalURL)
 	settingsMgr.SetOnEncryptionChange(authsvc.SetEncryptionKey)
 	if k := settingsMgr.EncryptionKeyBytes(); len(k) == 32 {
@@ -96,6 +106,7 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 	}
 	applyIntegration(settingsMgr.AuthGiteaIntegration(context.Background()))
 	applyGitHub(settingsMgr.AuthGitHubIntegration(context.Background()))
+	applyMultiForgeOAuth()
 	authsvc.UpdateExternalURL(settingsMgr.ExternalURL())
 	if integ := settingsMgr.Integration(); integ.WebhookSecret == "" && integ.AllowUnsignedWebhooks {
 		log.Warn("gitea webhook HMAC secret not set; unsigned payloads allowed")
@@ -144,12 +155,15 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 			bootstrapEnabled = false
 		}
 		payload := map[string]any{
-			"base_path":             prefix,
-			"oauth_enabled":         authsvc.OAuthEnabled(),
-			"github_oauth_enabled":  authsvc.GitHubOAuthEnabled(),
-			"bootstrap_enabled":     bootstrapEnabled,
-			"allow_skip_setup":      cfg.Dev.AllowSkipSetup,
-			"csrf_token":            csrf,
+			"base_path":               prefix,
+			"oauth_enabled":           authsvc.OAuthEnabled(),
+			"github_oauth_enabled":    authsvc.GitHubOAuthEnabled(),
+			"gitlab_oauth_enabled":    authsvc.GitLabOAuthEnabled(),
+			"bitbucket_oauth_enabled": authsvc.BitbucketOAuthEnabled(),
+			"forgejo_oauth_enabled":   authsvc.ForgejoOAuthEnabled(),
+			"bootstrap_enabled":       bootstrapEnabled,
+			"allow_skip_setup":        cfg.Dev.AllowSkipSetup,
+			"csrf_token":              csrf,
 		}
 		// Local npm start only: prefill login with the bootstrap password when the
 		// TCP peer is loopback, skip-setup is on, and external_url is loopback/empty.

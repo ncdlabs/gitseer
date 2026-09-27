@@ -20,14 +20,37 @@
 
 Status exposes `encryption_configured`, `encryption_source`, `encryption_healthy`, and `encryption_error` (no plaintext). A decrypt probe uses one stored secret ciphertext when present, otherwise a seal/open canary. Wrong-key rotation shows as unhealthy until secrets are re-sealed.
 
-**Rotation:** set the new key in env/Secret, re-enter forge tokens/webhook/OAuth secrets in Settings (or wizard), confirm Status encryption is healthy, then retire the old key.
+**Rotation (CLI):** re-seal all DB secrets under a new key without re-entering each secret:
+
+```bash
+# Back up first
+gitseer backup --out /path/to/backup
+
+# Option A: provide a new passphrase
+gitseer rotate-encryption-key --new-key 'your-new-high-entropy-passphrase'
+
+# Option B: read passphrase from a file
+gitseer rotate-encryption-key --new-key-file /secure/new.key
+
+# Option C: generate one (printed once; store it securely)
+gitseer rotate-encryption-key --generate
+```
+
+Behavior:
+
+- Decrypts every sealed field (`instances`, `user_tokens`, `app_settings`, `notification_settings`) with the current key and re-seals under the new key in one transaction (**fail closed** — any decrypt/encrypt error rolls back with no writes).
+- When the active key came from the on-disk `gitseer.encryption_key` file, replaces that file (0600) after a successful DB commit.
+- When the key comes from `GITSEER_ENCRYPTION_KEY` / config, the CLI prints a note to update that secret and restart; the on-disk file is left alone.
+- Confirm Status shows `encryption_healthy` after restart (or live apply when the file source is used).
+
+**Manual fallback:** set the new key in env/Secret, re-enter forge tokens/webhook/OAuth secrets in Settings (or wizard), confirm Status encryption is healthy, then retire the old key.
 
 ## Metrics
 
-Scrape `GET /metrics` with either:
+Scrape `GET /metrics`:
 
-- a session cookie (same auth as the API), or
-- `Authorization: Bearer <token>` when `server.metrics_token` / `GITSEER_METRICS_TOKEN` is set (preferred for Prometheus)
+- When `server.metrics_token` / `GITSEER_METRICS_TOKEN` is **unset**: session cookie (same auth as the API)
+- When the scrape token **is** set: **Bearer-only** (`Authorization: Bearer <token>`) — session cookies are rejected (preferred for Prometheus)
 
 Includes gauges for repos/PRs/runs, webhook counters, sync duration/errors, and Gitea API request/error counters (`gitseer_gitea_api_*`). Labels avoid repository names.
 
@@ -80,7 +103,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              image: git.ncdlabs.com/ncdlabs/gitseer:0.1.24
+              image: git.ncdlabs.com/ncdlabs/gitseer:0.1.27
               command: ["gitseer", "backup", "--out", "/backup/$(date +%Y%m%d)"]
               envFrom:
                 - secretRef:
@@ -109,9 +132,9 @@ Job logs: fetched from the forge on demand through GitSeer (`/api/v1/jobs/{id}/l
 ## Write ops (rerun / cancel)
 
 - `POST /api/v1/workflow-runs/{id}/rerun` and `.../cancel` (CSRF + session + `CanAccessRepo`)
-- Gitea OAuth users: forge call uses `UserAccessToken` (403 if missing) — never silent service-PAT fallback
+- Non-admin: forge call uses `UserAccessTokenForInstance` for that repo’s instance (403 if missing) — never silent service-PAT fallback; never cross-forge token reuse (legacy Gitea-only fallback when instance-scoped row is missing)
 - Bootstrap admin: may use the instance service PAT; UI warns before confirm
-- GitHub non-admin: uses per-user GitHub OAuth token when linked; otherwise 403 (bootstrap admin may use service PAT with warning; Settings → Access for manual grants)
+- GitHub non-admin: uses per-user GitHub OAuth token when linked; otherwise 403
 - Capability matrix rows: **Rerun Workflow** / **Cancel Workflow**; forge 404/405 → 501 unsupported
 - Success publishes an SSE `workflow_run` event so Active Actions / detail refetch
 
@@ -129,3 +152,4 @@ Job logs: fetched from the forge on demand through GitSeer (`/api/v1/jobs/{id}/l
 - Prefer empty bootstrap password once OAuth admins exist  
 - Keep `allow_unsigned_webhooks` off outside labs (Gitea and GitHub flags are separate)  
 - Removing a forge instance deletes cascaded inventory — confirm before delete  
+- **Wallboard tokens** (Settings → Status): bearer or `?token=` grants **read-only** access to summary + open attention (`GET /api/v1/wallboard/snapshot`) — no writes, settings, forge secrets, or job logs. Treat like a shared TV credential: create narrowly named tokens, revoke on leak, prefer Bearer over query-string (query tokens may appear in access logs / Referer). Snapshot uses bootstrap-wide inventory scope (not per-user ACL). 

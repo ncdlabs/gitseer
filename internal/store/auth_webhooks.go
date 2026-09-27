@@ -18,12 +18,14 @@ var (
 	ErrReservedLogin    = errors.New("oauth login is reserved")
 	ErrLoginConflict    = errors.New("login already linked to another account")
 	ErrBootstrapClash   = errors.New("cannot link oauth user to bootstrap admin")
-	ErrMissingGiteaUID  = errors.New("gitea_user_id is required")
-	ErrMissingGitHubUID = errors.New("github_user_id is required")
-	ErrIdentityLinked   = errors.New("forge identity already linked to another account")
+	ErrMissingGiteaUID     = errors.New("gitea_user_id is required")
+	ErrMissingGitHubUID    = errors.New("github_user_id is required")
+	ErrMissingGitLabUID    = errors.New("gitlab_user_id is required")
+	ErrMissingBitbucketUID = errors.New("bitbucket_user_id is required")
+	ErrIdentityLinked      = errors.New("forge identity already linked to another account")
 )
 
-const userSelectCols = ` id, instance_id, gitea_user_id, github_user_id, github_instance_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at`
+const userSelectCols = ` id, instance_id, gitea_user_id, github_user_id, github_instance_id, gitlab_user_id, gitlab_instance_id, bitbucket_user_id, bitbucket_instance_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at`
 
 func (s *Store) EnsureBootstrapUser(ctx context.Context) (*models.User, error) {
 	const login = "bootstrap"
@@ -49,10 +51,14 @@ RETURNING id`, login, now, now).Scan(&id)
 
 func scanUser(row scanner) (*models.User, error) {
 	var u models.User
-	var instanceID, giteaID, githubID, githubInstID sql.NullInt64
+	var instanceID, giteaID, githubID, githubInstID, gitlabID, gitlabInstID, bbID, bbInstID sql.NullInt64
 	var bootstrap int
 	var created, updated string
-	if err := row.Scan(&u.ID, &instanceID, &giteaID, &githubID, &githubInstID, &u.Login, &u.Email, &u.DisplayName, &u.AvatarURL, &bootstrap, &created, &updated); err != nil {
+	if err := row.Scan(
+		&u.ID, &instanceID, &giteaID, &githubID, &githubInstID,
+		&gitlabID, &gitlabInstID, &bbID, &bbInstID,
+		&u.Login, &u.Email, &u.DisplayName, &u.AvatarURL, &bootstrap, &created, &updated,
+	); err != nil {
 		return nil, err
 	}
 	if instanceID.Valid {
@@ -71,6 +77,22 @@ func scanUser(row scanner) (*models.User, error) {
 		v := githubInstID.Int64
 		u.GitHubInstanceID = &v
 	}
+	if gitlabID.Valid {
+		v := gitlabID.Int64
+		u.GitLabUserID = &v
+	}
+	if gitlabInstID.Valid {
+		v := gitlabInstID.Int64
+		u.GitLabInstanceID = &v
+	}
+	if bbID.Valid {
+		v := bbID.Int64
+		u.BitbucketUserID = &v
+	}
+	if bbInstID.Valid {
+		v := bbInstID.Int64
+		u.BitbucketInstanceID = &v
+	}
 	u.IsBootstrapAdmin = bootstrap != 0
 	u.CreatedAt, _ = parseTime(created)
 	u.UpdatedAt, _ = parseTime(updated)
@@ -78,11 +100,13 @@ func scanUser(row scanner) (*models.User, error) {
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id int64) (*models.User, error) {
-	row := s.queryRow(ctx, `SELECT`+userSelectCols+` FROM users WHERE id = ?`, id)
-	return scanUser(row)
+	return s.getUserSQLCByID(ctx, id)
 }
 
-func (s *Store) UpsertGiteaUser(ctx context.Context, instanceID *int64, u models.User) (*models.User, error) {
+// UpsertGiteaUser creates or updates a user keyed by (instance_id, gitea_user_id).
+// Forgejo OAuth reuses these columns (no separate forgejo_* identity). When linkUserID
+// is non-nil, attaches the identity to that existing account (no orphan inserts).
+func (s *Store) UpsertGiteaUser(ctx context.Context, instanceID *int64, u models.User, linkUserID *int64) (*models.User, error) {
 	if u.GiteaUserID == nil || *u.GiteaUserID == 0 {
 		return nil, ErrMissingGiteaUID
 	}
@@ -102,7 +126,11 @@ func (s *Store) UpsertGiteaUser(ctx context.Context, instanceID *int64, u models
 	}
 
 	now := formatTime(time.Now().UTC())
-	if byUID, err := s.getUserByGiteaUID(ctx, instanceID, *u.GiteaUserID); err == nil {
+	giteaUID := *u.GiteaUserID
+	if byUID, err := s.getUserByGiteaUID(ctx, instanceID, giteaUID); err == nil {
+		if linkUserID != nil && *linkUserID != byUID.ID {
+			return nil, ErrIdentityLinked
+		}
 		if byUID.Login != login {
 			if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != byUID.ID {
 				return nil, ErrLoginConflict
@@ -121,9 +149,32 @@ WHERE id=?`, nullInt64(instanceID), login, u.Email, u.DisplayName, u.AvatarURL, 
 		return nil, err
 	}
 
+	if linkUserID != nil {
+		target, err := s.GetUserByID(ctx, *linkUserID)
+		if err != nil {
+			return nil, err
+		}
+		if target.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if target.GiteaUserID != nil && (*target.GiteaUserID != giteaUID ||
+			(instanceID == nil && target.InstanceID != nil) ||
+			(instanceID != nil && (target.InstanceID == nil || *target.InstanceID != *instanceID))) {
+			return nil, ErrIdentityLinked
+		}
+		_, err = s.exec(ctx, `
+UPDATE users SET instance_id=?, gitea_user_id=?, email=COALESCE(NULLIF(?, ''), email),
+  display_name=COALESCE(NULLIF(?, ''), display_name), avatar_url=COALESCE(NULLIF(?, ''), avatar_url), updated_at=?
+WHERE id=?`, nullInt64(instanceID), giteaUID, u.Email, u.DisplayName, u.AvatarURL, now, target.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, target.ID)
+	}
+
 	// Re-bind orphaned users whose instance was deleted (instance_id SET NULL).
 	if instanceID != nil {
-		if orphan, err := s.getUserByGiteaUID(ctx, nil, *u.GiteaUserID); err == nil {
+		if orphan, err := s.getUserByGiteaUID(ctx, nil, giteaUID); err == nil {
 			if orphan.Login != login {
 				if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != orphan.ID {
 					return nil, ErrLoginConflict
@@ -142,7 +193,7 @@ WHERE id=?`, nullInt64(instanceID), login, u.Email, u.DisplayName, u.AvatarURL, 
 			return nil, err
 		}
 		if existing, err := s.getUserByLogin(ctx, login); err == nil {
-			if existing.InstanceID == nil && existing.GiteaUserID != nil && *existing.GiteaUserID == *u.GiteaUserID && !existing.IsBootstrapAdmin {
+			if existing.InstanceID == nil && existing.GiteaUserID != nil && *existing.GiteaUserID == giteaUID && !existing.IsBootstrapAdmin {
 				_, err := s.exec(ctx, `
 UPDATE users SET instance_id=?, email=?, display_name=?, avatar_url=?, updated_at=?
 WHERE id=?`, nullInt64(instanceID), u.Email, u.DisplayName, u.AvatarURL, now, existing.ID)
@@ -158,11 +209,17 @@ WHERE id=?`, nullInt64(instanceID), u.Email, u.DisplayName, u.AvatarURL, now, ex
 
 	if existing, err := s.getUserByLogin(ctx, login); err == nil {
 		// Login taken by a non-bootstrap row with a different Gitea id.
-		if existing.GiteaUserID != nil && *existing.GiteaUserID != *u.GiteaUserID {
+		if existing.GiteaUserID != nil && *existing.GiteaUserID != giteaUID {
 			return nil, ErrLoginConflict
 		}
 		if existing.IsBootstrapAdmin {
 			return nil, ErrBootstrapClash
+		}
+		// Same login already used by another forge identity — require explicit link while signed in.
+		if existing.GitHubUserID != nil || existing.GitLabUserID != nil || existing.BitbucketUserID != nil {
+			if existing.GiteaUserID == nil {
+				return nil, ErrLoginConflict
+			}
 		}
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -171,11 +228,11 @@ WHERE id=?`, nullInt64(instanceID), u.Email, u.DisplayName, u.AvatarURL, now, ex
 	_, err := s.exec(ctx, `
 INSERT INTO users (instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-`, nullInt64(instanceID), *u.GiteaUserID, login, u.Email, u.DisplayName, u.AvatarURL, now, now)
+`, nullInt64(instanceID), giteaUID, login, u.Email, u.DisplayName, u.AvatarURL, now, now)
 	if err != nil {
 		return nil, err
 	}
-	return s.getUserByGiteaUID(ctx, instanceID, *u.GiteaUserID)
+	return s.getUserByGiteaUID(ctx, instanceID, giteaUID)
 }
 
 func (s *Store) getUserByLogin(ctx context.Context, login string) (*models.User, error) {
@@ -289,6 +346,188 @@ VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
 	return s.getUserByGitHubUID(ctx, githubInstanceID, ghUID)
 }
 
+func (s *Store) getUserByGitLabUID(ctx context.Context, gitlabInstanceID, gitlabUID int64) (*models.User, error) {
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+`
+FROM users WHERE gitlab_instance_id = ? AND gitlab_user_id = ?`, gitlabInstanceID, gitlabUID)
+	return scanUser(row)
+}
+
+func (s *Store) getUserByBitbucketUID(ctx context.Context, bitbucketInstanceID, bitbucketUID int64) (*models.User, error) {
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+`
+FROM users WHERE bitbucket_instance_id = ? AND bitbucket_user_id = ?`, bitbucketInstanceID, bitbucketUID)
+	return scanUser(row)
+}
+
+// UpsertGitLabUser creates or updates a user keyed by (gitlab_instance_id, gitlab_user_id).
+func (s *Store) UpsertGitLabUser(ctx context.Context, gitlabInstanceID int64, u models.User, linkUserID *int64) (*models.User, error) {
+	if u.GitLabUserID == nil || *u.GitLabUserID == 0 {
+		return nil, ErrMissingGitLabUID
+	}
+	if gitlabInstanceID <= 0 {
+		return nil, fmt.Errorf("gitlab instance_id is required")
+	}
+	login := strings.TrimSpace(u.Login)
+	if login == "" {
+		return nil, fmt.Errorf("login is required")
+	}
+	if strings.EqualFold(login, "bootstrap") {
+		return nil, ErrReservedLogin
+	}
+	now := formatTime(time.Now().UTC())
+	uid := *u.GitLabUserID
+
+	if byUID, err := s.getUserByGitLabUID(ctx, gitlabInstanceID, uid); err == nil {
+		if linkUserID != nil && *linkUserID != byUID.ID {
+			return nil, ErrIdentityLinked
+		}
+		if byUID.Login != login {
+			if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != byUID.ID {
+				login = byUID.Login
+			} else if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+				return nil, oerr
+			}
+		}
+		_, err := s.exec(ctx, `
+UPDATE users SET gitlab_instance_id=?, gitlab_user_id=?, login=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, gitlabInstanceID, uid, login, u.Email, u.DisplayName, u.AvatarURL, now, byUID.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, byUID.ID)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if linkUserID != nil {
+		target, err := s.GetUserByID(ctx, *linkUserID)
+		if err != nil {
+			return nil, err
+		}
+		if target.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if target.GitLabUserID != nil && (*target.GitLabUserID != uid || target.GitLabInstanceID == nil || *target.GitLabInstanceID != gitlabInstanceID) {
+			return nil, ErrIdentityLinked
+		}
+		_, err = s.exec(ctx, `
+UPDATE users SET gitlab_instance_id=?, gitlab_user_id=?, email=COALESCE(NULLIF(?, ''), email),
+  display_name=COALESCE(NULLIF(?, ''), display_name), avatar_url=COALESCE(NULLIF(?, ''), avatar_url), updated_at=?
+WHERE id=?`, gitlabInstanceID, uid, u.Email, u.DisplayName, u.AvatarURL, now, target.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, target.ID)
+	}
+
+	if existing, err := s.getUserByLogin(ctx, login); err == nil {
+		if existing.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if existing.GitLabUserID != nil && *existing.GitLabUserID != uid {
+			return nil, ErrLoginConflict
+		}
+		if (existing.GiteaUserID != nil || existing.GitHubUserID != nil) && existing.GitLabUserID == nil {
+			return nil, ErrLoginConflict
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	_, err := s.exec(ctx, `
+INSERT INTO users (gitlab_instance_id, gitlab_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+`, gitlabInstanceID, uid, login, u.Email, u.DisplayName, u.AvatarURL, now, now)
+	if err != nil {
+		return nil, err
+	}
+	return s.getUserByGitLabUID(ctx, gitlabInstanceID, uid)
+}
+
+// UpsertBitbucketUser creates or updates a user keyed by (bitbucket_instance_id, bitbucket_user_id).
+func (s *Store) UpsertBitbucketUser(ctx context.Context, bitbucketInstanceID int64, u models.User, linkUserID *int64) (*models.User, error) {
+	if u.BitbucketUserID == nil || *u.BitbucketUserID == 0 {
+		return nil, ErrMissingBitbucketUID
+	}
+	if bitbucketInstanceID <= 0 {
+		return nil, fmt.Errorf("bitbucket instance_id is required")
+	}
+	login := strings.TrimSpace(u.Login)
+	if login == "" {
+		return nil, fmt.Errorf("login is required")
+	}
+	if strings.EqualFold(login, "bootstrap") {
+		return nil, ErrReservedLogin
+	}
+	now := formatTime(time.Now().UTC())
+	uid := *u.BitbucketUserID
+
+	if byUID, err := s.getUserByBitbucketUID(ctx, bitbucketInstanceID, uid); err == nil {
+		if linkUserID != nil && *linkUserID != byUID.ID {
+			return nil, ErrIdentityLinked
+		}
+		if byUID.Login != login {
+			if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != byUID.ID {
+				login = byUID.Login
+			} else if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+				return nil, oerr
+			}
+		}
+		_, err := s.exec(ctx, `
+UPDATE users SET bitbucket_instance_id=?, bitbucket_user_id=?, login=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, bitbucketInstanceID, uid, login, u.Email, u.DisplayName, u.AvatarURL, now, byUID.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, byUID.ID)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if linkUserID != nil {
+		target, err := s.GetUserByID(ctx, *linkUserID)
+		if err != nil {
+			return nil, err
+		}
+		if target.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if target.BitbucketUserID != nil && (*target.BitbucketUserID != uid || target.BitbucketInstanceID == nil || *target.BitbucketInstanceID != bitbucketInstanceID) {
+			return nil, ErrIdentityLinked
+		}
+		_, err = s.exec(ctx, `
+UPDATE users SET bitbucket_instance_id=?, bitbucket_user_id=?, email=COALESCE(NULLIF(?, ''), email),
+  display_name=COALESCE(NULLIF(?, ''), display_name), avatar_url=COALESCE(NULLIF(?, ''), avatar_url), updated_at=?
+WHERE id=?`, bitbucketInstanceID, uid, u.Email, u.DisplayName, u.AvatarURL, now, target.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, target.ID)
+	}
+
+	if existing, err := s.getUserByLogin(ctx, login); err == nil {
+		if existing.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if existing.BitbucketUserID != nil && *existing.BitbucketUserID != uid {
+			return nil, ErrLoginConflict
+		}
+		if (existing.GiteaUserID != nil || existing.GitHubUserID != nil || existing.GitLabUserID != nil) && existing.BitbucketUserID == nil {
+			return nil, ErrLoginConflict
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	_, err := s.exec(ctx, `
+INSERT INTO users (bitbucket_instance_id, bitbucket_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+`, bitbucketInstanceID, uid, login, u.Email, u.DisplayName, u.AvatarURL, now, now)
+	if err != nil {
+		return nil, err
+	}
+	return s.getUserByBitbucketUID(ctx, bitbucketInstanceID, uid)
+}
+
 // ListUsers returns all users ordered by id (bootstrap-admin ACL grant UI).
 func (s *Store) ListUsers(ctx context.Context) ([]models.User, error) {
 	rows, err := s.query(ctx, `SELECT`+userSelectCols+` FROM users ORDER BY id`)
@@ -330,32 +569,15 @@ ORDER BY ura.repo_id`, userID, instanceID)
 }
 
 func (s *Store) CreateSession(ctx context.Context, id, tokenHash string, userID int64, expires time.Time, ip, ua string) error {
-	_, err := s.exec(ctx, `
-INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at, ip, user_agent)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, id, userID, tokenHash, formatTime(expires), formatTime(time.Now().UTC()), ip, ua)
-	return err
+	return s.createSessionSQLC(ctx, id, tokenHash, userID, expires, ip, ua)
 }
 
 func (s *Store) GetSessionByTokenHash(ctx context.Context, hash string) (*models.Session, error) {
-	row := s.queryRow(ctx, `
-SELECT id, user_id, expires_at, created_at, ip, user_agent
-FROM sessions WHERE token_hash = ?`, hash)
-	var sess models.Session
-	var expires, created string
-	if err := row.Scan(&sess.ID, &sess.UserID, &expires, &created, &sess.IP, &sess.UserAgent); err != nil {
-		return nil, err
-	}
-	sess.ExpiresAt, _ = parseTime(expires)
-	sess.CreatedAt, _ = parseTime(created)
-	if time.Now().UTC().After(sess.ExpiresAt) {
-		return nil, sql.ErrNoRows
-	}
-	return &sess, nil
+	return s.getSessionSQLC(ctx, hash)
 }
 
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
-	_, err := s.exec(ctx, `DELETE FROM sessions WHERE id = ?`, id)
-	return err
+	return s.deleteSessionSQLC(ctx, id)
 }
 
 // OAuthStateMeta carries provider/instance/link metadata for an OAuth PKCE state.

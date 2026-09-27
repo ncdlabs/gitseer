@@ -57,6 +57,7 @@ func TestValidateURLBlocksLoopback(t *testing.T) {
 func TestMapRepoNormalization(t *testing.T) {
 	raw := `{
 		"id": 99,
+		"node_id": "R_kgDOABC123",
 		"name": "gitseer",
 		"full_name": "ncdlabs/gitseer",
 		"private": true,
@@ -75,8 +76,26 @@ func TestMapRepoNormalization(t *testing.T) {
 	if m.ExternalID != 99 || m.Owner != "ncdlabs" || m.Name != "gitseer" {
 		t.Fatalf("repo=%+v", m)
 	}
+	if m.NodeID != "R_kgDOABC123" {
+		t.Fatalf("node_id=%q", m.NodeID)
+	}
 	if m.Empty || !m.Private {
 		t.Fatalf("flags empty=%v private=%v", m.Empty, m.Private)
+	}
+}
+
+func TestMapPRRunJobNodeIDs(t *testing.T) {
+	pr := mapPR(ghPR{ID: 10, NodeID: "PR_kwDO1", Number: 3, Title: "t", State: "open"})
+	if pr.ExternalID != 10 || pr.NodeID != "PR_kwDO1" {
+		t.Fatalf("pr=%+v", pr)
+	}
+	run := mapRun(ghRun{ID: 55, NodeID: "WFR_kwDO2", Name: "CI", Status: "completed", Conclusion: "success", Path: ".github/workflows/ci.yaml", RunAttempt: 1})
+	if run.ExternalID != 55 || run.NodeID != "WFR_kwDO2" {
+		t.Fatalf("run=%+v", run)
+	}
+	job := mapJob(ghJob{ID: 77, NodeID: "J_kwDO3", Name: "build", Status: "completed", Conclusion: "success"})
+	if job.ExternalID != 77 || job.NodeID != "J_kwDO3" {
+		t.Fatalf("job=%+v", job)
 	}
 }
 

@@ -17,7 +17,7 @@ If `GITSEER_ENCRYPTION_KEY` / `auth.encryption_key_file` is already set, the enc
 
 ### 2. Choose Forge
 
-Pick Gitea or GitHub (GitLab / Bitbucket Coming Soon). Additional forges can be added later under Settings → Integration.
+Pick Gitea, GitHub, GitLab, Bitbucket, or Forgejo. Additional forges can be added later under Settings → Integration.
 
 ### 3. Connect
 

@@ -181,20 +181,7 @@ INSERT INTO instances (
 
 // ListInstances returns all forge instances ordered by id.
 func (s *Store) ListInstances(ctx context.Context) ([]models.Instance, error) {
-	rows, err := s.query(ctx, `SELECT`+instanceSelectCols+` FROM instances ORDER BY id ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []models.Instance
-	for rows.Next() {
-		inst, err := scanInstance(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *inst)
-	}
-	return out, rows.Err()
+	return s.listInstancesSQLC(ctx)
 }
 
 // UpdateInstanceSecretsByID updates an existing instance by id (including base_url).

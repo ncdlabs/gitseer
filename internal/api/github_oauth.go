@@ -81,12 +81,20 @@ func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 			"is_bootstrap_admin": u.IsBootstrapAdmin,
 			"has_gitea":          u.GiteaUserID != nil,
 			"has_github":         u.GitHubUserID != nil,
+			"has_gitlab":         u.GitLabUserID != nil,
+			"has_bitbucket":      u.BitbucketUserID != nil,
 		}
 		if u.InstanceID != nil {
 			row["gitea_instance_id"] = *u.InstanceID
 		}
 		if u.GitHubInstanceID != nil {
 			row["github_instance_id"] = *u.GitHubInstanceID
+		}
+		if u.GitLabInstanceID != nil {
+			row["gitlab_instance_id"] = *u.GitLabInstanceID
+		}
+		if u.BitbucketInstanceID != nil {
+			row["bitbucket_instance_id"] = *u.BitbucketInstanceID
 		}
 		tokenInst, _ := h.store.ListUserTokenInstanceIDs(r.Context(), u.ID)
 		row["token_instance_ids"] = tokenInst

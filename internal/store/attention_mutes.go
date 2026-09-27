@@ -104,14 +104,12 @@ func (s *Store) DeleteAttentionMutesByFingerprint(ctx context.Context, fingerpri
 	return err
 }
 
-// ClearUntilResolvedMutes removes fingerprint mutes with until_at IS NULL (condition cleared).
 func (s *Store) ClearUntilResolvedMutes(ctx context.Context, fingerprint string) error {
 	fp := strings.TrimSpace(fingerprint)
 	if fp == "" {
 		return nil
 	}
-	_, err := s.exec(ctx, `DELETE FROM attention_mutes WHERE fingerprint=? AND until_at IS NULL`, fp)
-	return err
+	return s.clearUntilResolvedMutesSQLC(ctx, fp)
 }
 
 // IsAttentionMuted reports whether a matching active mute exists.

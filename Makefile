@@ -1,11 +1,15 @@
-.PHONY: deps frontend frontend-dev build test run stop restart tidy lint install
+.PHONY: deps frontend frontend-dev build test run stop restart tidy lint install sqlc
 
 GO ?= go
 BIN ?= bin/gitseer
+SQLC ?= sqlc
 
 deps:
 	$(GO) mod tidy
 	cd web && npm install
+
+sqlc:
+	$(SQLC) generate
 
 frontend:
 	cd web && npm install && npm run build

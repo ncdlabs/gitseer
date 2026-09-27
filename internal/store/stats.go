@@ -38,10 +38,17 @@ func (s *Store) StatsReport(ctx context.Context, userID int64, bootstrapAll bool
 //	duration — run_duration only (nil when snapshot / no samples)
 //	all      — full report (same as StatsReport)
 func (s *Store) StatsBySection(ctx context.Context, userID int64, bootstrapAll bool, since time.Time, snapshot bool, section string) (*models.StatsReport, error) {
+	return s.StatsBySectionScoped(ctx, userID, bootstrapAll, since, snapshot, section, DashboardScope{})
+}
+
+// StatsBySectionScoped is StatsBySection with optional org/owner/team filter.
+func (s *Store) StatsBySectionScoped(ctx context.Context, userID int64, bootstrapAll bool, since time.Time, snapshot bool, section string, scope DashboardScope) (*models.StatsReport, error) {
 	if err := requireListScope(userID, bootstrapAll); err != nil {
 		return nil, err
 	}
 	join, args := statsAuthzJoin(userID, bootstrapAll)
+	filter, fArgs := scope.normalize().repoFilterSQL()
+	args = append(args, fArgs...)
 
 	out := emptyStatsReport()
 	if !snapshot {
@@ -50,7 +57,7 @@ func (s *Store) StatsBySection(ctx context.Context, userID int64, bootstrapAll b
 
 	switch section {
 	case StatsSectionCore:
-		if err := s.statsFillCore(ctx, out, join, args); err != nil {
+		if err := s.statsFillCore(ctx, out, join, args, filter); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -58,7 +65,7 @@ func (s *Store) StatsBySection(ctx context.Context, userID int64, bootstrapAll b
 		if snapshot {
 			return out, nil
 		}
-		if err := s.statsFillTrends(ctx, out, join, args, since); err != nil {
+		if err := s.statsFillTrends(ctx, out, join, args, since, filter); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -66,21 +73,21 @@ func (s *Store) StatsBySection(ctx context.Context, userID int64, bootstrapAll b
 		if snapshot {
 			return out, nil
 		}
-		if err := s.statsFillDuration(ctx, out, join, args, since); err != nil {
+		if err := s.statsFillDuration(ctx, out, join, args, since, filter); err != nil {
 			return nil, err
 		}
 		return out, nil
 	case StatsSectionAll, "":
-		if err := s.statsFillCore(ctx, out, join, args); err != nil {
+		if err := s.statsFillCore(ctx, out, join, args, filter); err != nil {
 			return nil, err
 		}
 		if snapshot {
 			return out, nil
 		}
-		if err := s.statsFillTrends(ctx, out, join, args, since); err != nil {
+		if err := s.statsFillTrends(ctx, out, join, args, since, filter); err != nil {
 			return nil, err
 		}
-		if err := s.statsFillDuration(ctx, out, join, args, since); err != nil {
+		if err := s.statsFillDuration(ctx, out, join, args, since, filter); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -108,12 +115,12 @@ func statsAuthzJoin(userID int64, bootstrapAll bool) (join string, args []any) {
 	return join, args
 }
 
-func (s *Store) statsFillCore(ctx context.Context, out *models.StatsReport, join string, args []any) error {
+func (s *Store) statsFillCore(ctx context.Context, out *models.StatsReport, join string, args []any, filter string) error {
 	var err error
 	out.PRCIStates, err = s.statsCountBuckets(ctx, `
 SELECT COALESCE(NULLIF(pr.ci_state, ''), 'unknown') AS k, COUNT(*)
 FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND pr.state = 'open'
+WHERE r.deleted_at IS NULL AND pr.state = 'open'`+filter+`
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args)
 	if err != nil {
@@ -123,7 +130,7 @@ ORDER BY COUNT(*) DESC, k`, args)
 	out.AttentionBySeverity, err = s.statsCountBuckets(ctx, `
 SELECT a.severity AS k, COUNT(*)
 FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
+WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL`+filter+`
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args)
 	if err != nil {
@@ -133,13 +140,13 @@ ORDER BY COUNT(*) DESC, k`, args)
 	out.AttentionByType, err = s.statsCountBuckets(ctx, `
 SELECT a.type AS k, COUNT(*)
 FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
+WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL`+filter+`
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args)
 	return err
 }
 
-func (s *Store) statsFillTrends(ctx context.Context, out *models.StatsReport, join string, args []any, since time.Time) error {
+func (s *Store) statsFillTrends(ctx context.Context, out *models.StatsReport, join string, args []any, since time.Time, filter string) error {
 	now := time.Now().UTC()
 	sinceUTC := since.UTC()
 	sinceStr := formatTime(sinceUTC)
@@ -147,7 +154,7 @@ func (s *Store) statsFillTrends(ctx context.Context, out *models.StatsReport, jo
 	out.RunsByDay = make([]models.DayRunBucket, 0, len(days))
 	out.PRsByDay = make([]models.DayPRBucket, 0, len(days))
 
-	runByDay, err := s.statsRunsByDay(ctx, join, args, sinceStr)
+	runByDay, err := s.statsRunsByDay(ctx, join, args, sinceStr, filter)
 	if err != nil {
 		return err
 	}
@@ -160,7 +167,7 @@ func (s *Store) statsFillTrends(ctx context.Context, out *models.StatsReport, jo
 	out.RunConclusions, err = s.statsCountBuckets(ctx, `
 SELECT COALESCE(NULLIF(wr.conclusion, ''), 'unknown') AS k, COUNT(*)
 FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id `+join+`
-WHERE r.deleted_at IS NULL
+WHERE r.deleted_at IS NULL`+filter+`
   AND COALESCE(wr.completed_at, wr.started_at) IS NOT NULL
   AND COALESCE(wr.completed_at, wr.started_at) >= ?
 GROUP BY k
@@ -172,7 +179,7 @@ ORDER BY COUNT(*) DESC, k`, args, sinceStr)
 	prOpened, err := s.statsDayCounts(ctx, `
 SELECT substr(pr.created_at, 1, 10) AS day, COUNT(*)
 FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND pr.created_at IS NOT NULL AND pr.created_at >= ?
+WHERE r.deleted_at IS NULL`+filter+` AND pr.created_at IS NOT NULL AND pr.created_at >= ?
 GROUP BY day`, args, sinceStr)
 	if err != nil {
 		return err
@@ -180,7 +187,7 @@ GROUP BY day`, args, sinceStr)
 	prMerged, err := s.statsDayCounts(ctx, `
 SELECT substr(pr.merged_at, 1, 10) AS day, COUNT(*)
 FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
-WHERE r.deleted_at IS NULL AND pr.merged_at IS NOT NULL AND pr.merged_at >= ?
+WHERE r.deleted_at IS NULL`+filter+` AND pr.merged_at IS NOT NULL AND pr.merged_at >= ?
 GROUP BY day`, args, sinceStr)
 	if err != nil {
 		return err
@@ -188,7 +195,7 @@ GROUP BY day`, args, sinceStr)
 	prClosed, err := s.statsDayCounts(ctx, `
 SELECT substr(pr.closed_at, 1, 10) AS day, COUNT(*)
 FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
-WHERE r.deleted_at IS NULL
+WHERE r.deleted_at IS NULL`+filter+`
   AND pr.closed_at IS NOT NULL AND pr.merged_at IS NULL AND pr.closed_at >= ?
 GROUP BY day`, args, sinceStr)
 	if err != nil {
@@ -205,13 +212,13 @@ GROUP BY day`, args, sinceStr)
 	return nil
 }
 
-func (s *Store) statsFillDuration(ctx context.Context, out *models.StatsReport, join string, args []any, since time.Time) error {
+func (s *Store) statsFillDuration(ctx context.Context, out *models.StatsReport, join string, args []any, since time.Time, filter string) error {
 	var err error
-	out.RunDuration, err = s.statsRunDuration(ctx, join, args, formatTime(since.UTC()))
+	out.RunDuration, err = s.statsRunDuration(ctx, join, args, formatTime(since.UTC()), filter)
 	return err
 }
 
-func (s *Store) statsRunsByDay(ctx context.Context, join string, baseArgs []any, sinceStr string) (map[string]models.DayRunBucket, error) {
+func (s *Store) statsRunsByDay(ctx context.Context, join string, baseArgs []any, sinceStr, filter string) (map[string]models.DayRunBucket, error) {
 	q := `
 SELECT substr(COALESCE(wr.completed_at, wr.started_at), 1, 10) AS day,
   SUM(CASE WHEN wr.conclusion = 'success' THEN 1 ELSE 0 END),
@@ -219,7 +226,7 @@ SELECT substr(COALESCE(wr.completed_at, wr.started_at), 1, 10) AS day,
   SUM(CASE WHEN wr.conclusion = 'cancelled' THEN 1 ELSE 0 END),
   SUM(CASE WHEN wr.conclusion NOT IN ('success', 'failure', 'cancelled') THEN 1 ELSE 0 END)
 FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id ` + join + `
-WHERE r.deleted_at IS NULL
+WHERE r.deleted_at IS NULL` + filter + `
   AND COALESCE(wr.completed_at, wr.started_at) IS NOT NULL
   AND COALESCE(wr.completed_at, wr.started_at) >= ?
 GROUP BY day`
@@ -279,11 +286,11 @@ func (s *Store) statsCountBuckets(ctx context.Context, query string, baseArgs []
 	return out, rows.Err()
 }
 
-func (s *Store) statsRunDuration(ctx context.Context, join string, baseArgs []any, sinceStr string) (*models.DurationStats, error) {
+func (s *Store) statsRunDuration(ctx context.Context, join string, baseArgs []any, sinceStr, filter string) (*models.DurationStats, error) {
 	q := `
 SELECT wr.started_at, wr.completed_at
 FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id ` + join + `
-WHERE r.deleted_at IS NULL
+WHERE r.deleted_at IS NULL` + filter + `
   AND wr.started_at IS NOT NULL AND wr.completed_at IS NOT NULL
   AND wr.status = 'completed'
   AND wr.completed_at >= ?`

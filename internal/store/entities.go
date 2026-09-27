@@ -65,12 +65,14 @@ func (s *Store) UpsertPullRequest(ctx context.Context, repoID int64, pr models.P
 	}
 	_, err := s.exec(ctx, `
 INSERT INTO pull_requests (
-  repo_id, external_id, number, title, body_excerpt, author_login, author_external_id,
+  repo_id, external_id, node_id, number, title, body_excerpt, author_login, author_external_id,
   source_branch, target_branch, head_sha, base_sha, state, draft, mergeable, mergeable_state,
   review_state, ci_state, html_url, created_at, updated_at, closed_at, merged_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(repo_id, number) DO UPDATE SET
-  external_id=excluded.external_id, title=excluded.title, body_excerpt=excluded.body_excerpt,
+  external_id=excluded.external_id,
+  node_id=CASE WHEN excluded.node_id != '' THEN excluded.node_id ELSE pull_requests.node_id END,
+  title=excluded.title, body_excerpt=excluded.body_excerpt,
   author_login=excluded.author_login, author_external_id=excluded.author_external_id,
   source_branch=excluded.source_branch, target_branch=excluded.target_branch,
   head_sha=excluded.head_sha, base_sha=excluded.base_sha, state=excluded.state, draft=excluded.draft,
@@ -91,7 +93,7 @@ ON CONFLICT(repo_id, number) DO UPDATE SET
   merged_at=COALESCE(excluded.merged_at, pull_requests.merged_at)
 WHERE pull_requests.updated_at IS NULL
    OR (excluded.updated_at IS NOT NULL AND excluded.updated_at >= pull_requests.updated_at)
-`, repoID, pr.ExternalID, pr.Number, pr.Title, pr.BodyExcerpt, pr.AuthorLogin, nullInt64(pr.AuthorExternalID),
+`, repoID, pr.ExternalID, pr.NodeID, pr.Number, pr.Title, pr.BodyExcerpt, pr.AuthorLogin, nullInt64(pr.AuthorExternalID),
 		pr.SourceBranch, pr.TargetBranch, pr.HeadSHA, pr.BaseSHA, pr.State, boolToInt(pr.Draft),
 		nullBool(pr.Mergeable), pr.MergeableState, pr.ReviewState, pr.CIState, pr.HTMLURL,
 		formatTimePtr(pr.CreatedAt), formatTimePtr(pr.UpdatedAt), formatTimePtr(pr.ClosedAt), formatTimePtr(pr.MergedAt))
@@ -131,7 +133,7 @@ func (s *Store) ListWorkflowRunsByCommitSHA(ctx context.Context, repoID int64, c
 		return nil, nil
 	}
 	rows, err := s.query(ctx, `
-SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
+SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.node_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name
 FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id
@@ -169,7 +171,7 @@ func nullBool(v *bool) any {
 
 func (s *Store) GetPullRequestByNumber(ctx context.Context, repoID, number int64) (*models.PullRequest, error) {
 	row := s.queryRow(ctx, `
-SELECT pr.id, pr.repo_id, pr.external_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
+SELECT pr.id, pr.repo_id, pr.external_id, pr.node_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
        pr.source_branch, pr.target_branch, pr.head_sha, pr.base_sha, pr.state, pr.draft, pr.mergeable, pr.mergeable_state,
        pr.review_state, pr.ci_state, pr.html_url, pr.created_at, pr.updated_at, pr.closed_at, pr.merged_at,
        r.owner, r.name, r.full_name
@@ -196,7 +198,7 @@ func scanPRList(row scanner, withForge bool) (*models.PullRequest, error) {
 	var instanceID int64
 	var instanceName string
 	dest := []any{
-		&pr.ID, &pr.RepoID, &pr.ExternalID, &pr.Number, &pr.Title, &pr.BodyExcerpt, &pr.AuthorLogin, &authorID,
+		&pr.ID, &pr.RepoID, &pr.ExternalID, &pr.NodeID, &pr.Number, &pr.Title, &pr.BodyExcerpt, &pr.AuthorLogin, &authorID,
 		&pr.SourceBranch, &pr.TargetBranch, &pr.HeadSHA, &pr.BaseSHA, &pr.State, &draft, &mergeable, &pr.MergeableState,
 		&pr.ReviewState, &pr.CIState, &pr.HTMLURL, &created, &updated, &closed, &merged,
 		&pr.RepoOwner, &pr.RepoName, &pr.RepoFull,
@@ -302,7 +304,7 @@ func (s *Store) ListPullRequests(ctx context.Context, opts ListPRsOpts) ([]model
 	args = append(args, opts.Limit, opts.Offset)
 	listJoin := join + instJoin
 	rows, err := s.query(ctx, `
-SELECT pr.id, pr.repo_id, pr.external_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
+SELECT pr.id, pr.repo_id, pr.external_id, pr.node_id, pr.number, pr.title, pr.body_excerpt, pr.author_login, pr.author_external_id,
        pr.source_branch, pr.target_branch, pr.head_sha, pr.base_sha, pr.state, pr.draft, pr.mergeable, pr.mergeable_state,
        pr.review_state, pr.ci_state, pr.html_url, pr.created_at, pr.updated_at, pr.closed_at, pr.merged_at,
        r.owner, r.name, r.full_name,
@@ -337,11 +339,12 @@ func (s *Store) UpsertWorkflowRun(ctx context.Context, repoID int64, run models.
 	}
 	_, err := s.exec(ctx, `
 INSERT INTO workflow_runs (
-  repo_id, external_id, name, event, branch, commit_sha, status, conclusion,
+  repo_id, external_id, node_id, name, event, branch, commit_sha, status, conclusion,
   upstream_status, upstream_conclusion, actor_login, html_url, workflow_path,
   started_at, completed_at, run_attempt
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(repo_id, external_id) DO UPDATE SET
+  node_id=CASE WHEN excluded.node_id != '' THEN excluded.node_id ELSE workflow_runs.node_id END,
   name=excluded.name, event=excluded.event, branch=excluded.branch, commit_sha=excluded.commit_sha,
   status=excluded.status, conclusion=excluded.conclusion, upstream_status=excluded.upstream_status,
   upstream_conclusion=excluded.upstream_conclusion, actor_login=excluded.actor_login, html_url=excluded.html_url,
@@ -367,7 +370,7 @@ WHERE excluded.run_attempt > workflow_runs.run_attempt
        AND excluded.status != 'completed'
      )
    )
-`, repoID, run.ExternalID, run.Name, run.Event, run.Branch, run.CommitSHA, run.Status, run.Conclusion,
+`, repoID, run.ExternalID, run.NodeID, run.Name, run.Event, run.Branch, run.CommitSHA, run.Status, run.Conclusion,
 		run.UpstreamStatus, run.UpstreamConclusion, run.ActorLogin, run.HTMLURL, run.WorkflowPath,
 		formatTimePtr(run.StartedAt), formatTimePtr(run.CompletedAt), run.RunAttempt)
 	if err != nil {
@@ -418,7 +421,7 @@ func runStatusRank(status string) int {
 
 func (s *Store) GetWorkflowRunByExternalID(ctx context.Context, repoID, externalID int64) (*models.WorkflowRun, error) {
 	row := s.queryRow(ctx, `
-SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
+SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.node_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name
 FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id
@@ -428,7 +431,7 @@ WHERE wr.repo_id=? AND wr.external_id=?`, repoID, externalID)
 
 func (s *Store) GetWorkflowRunByID(ctx context.Context, id int64) (*models.WorkflowRun, error) {
 	row := s.queryRow(ctx, `
-SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
+SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.node_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name,
        COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), r.instance_id, COALESCE(i.name, '')
@@ -442,7 +445,7 @@ WHERE wr.id=?`, id)
 // ListInFlightWorkflowRunsByRepo returns queued/waiting/running runs for a repository.
 func (s *Store) ListInFlightWorkflowRunsByRepo(ctx context.Context, repoID int64) ([]models.WorkflowRun, error) {
 	rows, err := s.query(ctx, `
-SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
+SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.node_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name
 FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id
@@ -513,7 +516,7 @@ func scanRunList(row scanner, withForge bool) (*models.WorkflowRun, error) {
 	var instanceID int64
 	var instanceName string
 	dest := []any{
-		&run.ID, &run.RepoID, &wfID, &run.ExternalID, &run.Name, &run.Event, &run.Branch, &run.CommitSHA,
+		&run.ID, &run.RepoID, &wfID, &run.ExternalID, &run.NodeID, &run.Name, &run.Event, &run.Branch, &run.CommitSHA,
 		&run.Status, &run.Conclusion, &run.UpstreamStatus, &run.UpstreamConclusion, &run.ActorLogin, &run.HTMLURL,
 		&run.WorkflowPath, &started, &completed, &run.RunAttempt, &run.RepoOwner, &run.RepoName, &run.RepoFull,
 	}
@@ -623,7 +626,7 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, opts ListRunsOpts) ([]mode
 	args = append(args, opts.Limit, opts.Offset)
 	listJoin := join + instJoin
 	rows, err := s.query(ctx, `
-SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.name, wr.event, wr.branch, wr.commit_sha,
+SELECT wr.id, wr.repo_id, wr.workflow_id, wr.external_id, wr.node_id, wr.name, wr.event, wr.branch, wr.commit_sha,
        wr.status, wr.conclusion, wr.upstream_status, wr.upstream_conclusion, wr.actor_login, wr.html_url,
        wr.workflow_path, wr.started_at, wr.completed_at, wr.run_attempt, r.owner, r.name, r.full_name,
        COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), r.instance_id, COALESCE(i.name, '')
@@ -654,10 +657,11 @@ func (s *Store) UpsertJob(ctx context.Context, repoID, runID int64, job models.J
 	}
 	_, err := s.exec(ctx, `
 INSERT INTO jobs (
-  run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
-  runner_id, runner_name, html_url, started_at, completed_at, steps_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  run_id, repo_id, external_id, node_id, name, status, conclusion, upstream_status, upstream_conclusion,
+  runner_id, runner_name, html_url, started_at, completed_at, steps_json, labels_json, message
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(repo_id, external_id) DO UPDATE SET
+  node_id=CASE WHEN excluded.node_id != '' THEN excluded.node_id ELSE jobs.node_id END,
   run_id=excluded.run_id, name=excluded.name, status=excluded.status, conclusion=excluded.conclusion,
   upstream_status=excluded.upstream_status, upstream_conclusion=excluded.upstream_conclusion,
   runner_id=excluded.runner_id, runner_name=excluded.runner_name, html_url=excluded.html_url,
@@ -669,6 +673,14 @@ ON CONFLICT(repo_id, external_id) DO UPDATE SET
   steps_json=CASE
     WHEN excluded.steps_json IS NOT NULL AND excluded.steps_json != '' THEN excluded.steps_json
     ELSE jobs.steps_json
+  END,
+  labels_json=CASE
+    WHEN excluded.labels_json IS NOT NULL AND excluded.labels_json != '' THEN excluded.labels_json
+    ELSE jobs.labels_json
+  END,
+  message=CASE
+    WHEN excluded.message != '' THEN excluded.message
+    ELSE jobs.message
   END
 WHERE CASE excluded.status
     WHEN 'queued' THEN 1 WHEN 'waiting' THEN 2 WHEN 'running' THEN 3 WHEN 'completed' THEN 4 ELSE 0
@@ -680,8 +692,9 @@ WHERE CASE excluded.status
     AND excluded.completed_at IS NULL
     AND excluded.status != 'completed'
   )
-`, runID, repoID, job.ExternalID, job.Name, job.Status, job.Conclusion, job.UpstreamStatus, job.UpstreamConclusion,
-		nullInt64(job.RunnerID), job.RunnerName, job.HTMLURL, formatTimePtr(job.StartedAt), formatTimePtr(job.CompletedAt), nullString(job.StepsJSON))
+`, runID, repoID, job.ExternalID, job.NodeID, job.Name, job.Status, job.Conclusion, job.UpstreamStatus, job.UpstreamConclusion,
+		nullInt64(job.RunnerID), job.RunnerName, job.HTMLURL, formatTimePtr(job.StartedAt), formatTimePtr(job.CompletedAt),
+		nullString(job.StepsJSON), nullString(job.LabelsJSON), job.Message)
 	if err != nil {
 		return nil, err
 	}
@@ -734,39 +747,15 @@ func nullString(v *string) any {
 }
 
 func (s *Store) GetJobByExternalID(ctx context.Context, repoID, externalID int64) (*models.Job, error) {
-	row := s.queryRow(ctx, `
-SELECT id, run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
-       runner_id, runner_name, html_url, started_at, completed_at, steps_json
-FROM jobs WHERE repo_id=? AND external_id=?`, repoID, externalID)
-	return scanJob(row)
+	return s.getJobSQLCByExternalID(ctx, repoID, externalID)
 }
 
 func (s *Store) GetJobByID(ctx context.Context, id int64) (*models.Job, error) {
-	row := s.queryRow(ctx, `
-SELECT id, run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
-       runner_id, runner_name, html_url, started_at, completed_at, steps_json
-FROM jobs WHERE id=?`, id)
-	return scanJob(row)
+	return s.getJobSQLCByID(ctx, id)
 }
 
 func (s *Store) ListJobsByRunID(ctx context.Context, runID int64) ([]models.Job, error) {
-	rows, err := s.query(ctx, `
-SELECT id, run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
-       runner_id, runner_name, html_url, started_at, completed_at, steps_json
-FROM jobs WHERE run_id=? ORDER BY id`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []models.Job
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *j)
-	}
-	return out, rows.Err()
+	return s.listJobsSQLCByRunID(ctx, runID)
 }
 
 // ListJobsByRunIDs returns jobs grouped by run ID. Empty map when runIDs is empty.
@@ -775,37 +764,70 @@ func (s *Store) ListJobsByRunIDs(ctx context.Context, runIDs []int64) (map[int64
 	if len(runIDs) == 0 {
 		return out, nil
 	}
-	ph := make([]string, len(runIDs))
-	args := make([]any, len(runIDs))
-	for i, id := range runIDs {
-		ph[i] = "?"
-		args[i] = id
-	}
-	rows, err := s.query(ctx, `
-SELECT id, run_id, repo_id, external_id, name, status, conclusion, upstream_status, upstream_conclusion,
-       runner_id, runner_name, html_url, started_at, completed_at, steps_json
+	var rows []models.Job
+	var err error
+	if s.driver == "postgres" {
+		raw, e := s.pg.ListJobsByRunIDs(ctx, runIDs)
+		err = e
+		if err == nil {
+			rows = make([]models.Job, 0, len(raw))
+			for _, r := range raw {
+				rows = append(rows, *mapJobFields(r.ID, r.RunID, r.RepoID, r.ExternalID, r.NodeID, r.Name, r.Status, r.Conclusion, r.UpstreamStatus, r.UpstreamConclusion,
+					r.RunnerID, r.RunnerName, r.HtmlUrl, r.StartedAt, r.CompletedAt, r.StepsJson, r.LabelsJson, r.Message))
+			}
+		}
+	} else if s.sqlite != nil {
+		raw, e := s.sqlite.ListJobsByRunIDs(ctx, runIDs)
+		err = e
+		if err == nil {
+			rows = make([]models.Job, 0, len(raw))
+			for _, r := range raw {
+				rows = append(rows, *mapJobFields(r.ID, r.RunID, r.RepoID, r.ExternalID, r.NodeID, r.Name, r.Status, r.Conclusion, r.UpstreamStatus, r.UpstreamConclusion,
+					r.RunnerID, r.RunnerName, r.HtmlUrl, r.StartedAt, r.CompletedAt, r.StepsJson, r.LabelsJson, r.Message))
+			}
+		}
+	} else {
+		// Fallback for stores without sqlc querier.
+		ph := make([]string, len(runIDs))
+		args := make([]any, len(runIDs))
+		for i, id := range runIDs {
+			ph[i] = "?"
+			args[i] = id
+		}
+		qrows, e := s.query(ctx, `
+SELECT id, run_id, repo_id, external_id, node_id, name, status, conclusion, upstream_status, upstream_conclusion,
+       runner_id, runner_name, html_url, started_at, completed_at, steps_json, labels_json, message
 FROM jobs WHERE run_id IN (`+strings.Join(ph, ",")+`) ORDER BY id`, args...)
+		if e != nil {
+			return nil, e
+		}
+		defer qrows.Close()
+		for qrows.Next() {
+			j, e := scanJob(qrows)
+			if e != nil {
+				return nil, e
+			}
+			out[j.RunID] = append(out[j.RunID], *j)
+		}
+		return out, qrows.Err()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, err
-		}
-		out[j.RunID] = append(out[j.RunID], *j)
+	for i := range rows {
+		j := rows[i]
+		out[j.RunID] = append(out[j.RunID], j)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func scanJob(row scanner) (*models.Job, error) {
 	var j models.Job
 	var runnerID sql.NullInt64
-	var started, completed, steps sql.NullString
+	var started, completed, steps, labels sql.NullString
 	if err := row.Scan(
-		&j.ID, &j.RunID, &j.RepoID, &j.ExternalID, &j.Name, &j.Status, &j.Conclusion, &j.UpstreamStatus, &j.UpstreamConclusion,
-		&runnerID, &j.RunnerName, &j.HTMLURL, &started, &completed, &steps,
+		&j.ID, &j.RunID, &j.RepoID, &j.ExternalID, &j.NodeID, &j.Name, &j.Status, &j.Conclusion, &j.UpstreamStatus, &j.UpstreamConclusion,
+		&runnerID, &j.RunnerName, &j.HTMLURL, &started, &completed, &steps, &labels, &j.Message,
 	); err != nil {
 		return nil, err
 	}
@@ -819,22 +841,19 @@ func scanJob(row scanner) (*models.Job, error) {
 		s := steps.String
 		j.StepsJSON = &s
 	}
+	if labels.Valid {
+		s := labels.String
+		j.LabelsJSON = &s
+	}
 	return &j, nil
 }
 
 func (s *Store) UpsertWorkflowGraph(ctx context.Context, repoID int64, path, commitSHA, nodesJSON string) error {
-	_, err := s.exec(ctx, `
-INSERT INTO workflow_graphs (repo_id, path, commit_sha, nodes_json)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(repo_id, path, commit_sha) DO UPDATE SET nodes_json=excluded.nodes_json
-`, repoID, path, commitSHA, nodesJSON)
-	return err
+	return s.upsertWorkflowGraphSQLC(ctx, repoID, path, commitSHA, nodesJSON)
 }
 
 func (s *Store) GetWorkflowGraph(ctx context.Context, repoID int64, path, commitSHA string) (string, error) {
-	var nodes string
-	err := s.queryRow(ctx, `SELECT nodes_json FROM workflow_graphs WHERE repo_id=? AND path=? AND commit_sha=?`, repoID, path, commitSHA).Scan(&nodes)
-	return nodes, err
+	return s.getWorkflowGraphSQLC(ctx, repoID, path, commitSHA)
 }
 
 func (s *Store) UpsertAttention(ctx context.Context, item models.AttentionItem) (*models.AttentionItem, error) {
@@ -865,9 +884,7 @@ WHERE a.fingerprint=?`, item.Fingerprint)
 }
 
 func (s *Store) ResolveAttentionByFingerprint(ctx context.Context, fingerprint string) error {
-	now := formatTime(time.Now().UTC())
-	_, err := s.exec(ctx, `UPDATE attention_items SET resolved_at=?, updated_at=? WHERE fingerprint=? AND resolved_at IS NULL`, now, now, fingerprint)
-	return err
+	return s.resolveAttentionSQLC(ctx, fingerprint)
 }
 
 const attentionEntityJoins = `
@@ -1029,87 +1046,10 @@ LIMIT ? OFFSET ?`, args...)
 // When snapshot is true (dashboard "Now"), counters reflect current open/running state with no
 // lookback: open PRs, open attention, and running runs are unfiltered; failed runs count only
 // failures that still have an open attention item (not historical failure volume).
-func (s *Store) Summary(ctx context.Context, userID int64, bootstrapAll bool, since *time.Time, snapshot bool) (*models.Summary, error) {
-	if err := requireListScope(userID, bootstrapAll); err != nil {
-		return nil, err
-	}
-	if snapshot {
-		since = nil
-	}
-	join := ""
-	args := []any{}
-	if userID > 0 && !bootstrapAll {
-		join = "INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
-		args = append(args, userID)
-	}
-	sum := &models.Summary{}
-	if since != nil {
-		sum.Since = formatTime(since.UTC())
-	}
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM repositories r `+join+` WHERE r.deleted_at IS NULL`, args...).Scan(&sum.Repositories); err != nil {
-		return nil, err
-	}
-
-	prSQL := `
-SELECT COUNT(*) FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id ` + join + `
-WHERE r.deleted_at IS NULL AND pr.state = 'open'`
-	prArgs := append([]any{}, args...)
-	if since != nil {
-		prSQL += ` AND COALESCE(pr.created_at, pr.updated_at) >= ?`
-		prArgs = append(prArgs, sum.Since)
-	}
-	if err := s.queryRow(ctx, prSQL, prArgs...).Scan(&sum.OpenPRs); err != nil {
-		return nil, err
-	}
-
-	attSQL := `
-SELECT COUNT(*) FROM attention_items a JOIN repositories r ON r.id = a.repo_id ` + join + `
-WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL`
-	attArgs := append([]any{}, args...)
-	if since != nil {
-		attSQL += ` AND a.opened_at >= ?`
-		attArgs = append(attArgs, sum.Since)
-	}
-	if err := s.queryRow(ctx, attSQL, attArgs...).Scan(&sum.Attention); err != nil {
-		return nil, err
-	}
-
-	failSQL := `
-SELECT COUNT(*) FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id ` + join + `
-WHERE r.deleted_at IS NULL AND wr.conclusion = 'failure'`
-	failArgs := append([]any{}, args...)
-	if snapshot {
-		failSQL += `
-AND EXISTS (
-  SELECT 1 FROM attention_items a
-  WHERE a.entity_type = 'workflow_run' AND a.entity_id = wr.id AND a.resolved_at IS NULL
-)`
-	} else if since != nil {
-		failSQL += ` AND COALESCE(wr.completed_at, wr.started_at) >= ?`
-		failArgs = append(failArgs, sum.Since)
-	}
-	if err := s.queryRow(ctx, failSQL, failArgs...).Scan(&sum.FailedRuns); err != nil {
-		return nil, err
-	}
-
-	runSQL := `
-SELECT COUNT(*) FROM workflow_runs wr JOIN repositories r ON r.id = wr.repo_id ` + join + `
-WHERE r.deleted_at IS NULL AND wr.status = 'running'`
-	runArgs := append([]any{}, args...)
-	if since != nil {
-		runSQL += ` AND COALESCE(wr.started_at, wr.completed_at) >= ?`
-		runArgs = append(runArgs, sum.Since)
-	}
-	if err := s.queryRow(ctx, runSQL, runArgs...).Scan(&sum.RunningRuns); err != nil {
-		return nil, err
-	}
-	return sum, nil
-}
+// Summary lives in product_surfaces.go (Summary / SummaryScoped).
 
 func (s *Store) CountWorkflowRuns(ctx context.Context) (int64, error) {
-	var n int64
-	err := s.queryRow(ctx, `SELECT COUNT(*) FROM workflow_runs`).Scan(&n)
-	return n, err
+	return s.countWorkflowRunsSQLC(ctx)
 }
 
 func (s *Store) UserCanAccessRepo(ctx context.Context, userID, repoID int64) (bool, error) {
@@ -1292,7 +1232,7 @@ LEFT JOIN instances i ON i.id = o.instance_id`
 	clause := strings.Join(where, " AND ")
 	args = append(args, opts.Limit)
 	rows, err := s.query(ctx, `
-SELECT DISTINCT o.id, o.instance_id, o.external_id, o.name, o.full_name, o.avatar_url, o.synced_at,
+SELECT DISTINCT o.id, o.instance_id, o.external_id, o.node_id, o.name, o.full_name, o.avatar_url, o.synced_at,
        COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea'), COALESCE(i.name, '')
 `+join+`
 WHERE `+clause+`
@@ -1308,7 +1248,7 @@ LIMIT ?`, args...)
 		var synced sql.NullString
 		var forgeType, instanceName sql.NullString
 		if err := rows.Scan(
-			&o.ID, &o.InstanceID, &o.ExternalID, &o.Name, &o.FullName, &o.AvatarURL, &synced,
+			&o.ID, &o.InstanceID, &o.ExternalID, &o.NodeID, &o.Name, &o.FullName, &o.AvatarURL, &synced,
 			&forgeType, &instanceName,
 		); err != nil {
 			return nil, err

@@ -7,10 +7,6 @@ import {
   type InstancePatch,
   type InstancePublic,
 } from "../api/client";
-import {
-  githubOrgWebhookSettingsURL,
-  githubRepoWebhookSettingsURL,
-} from "../lib/github";
 import { DEFAULT_GITHUB_URL } from "../lib/product";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ForgeBadge } from "./ForgeBadge";
@@ -56,7 +52,11 @@ function emptyDraft(forgeType: ForgeType = "gitea"): InstanceDraft {
 
 function draftFromPublic(inst: InstancePublic): InstanceDraft {
   return {
-    forge_type: (inst.forge_type === "github" ? "github" : "gitea") as ForgeType,
+    forge_type: (["gitea", "github", "gitlab", "bitbucket", "forgejo"].includes(
+      (inst.forge_type || "").toLowerCase(),
+    )
+      ? (inst.forge_type as ForgeType)
+      : "gitea") as ForgeType,
     name: inst.name || "",
     base_url: inst.base_url || "",
     token: "",
@@ -83,8 +83,10 @@ function sameDraft(a: InstanceDraft, b: InstanceDraft): boolean {
 }
 
 function webhookPath(forgeType: string, id: number): string {
-  const ft = (forgeType || "gitea").toLowerCase() === "github" ? "github" : "gitea";
-  return `/api/webhooks/${ft}/${id}`;
+  const ft = (forgeType || "gitea").toLowerCase();
+  const allowed = new Set(["gitea", "github", "gitlab", "bitbucket", "forgejo"]);
+  const pathType = allowed.has(ft) ? ft : "gitea";
+  return `/api/webhooks/${pathType}/${id}`;
 }
 
 function configuredFlags(inst: InstancePublic): string[] {
@@ -121,8 +123,11 @@ export function InstanceSettingsPanel({ editable }: Props) {
   const [actionHint, setActionHint] = useState<string | null>(null);
 
   const dirty = useMemo(() => !sameDraft(draft, baseline), [draft, baseline]);
-  const isGitea = draft.forge_type === "gitea";
+  const isGitea = draft.forge_type === "gitea" || draft.forge_type === "forgejo";
   const isGitHub = draft.forge_type === "github";
+  const isGitLab = draft.forge_type === "gitlab";
+  const isBitbucket = draft.forge_type === "bitbucket";
+  const showsOAuth = isGitea || isGitLab;
   const dialogOpen = mode === "pick" || mode === "create" || mode === "edit";
 
   useEffect(() => {
@@ -425,13 +430,17 @@ export function InstanceSettingsPanel({ editable }: Props) {
                     <ForgeBadge forgeType="github" />
                     <span>GitHub</span>
                   </button>
-                  <button className="forge-pick__btn" type="button" disabled>
-                    <span className="badge badge--forge">GitLab</span>
-                    <span>Coming Soon</span>
+                  <button className="forge-pick__btn" type="button" onClick={() => pickForge("gitlab")}>
+                    <ForgeBadge forgeType="gitlab" />
+                    <span>GitLab</span>
                   </button>
-                  <button className="forge-pick__btn" type="button" disabled>
-                    <span className="badge badge--forge">Bitbucket</span>
-                    <span>Coming Soon</span>
+                  <button className="forge-pick__btn" type="button" onClick={() => pickForge("bitbucket")}>
+                    <ForgeBadge forgeType="bitbucket" />
+                    <span>Bitbucket</span>
+                  </button>
+                  <button className="forge-pick__btn" type="button" onClick={() => pickForge("forgejo")}>
+                    <ForgeBadge forgeType="forgejo" />
+                    <span>Forgejo</span>
                   </button>
                 </div>
                 <div className="modal__actions">
@@ -472,8 +481,14 @@ export function InstanceSettingsPanel({ editable }: Props) {
                       onChange={(e) => setField("base_url", e.target.value)}
                       placeholder={
                         isGitea
-                          ? "Gitea URL (https://git.example.com)"
-                          : `GitHub URL (${DEFAULT_GITHUB_URL})`
+                          ? draft.forge_type === "forgejo"
+                            ? "Forgejo URL (https://forgejo.example.com)"
+                            : "Gitea URL (https://git.example.com)"
+                          : isGitLab
+                            ? "GitLab URL (https://gitlab.com)"
+                            : isBitbucket
+                              ? "Bitbucket URL (https://bitbucket.org)"
+                              : `GitHub URL (${DEFAULT_GITHUB_URL})`
                       }
                       aria-label={`${forgeLabel(draft.forge_type)} URL`}
                       autoComplete="off"
@@ -486,22 +501,22 @@ export function InstanceSettingsPanel({ editable }: Props) {
                       value={draft.token}
                       onChange={(value) => setField("token", value)}
                       placeholder={
-                        isGitea
+                        isGitHub
                           ? mode === "edit" && editing?.token_configured
-                            ? "Service token (leave blank to keep)"
-                            : "Service token"
-                          : mode === "edit" && editing?.token_configured
                             ? "GitHub PAT (leave blank to keep)"
                             : "GitHub PAT"
+                          : mode === "edit" && editing?.token_configured
+                            ? "Service token (leave blank to keep)"
+                            : "Service token"
                       }
-                      aria-label={isGitea ? "Service token" : "GitHub PAT"}
+                      aria-label={isGitHub ? "GitHub PAT" : "Service token"}
                       autoComplete="new-password"
                     />
                     {isGitea ? (
                       <GiteaPATHelp baseURL={draft.base_url} nested />
-                    ) : (
+                    ) : isGitHub ? (
                       <GitHubPATHelp baseURL={draft.base_url} nested />
-                    )}
+                    ) : null}
                     {mode === "edit" && editing?.token_configured ? (
                       <p className="settings-form__hint">Token is configured. Leave blank to keep it.</p>
                     ) : null}
@@ -530,10 +545,10 @@ export function InstanceSettingsPanel({ editable }: Props) {
                     ) : isGitea ? (
                       <p className="settings-form__hint settings-form__hint--stack">
                         <span>
-                          Shared secret Gitea uses to sign webhook deliveries (HMAC).
+                          Shared secret {forgeLabel(draft.forge_type)} uses to sign webhook deliveries (HMAC).
                         </span>
                         <span>
-                          Paste the same value into the Gitea webhook Secret field.
+                          Paste the same value into the forge webhook Secret field.
                         </span>
                         <span>
                           {mode === "edit" && editing ? (
@@ -551,28 +566,11 @@ export function InstanceSettingsPanel({ editable }: Props) {
                     ) : (
                       <p className="settings-form__hint settings-form__hint--stack">
                         <span>
-                          Shared secret GitHub uses to sign webhook deliveries (HMAC).
+                          Shared secret {forgeLabel(draft.forge_type)} uses to verify webhook deliveries
+                          {isGitLab ? " (token / optional HMAC)" : " (HMAC)"}.
                         </span>
                         <span>
-                          Paste the same value into the GitHub webhook Secret field under{" "}
-                          <a
-                            href={githubOrgWebhookSettingsURL(draft.base_url)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="field-help-row__link"
-                          >
-                            Organization
-                          </a>{" "}
-                          or{" "}
-                          <a
-                            href={githubRepoWebhookSettingsURL(draft.base_url)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="field-help-row__link"
-                          >
-                            Repository
-                          </a>{" "}
-                          → Settings → Webhooks.
+                          Paste the same value into the forge webhook secret field.
                         </span>
                         <span>
                           {mode === "edit" && editing ? (
@@ -589,7 +587,7 @@ export function InstanceSettingsPanel({ editable }: Props) {
                       </p>
                     )}
                   </div>
-                  {(isGitea || isGitHub) && (
+                  {showsOAuth && (
                     <>
                       <div className="settings-form__field">
                         <input

@@ -2707,20 +2707,66 @@ td.empty {
 .dag-fallback {
   padding: var(--space-3) var(--space-4);
   margin: 0;
+  outline: none;
+}
+.dag-fallback:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius);
 }
 .dag-fallback li { margin-bottom: 0.35rem; }
+.dag-fallback__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--radius);
+}
+.dag-fallback__item--focus {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
+}
+.dag-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
+.dag-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.dag-legend__item::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  background: var(--muted);
+}
+.dag-legend__item--ok::before { background: var(--ok); }
+.dag-legend__item--danger::before { background: var(--danger); }
+.dag-legend__item--accent::before { background: var(--accent); }
+.dag-legend__item--warn::before { background: var(--warn); }
+.dag-legend__item--muted::before { background: var(--muted); }
 .dag-host {
   --dag-dot: color-mix(in srgb, var(--line) 70%, transparent);
   --dag-edge: color-mix(in srgb, var(--muted) 55%, var(--line));
-  height: 360px;
+  height: 400px;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg) 70%, var(--bg-elevated));
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .dag-host .react-flow {
   background: transparent;
+  flex: 1;
+  min-height: 0;
 }
 .dag-host .react-flow__node {
   padding: 0;
@@ -2830,6 +2876,33 @@ td.empty {
   display: block;
   margin-top: 0.25rem;
   font-size: var(--font-size-xs);
+}
+.dag-node__status {
+  text-transform: capitalize;
+  font-size: var(--font-size-xs);
+}
+.badge--dag {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elevated));
+}
+.dag-node__status--ok {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  color: var(--ok);
+}
+.dag-node__status--danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  color: var(--danger);
+}
+.dag-node__status--accent {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  color: var(--accent);
+}
+.dag-node__status--warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+  color: var(--warn);
+}
+.dag-node__status--muted {
+  color: var(--muted);
 }
 .dag-node__handle {
   width: 7px !important;
@@ -4022,3 +4095,78 @@ td.empty {
 .brand-img.gitseer-brand--mark .gitseer-brand__emblem { width: 100%; height: 100%; }
 .brand-img.gitseer-brand.login__logo { font-size: clamp(28px, 7vw, 42px); }
 .brand-img.gitseer-brand.setup-wizard__logo { font-size: clamp(23px, 5vw, 30px); }
+
+.dashboard-scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  margin: 0 0 1.25rem;
+}
+.dashboard-scope-bar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 12rem;
+}
+.dashboard-scope-bar__field input {
+  min-width: 14rem;
+}
+.saved-filters--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.saved-filters__chip {
+  display: inline-flex;
+  gap: 0.15rem;
+  align-items: center;
+}
+
+.wallboard {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+}
+.wallboard--gate {
+  max-width: 32rem;
+}
+.wallboard__header {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+.wallboard__gate-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.wallboard__attention {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.wallboard__attention-item {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+.wallboard__attention-item--critical {
+  border-color: var(--danger);
+}
+.wallboard__attention-item--warning {
+  border-color: var(--warn);
+}
+.wallboard-token-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: grid;
+  gap: 0.4rem;
+}

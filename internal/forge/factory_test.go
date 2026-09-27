@@ -11,9 +11,51 @@ import (
 )
 
 func TestNewUnsupportedType(t *testing.T) {
-	_, err := forge.New(forge.Options{ForgeType: "gitlab", BaseURL: "https://gitlab.com", Token: "x"})
+	_, err := forge.New(forge.Options{ForgeType: "sourcehut", BaseURL: "https://git.sr.ht", Token: "x"})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestNewGitLabRegisters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+	_, err := forge.New(forge.Options{
+		ForgeType:           models.ForgeTypeGitLab,
+		BaseURL:             srv.URL,
+		Token:               "t",
+		AllowPrivateNetwork: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewBitbucketRegisters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+	_, err := forge.New(forge.Options{
+		ForgeType:           models.ForgeTypeBitbucket,
+		BaseURL:             srv.URL,
+		Token:               "t",
+		AllowPrivateNetwork: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewForgejoRegisters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+	_, err := forge.New(forge.Options{
+		ForgeType:           models.ForgeTypeForgejo,
+		BaseURL:             srv.URL,
+		Token:               "t",
+		AllowPrivateNetwork: true,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -745,7 +745,7 @@ func TestStatsReportAuthzScope(t *testing.T) {
 	giteaUID := int64(42)
 	user, err := st.UpsertGiteaUser(ctx, &instID, models.User{
 		GiteaUserID: &giteaUID, Login: "alice", Email: "a@example.com", DisplayName: "Alice",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1112,9 +1112,66 @@ func TestUpsertGiteaUserRejectsBootstrapLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	uid := int64(99)
-	_, err = st.UpsertGiteaUser(ctx, nil, models.User{GiteaUserID: &uid, Login: "bootstrap"})
+	_, err = st.UpsertGiteaUser(ctx, nil, models.User{GiteaUserID: &uid, Login: "bootstrap"}, nil)
 	if !errors.Is(err, store.ErrReservedLogin) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestUpsertGiteaUserLinkAttachesWithoutOrphan(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "gitseer-link.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	ghInst, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeGitHub, "gh", "https://api.github.com", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fjInst, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeForgejo, "fj", "https://forgejo.example.com", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghUID := int64(501)
+	target, err := st.UpsertGitHubUser(ctx, ghInst.ID, models.User{
+		GitHubUserID: &ghUID, Login: "linker", Email: "l@example.com",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := st.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCount := len(before)
+
+	fjUID := int64(777)
+	linkID := target.ID
+	linked, err := st.UpsertGiteaUser(ctx, &fjInst.ID, models.User{
+		GiteaUserID: &fjUID, Login: "forgejo-login", Email: "fj@example.com", DisplayName: "FJ",
+	}, &linkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked.ID != target.ID {
+		t.Fatalf("linked id=%d want %d", linked.ID, target.ID)
+	}
+	if linked.GiteaUserID == nil || *linked.GiteaUserID != fjUID {
+		t.Fatalf("gitea_user_id=%v", linked.GiteaUserID)
+	}
+	if linked.InstanceID == nil || *linked.InstanceID != fjInst.ID {
+		t.Fatalf("instance_id=%v", linked.InstanceID)
+	}
+	after, err := st.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != beforeCount {
+		t.Fatalf("user count=%d want %d (orphan insert)", len(after), beforeCount)
 	}
 }
 
@@ -1364,7 +1421,7 @@ func TestSearchMatchesFieldsAndACL(t *testing.T) {
 	}
 
 	gid := int64(55)
-	user, err := st.UpsertGiteaUser(ctx, &inst.ID, models.User{GiteaUserID: &gid, Login: "searcher"})
+	user, err := st.UpsertGiteaUser(ctx, &inst.ID, models.User{GiteaUserID: &gid, Login: "searcher"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

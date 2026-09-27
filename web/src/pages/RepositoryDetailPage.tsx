@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, openOnForgeLabel, safeExternalHref } from "../api/client";
 import { FailureClustersPanel } from "../components/FailureClustersPanel";
+import { FlakyJobsPanel } from "../components/FlakyJobsPanel";
 import { ForgeBadge } from "../components/ForgeBadge";
 import { HealthBadge } from "../components/HealthBadge";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
@@ -135,6 +136,18 @@ export function RepositoryDetailPage() {
         <h2>Failure Clusters</h2>
         <p className="muted">Repeated failed jobs grouped by workflow path and job name (last 7 days).</p>
         <FailureClustersPanel
+          owner={owner}
+          repo={repo}
+          instanceId={instanceId && instanceId > 0 ? instanceId : undefined}
+        />
+      </div>
+
+      <div className="panel panel--padded">
+        <h2>Flaky Jobs</h2>
+        <p className="muted">
+          Jobs that both failed and succeeded in the last 14 days (heuristic flip detection).
+        </p>
+        <FlakyJobsPanel
           owner={owner}
           repo={repo}
           instanceId={instanceId && instanceId > 0 ? instanceId : undefined}

@@ -1,0 +1,7 @@
+-- +goose Up
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS labels_json TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT NOT NULL DEFAULT '';
+
+-- +goose Down
+ALTER TABLE jobs DROP COLUMN IF EXISTS message;
+ALTER TABLE jobs DROP COLUMN IF EXISTS labels_json;

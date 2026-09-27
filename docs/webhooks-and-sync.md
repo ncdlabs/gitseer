@@ -7,9 +7,12 @@
 | POST | `/api/webhooks/gitea` | Legacy unscoped; HMAC against the [primary Gitea instance](authentication-and-acl.md#primary-gitea-instance) |
 | POST | `/api/webhooks/gitea/{instanceID}` | Per-instance Gitea HMAC (`X-Gitea-Signature`) |
 | POST | `/api/webhooks/github/{instanceID}` | Per-instance GitHub HMAC (`X-Hub-Signature-256`) |
+| POST | `/api/webhooks/gitlab/{instanceID}` | Per-instance GitLab token (`X-Gitlab-Token`; optional HMAC) |
+| POST | `/api/webhooks/bitbucket/{instanceID}` | Per-instance Bitbucket HMAC (`X-Hub-Signature-256`) |
+| POST | `/api/webhooks/forgejo/{instanceID}` | Per-instance Forgejo HMAC (`X-Forgejo-Signature` / `X-Gitea-Signature`) |
 
 - Fail closed when a forge URL is set in config and that forge’s webhook secret is empty (unless unsigned allowed for that forge — lab only)
-- Per-instance routes use the secret stored on that `instances` row (never inherit the other forge’s global secret)
+- Per-instance routes use the secret stored on that `instances` row (never inherit another forge’s global secret or allow-unsigned flag)
 - In-process rate limit: 120 POSTs / IP / minute
 - Events update runs, jobs, PRs (including review state), commit status / checks → PR `ci_state`, and trigger attention evaluation
 - Stuck `processing` webhook rows are reaped (~5 minutes)
@@ -23,6 +26,18 @@ System or repository webhook → `{external_url}/api/webhooks/gitea/{instanceID}
 ### GitHub
 
 Organization or repository webhook → `{external_url}/api/webhooks/github/{instanceID}`. Content type JSON; secret must match the instance webhook secret. Events: `pull_request`, `pull_request_review`, `workflow_run`, `workflow_job`, `repository`, `check_run`, `check_suite`, `status`. Startup requires `GITSEER_GITHUB_WEBHOOK_SECRET` (or file) whenever `github.url` is set unless unsigned webhooks are explicitly allowed.
+
+### GitLab
+
+Project (or group) webhook → `{external_url}/api/webhooks/gitlab/{instanceID}`. Configure the same secret GitSeer stores; deliveries are checked via `X-Gitlab-Token` (and optional signature headers when present). **Ensure Webhook** returns a manual preview (no reliable system-hook ensure API for typical PATs).
+
+### Bitbucket
+
+Repository / workspace webhook → `{external_url}/api/webhooks/bitbucket/{instanceID}` with `X-Hub-Signature-256`. **Ensure Webhook** returns a manual preview.
+
+### Forgejo
+
+System or repository webhook → `{external_url}/api/webhooks/forgejo/{instanceID}` (`X-Forgejo-Signature` or Gitea-compatible headers). **Ensure Webhook** uses the Gitea-compatible system-hooks API when the PAT allows it.
 
 ## Sync / reconcile
 

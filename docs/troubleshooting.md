@@ -69,7 +69,7 @@ Empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password 
 
 ## Actions APIs missing
 
-GitSeer detects capabilities and degrades when Actions endpoints return 404 (Gitea and GitHub/GHE variance). Job/run JSON shapes vary; the client accepts wrapped or flat arrays where needed. Settings → **Status** shows a per-instance **Capability Matrix** (Actions, logs, runners, workflow webhooks, Checks vs status). The **Runners API** row notes that `runner_unavailable_queued` attention stays stubbed even when listing works — forges do not expose a reliable “queued because runner offline” job signal.
+GitSeer detects capabilities and degrades when Actions endpoints return 404 (Gitea and GitHub/GHE variance). Job/run JSON shapes vary; the client accepts wrapped or flat arrays where needed. Settings → **Status** shows a per-instance **Capability Matrix** (Actions, logs, runners, workflow webhooks, Checks vs status). The **Runners API** row notes that `runner_unavailable_queued` attention opens only on a positive job conclusion/message/label/steps signal — ordinary queued jobs do not alert, and many forges omit an offline-runner signal entirely.
 
 ## Encryption unhealthy / wrong key
 

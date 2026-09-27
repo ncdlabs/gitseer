@@ -17,6 +17,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
 import { PullRequestsPage, RepositoriesPage } from "./pages/RepositoriesPage";
 import { RepositoryDetailPage } from "./pages/RepositoryDetailPage";
+import { WallboardPage } from "./pages/WallboardPage";
 import "./styles/app.css";
 
 const DASHBOARD_REWARM_MS = 1500;
@@ -208,6 +209,7 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
                 <Route path="/pipelines" element={<PipelinesPage />} />
                 <Route path="/pipelines/:id" element={<PipelineDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/wallboard" element={<WallboardPage />} />
                 <Route path="/setup" element={<Navigate to="/" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
@@ -229,6 +231,7 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
 
 function Root() {
   const queryClient = useQueryClient();
+  const location = useLocation();
   const me = useQuery({
     queryKey: ["me"],
     queryFn: api.me,
@@ -242,9 +245,14 @@ function Root() {
     return () => setUnauthorizedHandler(null);
   }, [queryClient]);
 
-  if (me.isLoading) return <div className="loading">Loading…</div>;
-  if (me.isError) return <div className="error">Could not check session.</div>;
+  const onWallboard = location.pathname === "/wallboard" || location.pathname.endsWith("/wallboard");
+
+  if (me.isLoading && !onWallboard) return <div className="loading">Loading…</div>;
+  if (me.isError && !onWallboard) return <div className="error">Could not check session.</div>;
   if (!me.data) {
+    if (onWallboard) {
+      return <WallboardPage />;
+    }
     return (
       <LoginPage
         onLoggedIn={() => {

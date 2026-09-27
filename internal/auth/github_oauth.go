@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -185,7 +184,7 @@ func (s *Service) CompleteGitHubOAuth(ctx context.Context, r *http.Request, w ht
 		return nil, err
 	}
 	if err := s.persistUserToken(ctx, user.ID, instanceID, tok); err != nil {
-		slog.Warn("github oauth token persist failed", "err", err, "user_id", user.ID, "login", user.Login)
+		return nil, fmt.Errorf("persist github oauth token: %w", err)
 	}
 	sessionToken, err := s.createSession(ctx, user.ID, ip, ua)
 	if err != nil {

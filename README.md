@@ -2,7 +2,7 @@
 
 Self-hosted CI/CD and pull-request operations console for **Gitea** and **GitHub** (dual-forge). Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `gitseer`, env `GITSEER_*`.
 
-Aggregates repositories, open pull requests, Actions/workflow runs, and attention items into one ACL-aware UI. Each forge stays the system of record; GitSeer syncs via API + webhooks. Login is bootstrap password and/or Gitea OAuth (PKCE) and GitHub OAuth (PKCE). GitHub inventory sync uses a service PAT. GitLab and Bitbucket are Coming Soon.
+Aggregates repositories, open pull requests, Actions/workflow runs, and attention items into one ACL-aware UI. Each forge stays the system of record; GitSeer syncs via API + webhooks. Login is bootstrap password and/or Gitea OAuth (PKCE) and GitHub OAuth (PKCE). GitHub inventory sync uses a service PAT. 
 
 Maintained by **[ncdLabs](https://ncdlabs.com)**.
 
@@ -59,7 +59,7 @@ Five themes. System follows the OS preference (shown here resolving to dark).
 - **Dashboard** — time-scoped summary and trends (Now / 1 / 7 / 30 / 90 days)
 - **Attention** — discrete rules for CI failures, review waits, long-running runs, and merge conflicts
 - **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
-- **Setup wizard** — Prepare (public URL + encryption key) → forge picker (Gitea / GitHub; GitLab & Bitbucket Coming Soon) → Connect → Validate → Finish
+- **Setup wizard** — Prepare (public URL + encryption key) → forge picker (Gitea / GitHub; GitLab, Bitbucket, Forgejo) → Connect → Validate → Finish
 - **Settings** — runtime preferences and multi-instance Gitea + GitHub integration (DB-backed secrets are write-only; instance CRUD is bootstrap-admin)
 - **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
 - **Ops** — Prometheus `/metrics` (session or Bearer token), retention purge, SQLite by default (Postgres experimental)
@@ -96,7 +96,7 @@ Goals:
 Constraints:
 - Do not commit secrets, .env, config.yaml, or install.yaml.
 - Prefer .yaml over .yml for new config files.
-- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or GitLab/Bitbucket clients (Coming Soon).
+- Follow docs/install.md and README.md; do not invent Redis, WebSockets, or undocumented forge types.
 - Ask before destructive changes or removing existing services.
 
 My values (replace or leave blank to prompt me):

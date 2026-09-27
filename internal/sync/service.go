@@ -149,6 +149,12 @@ func (s *Service) defaultInstanceName(forgeType string) string {
 	switch forgeType {
 	case models.ForgeTypeGitHub:
 		return "GitHub"
+	case models.ForgeTypeGitLab:
+		return "GitLab"
+	case models.ForgeTypeBitbucket:
+		return "Bitbucket"
+	case models.ForgeTypeForgejo:
+		return "Forgejo"
 	default:
 		return "Gitea"
 	}
@@ -225,6 +231,7 @@ func (s *Service) SyncAllInstances(ctx context.Context) ([]Result, error) {
 			continue
 		}
 		res, err := s.syncTarget(ctx, t)
+		_ = s.store.ReleaseSyncLease(ctx, instID, holder)
 		if err != nil {
 			s.log.Error("instance sync failed", "instance_id", t.inst.ID, "forge", t.inst.ForgeType, "err", err)
 			if firstErr == nil {
@@ -632,8 +639,10 @@ func (s *Service) reconcileOnce(ctx context.Context, leaseTTL time.Duration) {
 			if err != nil || !ok {
 				return
 			}
-			if _, err := s.syncTarget(ctx, t); err != nil {
-				s.log.Error("reconcile failed", "instance_id", instID, "forge", t.inst.ForgeType, "err", err)
+			_, syncErr := s.syncTarget(ctx, t)
+			_ = s.store.ReleaseSyncLease(ctx, instID, holder)
+			if syncErr != nil {
+				s.log.Error("reconcile failed", "instance_id", instID, "forge", t.inst.ForgeType, "err", syncErr)
 			}
 		}()
 	}

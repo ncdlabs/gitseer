@@ -183,6 +183,7 @@ func (s *Service) enqueueAllChannels(ctx context.Context, cfg *store.Notificatio
 		{cfg.SlackEnabled && strings.TrimSpace(cfg.SlackWebhookCiphertext) != "", store.NotifyChannelSlack},
 		{cfg.DiscordEnabled && strings.TrimSpace(cfg.DiscordWebhookCiphertext) != "", store.NotifyChannelDiscord},
 		{cfg.WebhookEnabled && strings.TrimSpace(cfg.WebhookURLCiphertext) != "", store.NotifyChannelWebhook},
+		{cfg.IncidentEnabled && strings.TrimSpace(cfg.IncidentWebhookCiphertext) != "", store.NotifyChannelIncident},
 	}
 	for _, c := range channels {
 		if !c.enabled {
@@ -307,6 +308,8 @@ func (s *Service) deliverOne(ctx context.Context, cfg *store.NotificationSetting
 		err = s.sendDiscord(cfg, payload)
 	case store.NotifyChannelWebhook:
 		err = s.sendGenericWebhook(ctx, cfg, payload)
+	case store.NotifyChannelIncident:
+		err = s.sendIncidentWebhook(ctx, cfg, payload)
 	default:
 		err = fmt.Errorf("unknown channel %q", row.Channel)
 	}
@@ -471,12 +474,67 @@ func (s *Service) sendGenericWebhook(ctx context.Context, cfg *store.Notificatio
 		return err
 	}
 	raw, _ := json.Marshal(payload)
+	return s.postJSON(urlStr, raw)
+}
+
+// sendIncidentWebhook posts a structured incident payload suitable for Opsgenie/PagerDuty-style receivers.
+// Self-hosted only — GitSeer does not run a hosted relay.
+func (s *Service) sendIncidentWebhook(ctx context.Context, cfg *store.NotificationSettings, payload Payload) error {
+	if cfg == nil || !cfg.IncidentEnabled {
+		return fmt.Errorf("incident webhook disabled")
+	}
+	urlStr, err := s.openSecret(cfg.IncidentWebhookCiphertext)
+	if err != nil {
+		return err
+	}
+	if err := validateHTTPSURL(urlStr); err != nil {
+		return err
+	}
+	sev := strings.ToLower(strings.TrimSpace(payload.Severity))
+	priority := "P3"
+	switch sev {
+	case "critical":
+		priority = "P1"
+	case "warning":
+		priority = "P2"
+	case "waiting":
+		priority = "P4"
+	}
+	body := map[string]any{
+		"source":      "gitseer",
+		"event":       "attention",
+		"kind":        payload.Kind,
+		"title":       payload.Title,
+		"severity":    payload.Severity,
+		"priority":    priority,
+		"message":     payload.Message,
+		"repo":        payload.RepoFull,
+		"repo_owner":  payload.RepoOwner,
+		"repo_name":   payload.RepoName,
+		"type":        payload.Type,
+		"deep_link":   payload.DeepLink,
+		"forge_url":   payload.ForgeURL,
+		"dedupe_key":  payload.Type + ":" + payload.RepoFull + ":" + payload.Title,
+	}
+	if len(payload.Items) > 0 {
+		items := make([]map[string]string, 0, len(payload.Items))
+		for _, it := range payload.Items {
+			items = append(items, map[string]string{
+				"title":    it.Title,
+				"severity": it.Severity,
+				"repo":     it.RepoFull,
+			})
+		}
+		body["items"] = items
+	}
+	raw, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "GitSeer-Notify/1.0")
+	req.Header.Set("X-GitSeer-Event", "incident")
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return err
@@ -484,7 +542,7 @@ func (s *Service) sendGenericWebhook(ctx context.Context, cfg *store.Notificatio
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook status %d", resp.StatusCode)
+		return fmt.Errorf("incident webhook status %d", resp.StatusCode)
 	}
 	return nil
 }

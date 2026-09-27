@@ -6,12 +6,14 @@ import { AttentionCards } from "../components/AttentionCards";
 import { BarList } from "../components/charts/BarList";
 import { StackedAreaChart } from "../components/charts/StackedAreaChart";
 import { StatCallout } from "../components/charts/StatCallout";
+import { DashboardScopeBar } from "../components/DashboardScopeBar";
 import { ListControls } from "../components/ListControls";
 import { RangeToggle } from "../components/RangeToggle";
 import { useDashboardRange } from "../hooks/useDashboardRange";
 import { useForgeInventory } from "../hooks/useShowForgeUI";
 import { useViewMode } from "../hooks/useViewMode";
 import { prefetchDashboardRanges } from "../lib/prefetchDashboard";
+import { relativeAge } from "../lib/relativeAge";
 
 const LAYER_STALE_MS = 60_000;
 
@@ -61,30 +63,32 @@ export function DashboardPage() {
   const { showForge, forges } = useForgeInventory();
   const { days, setDays } = useDashboardRange();
   const [filter, setFilter] = useState("");
+  const [owner, setOwner] = useState("");
   const isNow = days === 0;
+  const scope = owner.trim() ? { owner: owner.trim() } : undefined;
 
   const summary = useQuery({
-    queryKey: ["summary", days],
-    queryFn: () => api.summary(days),
+    queryKey: ["summary", days, owner],
+    queryFn: () => api.summary(days, scope),
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
   });
   const statsCore = useQuery({
-    queryKey: ["stats", days, "core"],
-    queryFn: () => api.stats(days, "core"),
+    queryKey: ["stats", days, "core", owner],
+    queryFn: () => api.stats(days, "core", scope),
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
   });
   const statsTrends = useQuery({
-    queryKey: ["stats", days, "trends"],
-    queryFn: () => api.stats(days, "trends"),
+    queryKey: ["stats", days, "trends", owner],
+    queryFn: () => api.stats(days, "trends", scope),
     enabled: !isNow,
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
   });
   const statsDuration = useQuery({
-    queryKey: ["stats", days, "duration"],
-    queryFn: () => api.stats(days, "duration"),
+    queryKey: ["stats", days, "duration", owner],
+    queryFn: () => api.stats(days, "duration", scope),
     enabled: !isNow,
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
@@ -93,6 +97,16 @@ export function DashboardPage() {
     queryKey: ["attention", filter],
     queryFn: () => api.attention(filter),
     placeholderData: keepPreviousData,
+  });
+  const runners = useQuery({
+    queryKey: ["runners-utilization", 7],
+    queryFn: () => api.runnerUtilization(7),
+    staleTime: LAYER_STALE_MS,
+  });
+  const releases = useQuery({
+    queryKey: ["releases", 30],
+    queryFn: () => api.releases(30),
+    staleTime: LAYER_STALE_MS,
   });
 
   useEffect(() => {
@@ -106,6 +120,7 @@ export function DashboardPage() {
   const core = statsCore.data;
   const trends = statsTrends.data;
   const duration = statsDuration.data?.run_duration ?? null;
+  const scopeHint = owner ? ` scoped to ${owner}` : "";
 
   return (
     <>
@@ -114,12 +129,18 @@ export function DashboardPage() {
           <h1>Dashboard</h1>
           <p className="muted">
             {isNow
-              ? "Current snapshot across repositories you can access."
-              : `Operational report for the ${rangeLabel} across repositories you can access.`}
+              ? `Current snapshot across repositories you can access${scopeHint}.`
+              : `Operational report for the ${rangeLabel} across repositories you can access${scopeHint}.`}
           </p>
         </div>
         <RangeToggle days={days} onDays={setDays} />
       </div>
+
+      <DashboardScopeBar
+        owner={owner}
+        onOwner={setOwner}
+        currentQuery={{ page: "dashboard", owner: owner || undefined }}
+      />
 
       {summary.isError && !s ? (
         <div className="error">{(summary.error as Error).message}</div>
@@ -151,6 +172,105 @@ export function DashboardPage() {
           </Link>
         </div>
       ) : null}
+
+      <section className="report-section">
+        <div className="panel__header report-section__header">
+          <h2>Runner Utilization</h2>
+        </div>
+        {runners.isLoading ? (
+          <div className="loading">Loading runners…</div>
+        ) : runners.isError ? (
+          <div className="error">{(runners.error as Error).message}</div>
+        ) : (
+          <>
+            {runners.data?.degraded ? (
+              <p className="settings-form__hint" role="status">
+                {runners.data.degraded_reason || "Runner utilization is degraded."}
+              </p>
+            ) : null}
+            {(runners.data?.items?.length ?? 0) === 0 ? (
+              <div className="empty">No runner activity in the last 7 days.</div>
+            ) : (
+              <div className="panel">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Runner</th>
+                      <th>Busy</th>
+                      <th>Queued</th>
+                      <th>Completed</th>
+                      <th>Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(runners.data?.items ?? []).map((row) => (
+                      <tr key={row.runner_name}>
+                        <td>{row.runner_name}</td>
+                        <td>{row.busy_jobs}</td>
+                        <td>{row.queued_jobs}</td>
+                        <td>{row.completed_jobs}</td>
+                        <td>{row.failed_jobs}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className="report-section">
+        <div className="panel__header report-section__header">
+          <h2>Releases & Deployments</h2>
+        </div>
+        {releases.isLoading ? (
+          <div className="loading">Loading releases…</div>
+        ) : releases.isError ? (
+          <div className="error">{(releases.error as Error).message}</div>
+        ) : (releases.data?.items?.length ?? 0) === 0 ? (
+          <div className="empty">No release or deploy-like runs in the last 30 days.</div>
+        ) : (
+          <div className="panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>Repo</th>
+                  <th>Workflow</th>
+                  <th>Status</th>
+                  <th>When</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {(releases.data?.items ?? []).slice(0, 12).map((rr) => (
+                  <tr key={rr.id}>
+                    <td>{rr.repo_full}</td>
+                    <td>
+                      {rr.name || rr.workflow_path}
+                      {rr.attention_open ? <span className="badge badge--danger"> Attention</span> : null}
+                    </td>
+                    <td>
+                      {rr.status}
+                      {rr.conclusion ? ` / ${rr.conclusion}` : ""}
+                    </td>
+                    <td className="muted">
+                      {rr.completed_at || rr.started_at
+                        ? relativeAge(rr.completed_at || rr.started_at || "")
+                        : "—"}
+                    </td>
+                    <td>
+                      <Link className="btn btn--small" to={`/pipelines/${rr.id}`}>
+                        Open
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {!isNow && (
         <section className="report-section">

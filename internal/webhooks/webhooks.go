@@ -18,6 +18,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/attention"
 	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
 	"github.com/ncdlabs/gitseer/internal/forge"
+	"github.com/ncdlabs/gitseer/internal/forge/bitbucket"
 	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
 	"github.com/ncdlabs/gitseer/internal/models"
 	"github.com/ncdlabs/gitseer/internal/realtime"
@@ -112,6 +113,33 @@ func (p *Processor) HandleGitHubHTTPForInstance(w http.ResponseWriter, r *http.R
 	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeGitHub)
 }
 
+// HandleGitLabHTTPForInstance accepts a GitLab webhook for a specific GitSeer instance ID.
+func (p *Processor) HandleGitLabHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
+	if instanceID <= 0 {
+		http.Error(w, "instance required", http.StatusBadRequest)
+		return
+	}
+	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeGitLab)
+}
+
+// HandleBitbucketHTTPForInstance accepts a Bitbucket webhook for a specific GitSeer instance ID.
+func (p *Processor) HandleBitbucketHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
+	if instanceID <= 0 {
+		http.Error(w, "instance required", http.StatusBadRequest)
+		return
+	}
+	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeBitbucket)
+}
+
+// HandleForgejoHTTPForInstance accepts a Forgejo webhook (Gitea-compatible HMAC) for an instance.
+func (p *Processor) HandleForgejoHTTPForInstance(w http.ResponseWriter, r *http.Request, instanceID int64) {
+	if instanceID <= 0 {
+		http.Error(w, "instance required", http.StatusBadRequest)
+		return
+	}
+	p.handleForgeWebhook(w, r, instanceID, models.ForgeTypeForgejo)
+}
+
 func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, instanceID int64, forgeType string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
@@ -143,7 +171,7 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 
 	// Legacy global HMAC/allow-unsigned applies only to the unscoped Gitea route
 	// (instanceID==0). Instance-scoped routes never inherit another forge's secret/flag.
-	inheritLegacy := instanceID == 0 && forgeType != models.ForgeTypeGitHub
+	inheritLegacy := instanceID == 0 && (forgeType == "" || forgeType == models.ForgeTypeGitea)
 	secret, allowUnsigned, err := p.webhookAuthForInstance(inst, inheritLegacy)
 	if err != nil {
 		p.log.Error("webhook secret decrypt", "instance_id", inst.ID, "err", err)
@@ -153,8 +181,34 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 	if secret != "" {
 		ok := false
 		switch forgeType {
-		case models.ForgeTypeGitHub:
-			ok = validGitHubSignature(secret, body, r.Header.Get("X-Hub-Signature-256"))
+		case models.ForgeTypeGitHub, models.ForgeTypeBitbucket:
+			sig := r.Header.Get("X-Hub-Signature-256")
+			if sig == "" {
+				sig = r.Header.Get("X-Hub-Signature")
+			}
+			ok = validGitHubSignature(secret, body, sig)
+		case models.ForgeTypeGitLab:
+			ok = validGitLabToken(secret, r.Header.Get("X-Gitlab-Token"))
+			if !ok {
+				// Optional HMAC when GitLab sends X-Gitlab-Signature / X-Hub-Signature-256.
+				sig := r.Header.Get("X-Gitlab-Signature")
+				if sig == "" {
+					sig = r.Header.Get("X-Hub-Signature-256")
+				}
+				if sig != "" {
+					ok = validGitHubSignature(secret, body, sig) || validHMAC(secret, body, sig)
+				}
+			}
+		case models.ForgeTypeForgejo:
+			sig := r.Header.Get("X-Forgejo-Signature")
+			if sig == "" {
+				sig = r.Header.Get("X-Gitea-Signature")
+			}
+			if sig != "" {
+				ok = validHMAC(secret, body, sig)
+			} else {
+				ok = validGitHubSignature(secret, body, r.Header.Get("X-Hub-Signature-256"))
+			}
 		default:
 			ok = validHMAC(secret, body, r.Header.Get("X-Gitea-Signature"))
 		}
@@ -168,7 +222,12 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 	}
 
 	eventType, delivery := webhookHeaders(r, forgeType)
-	_, inserted, err := p.store.InsertWebhookEvent(r.Context(), inst.ID, delivery, eventType, string(body))
+	eventType = normalizeWebhookEventType(forgeType, eventType)
+	payload := string(body)
+	if norm, ok := normalizeWebhookPayload(forgeType, eventType, body); ok {
+		payload = string(norm)
+	}
+	_, inserted, err := p.store.InsertWebhookEvent(r.Context(), inst.ID, delivery, eventType, payload)
 	if err != nil {
 		p.log.Error("persist webhook", "err", err)
 		http.Error(w, "persist failed", http.StatusInternalServerError)
@@ -221,6 +280,36 @@ func webhookHeaders(r *http.Request, forgeType string) (eventType, delivery stri
 	switch forgeType {
 	case models.ForgeTypeGitHub:
 		return r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
+	case models.ForgeTypeGitLab:
+		eventType = r.Header.Get("X-Gitlab-Event")
+		delivery = r.Header.Get("X-Gitlab-Event-UUID")
+		if delivery == "" {
+			delivery = r.Header.Get("X-Request-Id")
+		}
+		return eventType, delivery
+	case models.ForgeTypeBitbucket:
+		eventType = r.Header.Get("X-Event-Key")
+		delivery = r.Header.Get("X-Request-UUID")
+		if delivery == "" {
+			delivery = r.Header.Get("X-Hook-UUID")
+		}
+		return eventType, delivery
+	case models.ForgeTypeForgejo:
+		eventType = r.Header.Get("X-Forgejo-Event")
+		if eventType == "" {
+			eventType = r.Header.Get("X-Gitea-Event")
+		}
+		if eventType == "" {
+			eventType = r.Header.Get("X-GitHub-Event")
+		}
+		delivery = r.Header.Get("X-Forgejo-Delivery")
+		if delivery == "" {
+			delivery = r.Header.Get("X-Gitea-Delivery")
+		}
+		if delivery == "" {
+			delivery = r.Header.Get("X-GitHub-Delivery")
+		}
+		return eventType, delivery
 	default:
 		eventType = r.Header.Get("X-Gitea-Event")
 		if eventType == "" {
@@ -231,6 +320,537 @@ func webhookHeaders(r *http.Request, forgeType string) (eventType, delivery stri
 			delivery = r.Header.Get("X-GitHub-Delivery")
 		}
 		return eventType, delivery
+	}
+}
+
+// validGitLabToken checks the shared secret token header (constant-time).
+func validGitLabToken(secret, header string) bool {
+	secret = strings.TrimSpace(secret)
+	header = strings.TrimSpace(header)
+	if secret == "" || header == "" {
+		return false
+	}
+	return hmac.Equal([]byte(secret), []byte(header))
+}
+
+// normalizeWebhookEventType maps forge-specific event names onto the apply() vocabulary.
+func normalizeWebhookEventType(forgeType, eventType string) string {
+	et := strings.TrimSpace(eventType)
+	switch forgeType {
+	case models.ForgeTypeGitLab:
+		switch strings.ToLower(et) {
+		case "merge request hook", "merge_request":
+			return "pull_request"
+		case "pipeline hook", "pipeline":
+			return "workflow_run"
+		case "job hook", "build hook", "job", "build":
+			return "workflow_job"
+		case "note hook":
+			return "pull_request_review"
+		default:
+			return et
+		}
+	case models.ForgeTypeBitbucket:
+		switch strings.ToLower(et) {
+		case "pullrequest:created", "pullrequest:updated", "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:approved", "pullrequest:unapproved":
+			return "pull_request"
+		case "repo:commit_status_created", "repo:commit_status_updated":
+			return "status"
+		default:
+			return et
+		}
+	default:
+		return et
+	}
+}
+
+// normalizeWebhookPayload rewrites forge-specific bodies into the Gitea/GitHub-shaped
+// JSON that applyPR / applyRun already understand. Returns ok=false to keep original.
+func normalizeWebhookPayload(forgeType, eventType string, body []byte) ([]byte, bool) {
+	switch forgeType {
+	case models.ForgeTypeGitLab:
+		switch eventType {
+		case "pull_request":
+			return normalizeGitLabMergeRequest(body)
+		case "workflow_run":
+			return normalizeGitLabPipeline(body)
+		case "workflow_job":
+			return normalizeGitLabJob(body)
+		}
+	case models.ForgeTypeBitbucket:
+		switch eventType {
+		case "pull_request":
+			return normalizeBitbucketPullRequest(body)
+		case "status":
+			return normalizeBitbucketCommitStatus(body)
+		}
+	}
+	return nil, false
+}
+
+func normalizeGitLabMergeRequest(body []byte) ([]byte, bool) {
+	var raw struct {
+		ObjectKind string `json:"object_kind"`
+		Project    struct {
+			ID                int64  `json:"id"`
+			Name              string `json:"name"`
+			PathWithNamespace string `json:"path_with_namespace"`
+		} `json:"project"`
+		ObjectAttributes struct {
+			ID           int64  `json:"id"`
+			IID          int64  `json:"iid"`
+			Title        string `json:"title"`
+			Description  string `json:"description"`
+			State        string `json:"state"`
+			Draft        bool   `json:"draft"`
+			URL          string `json:"url"`
+			CreatedAt    string `json:"created_at"`
+			UpdatedAt    string `json:"updated_at"`
+			SourceBranch string `json:"source_branch"`
+			TargetBranch string `json:"target_branch"`
+			LastCommit   *struct {
+				ID string `json:"id"`
+			} `json:"last_commit"`
+		} `json:"object_attributes"`
+		User *struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false
+	}
+	state := raw.ObjectAttributes.State
+	if state == "opened" {
+		state = "open"
+	} else if state == "merged" || state == "closed" {
+		state = "closed"
+	}
+	owner := ""
+	if parts := strings.SplitN(raw.Project.PathWithNamespace, "/", 2); len(parts) > 0 {
+		owner = parts[0]
+	}
+	headSHA := ""
+	if raw.ObjectAttributes.LastCommit != nil {
+		headSHA = raw.ObjectAttributes.LastCommit.ID
+	}
+	out := map[string]any{
+		"action": "updated",
+		"pull_request": map[string]any{
+			"id":         raw.ObjectAttributes.ID,
+			"number":     raw.ObjectAttributes.IID,
+			"title":      raw.ObjectAttributes.Title,
+			"body":       raw.ObjectAttributes.Description,
+			"state":      state,
+			"draft":      raw.ObjectAttributes.Draft,
+			"html_url":   raw.ObjectAttributes.URL,
+			"created_at": raw.ObjectAttributes.CreatedAt,
+			"updated_at": raw.ObjectAttributes.UpdatedAt,
+			"user": func() any {
+				if raw.User == nil {
+					return nil
+				}
+				return map[string]any{"id": raw.User.ID, "login": raw.User.Username}
+			}(),
+			"head": map[string]any{"ref": raw.ObjectAttributes.SourceBranch, "sha": headSHA},
+			"base": map[string]any{"ref": raw.ObjectAttributes.TargetBranch, "sha": ""},
+		},
+		"repository": map[string]any{
+			"id":        raw.Project.ID,
+			"name":      raw.Project.Name,
+			"full_name": raw.Project.PathWithNamespace,
+			"owner":     map[string]any{"login": owner},
+		},
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func normalizeGitLabPipeline(body []byte) ([]byte, bool) {
+	var raw struct {
+		ObjectKind string `json:"object_kind"`
+		Project    struct {
+			ID                int64  `json:"id"`
+			Name              string `json:"name"`
+			PathWithNamespace string `json:"path_with_namespace"`
+		} `json:"project"`
+		ObjectAttributes struct {
+			ID         int64  `json:"id"`
+			IID        int64  `json:"iid"`
+			Name       string `json:"name"`
+			Ref        string `json:"ref"`
+			SHA        string `json:"sha"`
+			Status     string `json:"status"`
+			Source     string `json:"source"`
+			CreatedAt  string `json:"created_at"`
+			FinishedAt string `json:"finished_at"`
+			URL        string `json:"url"`
+		} `json:"object_attributes"`
+		Commit *struct {
+			ID string `json:"id"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false
+	}
+	runID := raw.ObjectAttributes.ID
+	if runID == 0 {
+		runID = raw.ObjectAttributes.IID
+	}
+	if runID == 0 || raw.Project.ID == 0 {
+		return nil, false
+	}
+	owner, name := splitOwnerName(raw.Project.PathWithNamespace, raw.Project.Name)
+	if owner == "" || name == "" {
+		return nil, false
+	}
+	sha := raw.ObjectAttributes.SHA
+	if sha == "" && raw.Commit != nil {
+		sha = raw.Commit.ID
+	}
+	runName := strings.TrimSpace(raw.ObjectAttributes.Name)
+	if runName == "" {
+		runName = "pipeline"
+	}
+	status, conclusion := gitlabWebhookStatus(raw.ObjectAttributes.Status)
+	html := raw.ObjectAttributes.URL
+	if html == "" && raw.Project.PathWithNamespace != "" {
+		html = fmt.Sprintf("%s/-/pipelines/%d", strings.TrimRight(raw.Project.PathWithNamespace, "/"), runID)
+	}
+	out := map[string]any{
+		"workflow_run": map[string]any{
+			"id":             runID,
+			"name":           runName,
+			"event":          raw.ObjectAttributes.Source,
+			"status":         status,
+			"conclusion":     conclusion,
+			"html_url":       html,
+			"head_branch":    raw.ObjectAttributes.Ref,
+			"head_sha":       sha,
+			"path":           ".gitlab-ci.yml",
+			"run_attempt":    1,
+			"run_started_at": raw.ObjectAttributes.CreatedAt,
+			"updated_at":     firstNonEmpty(raw.ObjectAttributes.FinishedAt, raw.ObjectAttributes.CreatedAt),
+			"created_at":     raw.ObjectAttributes.CreatedAt,
+		},
+		"repository": map[string]any{
+			"id":        raw.Project.ID,
+			"name":      name,
+			"full_name": raw.Project.PathWithNamespace,
+			"owner":     map[string]any{"login": owner},
+		},
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func normalizeGitLabJob(body []byte) ([]byte, bool) {
+	var raw struct {
+		ObjectKind       string `json:"object_kind"`
+		Ref              string `json:"ref"`
+		BuildID          int64  `json:"build_id"`
+		BuildName        string `json:"build_name"`
+		BuildStatus      string `json:"build_status"`
+		BuildStartedAt   string `json:"build_started_at"`
+		BuildFinishedAt  string `json:"build_finished_at"`
+		BuildFailureReason string `json:"build_failure_reason"`
+		PipelineID       int64  `json:"pipeline_id"`
+		ProjectID        int64  `json:"project_id"`
+		ProjectName      string `json:"project_name"`
+		Project          *struct {
+			ID                int64  `json:"id"`
+			Name              string `json:"name"`
+			PathWithNamespace string `json:"path_with_namespace"`
+			WebURL            string `json:"web_url"`
+		} `json:"project"`
+		Repository *struct {
+			Name        string `json:"name"`
+			URL         string `json:"url"`
+			Homepage    string `json:"homepage"`
+			Description string `json:"description"`
+		} `json:"repository"`
+		Commit *struct {
+			SHA string `json:"sha"`
+			ID  string `json:"id"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false
+	}
+	jobID := raw.BuildID
+	runID := raw.PipelineID
+	if jobID == 0 || runID == 0 {
+		return nil, false
+	}
+	projectID := raw.ProjectID
+	fullName, name, owner := "", raw.ProjectName, ""
+	if raw.Project != nil {
+		if projectID == 0 {
+			projectID = raw.Project.ID
+		}
+		if raw.Project.Name != "" {
+			name = raw.Project.Name
+		}
+		fullName = raw.Project.PathWithNamespace
+	}
+	if fullName == "" && raw.Repository != nil && raw.Repository.Homepage != "" {
+		// Best-effort: leave fullName empty and rely on name/owner split below.
+	}
+	owner, name = splitOwnerName(fullName, name)
+	if projectID == 0 || owner == "" || name == "" {
+		return nil, false
+	}
+	if fullName == "" {
+		fullName = owner + "/" + name
+	}
+	status, conclusion := gitlabWebhookStatus(raw.BuildStatus)
+	html := ""
+	if raw.Project != nil && raw.Project.WebURL != "" {
+		html = fmt.Sprintf("%s/-/jobs/%d", strings.TrimRight(raw.Project.WebURL, "/"), jobID)
+	}
+	out := map[string]any{
+		"workflow_job": map[string]any{
+			"id":           jobID,
+			"run_id":       runID,
+			"name":         raw.BuildName,
+			"status":       status,
+			"conclusion":   conclusion,
+			"html_url":     html,
+			"started_at":   raw.BuildStartedAt,
+			"completed_at": raw.BuildFinishedAt,
+			"message":      strings.TrimSpace(raw.BuildFailureReason),
+		},
+		"repository": map[string]any{
+			"id":        projectID,
+			"name":      name,
+			"full_name": fullName,
+			"owner":     map[string]any{"login": owner},
+		},
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func gitlabWebhookStatus(s string) (status, conclusion string) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "created", "waiting_for_resource", "preparing", "pending", "manual", "scheduled":
+		return "queued", ""
+	case "running":
+		return "in_progress", ""
+	case "success":
+		return "completed", "success"
+	case "failed":
+		return "completed", "failure"
+	case "canceled", "cancelled":
+		return "completed", "cancelled"
+	case "skipped":
+		return "completed", "skipped"
+	default:
+		return s, ""
+	}
+}
+
+func splitOwnerName(pathWithNamespace, fallbackName string) (owner, name string) {
+	pathWithNamespace = strings.TrimSpace(pathWithNamespace)
+	fallbackName = strings.TrimSpace(fallbackName)
+	if pathWithNamespace != "" {
+		parts := strings.Split(pathWithNamespace, "/")
+		if len(parts) >= 2 {
+			return parts[0], parts[len(parts)-1]
+		}
+		if len(parts) == 1 && parts[0] != "" {
+			return parts[0], fallbackName
+		}
+	}
+	return "", fallbackName
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func normalizeBitbucketPullRequest(body []byte) ([]byte, bool) {
+	var raw struct {
+		PullRequest struct {
+			ID          int64  `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			State       string `json:"state"`
+			CreatedOn   string `json:"created_on"`
+			UpdatedOn   string `json:"updated_on"`
+			Author      *struct {
+				UUID     string `json:"uuid"`
+				Nickname string `json:"nickname"`
+				Username string `json:"username"`
+			} `json:"author"`
+			Source *struct {
+				Branch *struct {
+					Name string `json:"name"`
+				} `json:"branch"`
+				Commit *struct {
+					Hash string `json:"hash"`
+				} `json:"commit"`
+			} `json:"source"`
+			Destination *struct {
+				Branch *struct {
+					Name string `json:"name"`
+				} `json:"branch"`
+			} `json:"destination"`
+			Links *struct {
+				HTML *struct {
+					Href string `json:"href"`
+				} `json:"html"`
+			} `json:"links"`
+		} `json:"pullrequest"`
+		Repository struct {
+			UUID     string `json:"uuid"`
+			Name     string `json:"name"`
+			FullName string `json:"full_name"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false
+	}
+	state := strings.ToLower(raw.PullRequest.State)
+	if state == "open" {
+		state = "open"
+	} else {
+		state = "closed"
+	}
+	owner, name := "", raw.Repository.Name
+	if parts := strings.SplitN(raw.Repository.FullName, "/", 2); len(parts) == 2 {
+		owner, name = parts[0], parts[1]
+	}
+	html := ""
+	if raw.PullRequest.Links != nil && raw.PullRequest.Links.HTML != nil {
+		html = raw.PullRequest.Links.HTML.Href
+	}
+	login := ""
+	if raw.PullRequest.Author != nil {
+		login = raw.PullRequest.Author.Username
+		if login == "" {
+			login = raw.PullRequest.Author.Nickname
+		}
+	}
+	srcRef, headSHA := "", ""
+	if raw.PullRequest.Source != nil {
+		if raw.PullRequest.Source.Branch != nil {
+			srcRef = raw.PullRequest.Source.Branch.Name
+		}
+		if raw.PullRequest.Source.Commit != nil {
+			headSHA = raw.PullRequest.Source.Commit.Hash
+		}
+	}
+	dstRef := ""
+	if raw.PullRequest.Destination != nil && raw.PullRequest.Destination.Branch != nil {
+		dstRef = raw.PullRequest.Destination.Branch.Name
+	}
+	// StableID keeps webhook repo external_id aligned with Bitbucket API sync.
+	repoID := bitbucket.StableID(raw.Repository.UUID)
+	out := map[string]any{
+		"action": "updated",
+		"pull_request": map[string]any{
+			"id":         raw.PullRequest.ID,
+			"number":     raw.PullRequest.ID,
+			"title":      raw.PullRequest.Title,
+			"body":       raw.PullRequest.Description,
+			"state":      state,
+			"html_url":   html,
+			"created_at": raw.PullRequest.CreatedOn,
+			"updated_at": raw.PullRequest.UpdatedOn,
+			"user":       map[string]any{"id": 0, "login": login},
+			"head":       map[string]any{"ref": srcRef, "sha": headSHA},
+			"base":       map[string]any{"ref": dstRef, "sha": ""},
+		},
+		"repository": map[string]any{
+			"id":        repoID,
+			"name":      name,
+			"full_name": raw.Repository.FullName,
+			"owner":     map[string]any{"login": owner},
+		},
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func normalizeBitbucketCommitStatus(body []byte) ([]byte, bool) {
+	var raw struct {
+		Repository struct {
+			UUID     string `json:"uuid"`
+			Name     string `json:"name"`
+			FullName string `json:"full_name"`
+		} `json:"repository"`
+		CommitStatus struct {
+			State  string `json:"state"`
+			Key    string `json:"key"`
+			Name   string `json:"name"`
+			URL    string `json:"url"`
+			Type   string `json:"type"`
+			Commit *struct {
+				Hash string `json:"hash"`
+			} `json:"commit"`
+		} `json:"commit_status"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false
+	}
+	repoID := bitbucket.StableID(raw.Repository.UUID)
+	sha := ""
+	if raw.CommitStatus.Commit != nil {
+		sha = raw.CommitStatus.Commit.Hash
+	}
+	if repoID == 0 || sha == "" {
+		return nil, false
+	}
+	state := mapBitbucketCIState(raw.CommitStatus.State)
+	if state == "" {
+		return nil, false
+	}
+	out := map[string]any{
+		"sha":   sha,
+		"state": state,
+		"repository": map[string]any{
+			"id":        repoID,
+			"name":      raw.Repository.Name,
+			"full_name": raw.Repository.FullName,
+		},
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func mapBitbucketCIState(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "SUCCESSFUL", "SUCCESS":
+		return "success"
+	case "FAILED", "FAILURE", "ERROR":
+		return "failure"
+	case "INPROGRESS", "IN_PROGRESS", "PENDING":
+		return "pending"
+	case "STOPPED", "CANCELLED", "CANCELED":
+		return "cancelled"
+	default:
+		return forge.NormalizeCIState(s)
 	}
 }
 
@@ -559,7 +1179,15 @@ func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 	if err := json.Unmarshal([]byte(ev.Payload), &payload); err != nil {
 		return err
 	}
-	repo, err := p.ensureRepo(ctx, ev.InstanceID, payload.Repository.ID, payload.Repository.Owner.Login, payload.Repository.Name, payload.Repository.FullName)
+	if payload.WorkflowRun.ID == 0 {
+		return fmt.Errorf("workflow_run external_id is required")
+	}
+	owner := strings.TrimSpace(payload.Repository.Owner.Login)
+	name := strings.TrimSpace(payload.Repository.Name)
+	if payload.Repository.ID == 0 || owner == "" || name == "" {
+		return fmt.Errorf("workflow_run repository id/owner/name required")
+	}
+	repo, err := p.ensureRepo(ctx, ev.InstanceID, payload.Repository.ID, owner, name, payload.Repository.FullName)
 	if err != nil {
 		return err
 	}
@@ -626,6 +1254,8 @@ func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 			HTMLURL     string          `json:"html_url"`
 			StartedAt   string          `json:"started_at"`
 			CompletedAt string          `json:"completed_at"`
+			Labels      json.RawMessage `json:"labels"`
+			Message     string          `json:"message"`
 			Steps       json.RawMessage `json:"steps"`
 		} `json:"workflow_job"`
 		Repository struct {
@@ -640,7 +1270,15 @@ func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 	if err := json.Unmarshal([]byte(ev.Payload), &payload); err != nil {
 		return err
 	}
-	repo, err := p.ensureRepo(ctx, ev.InstanceID, payload.Repository.ID, payload.Repository.Owner.Login, payload.Repository.Name, payload.Repository.FullName)
+	if payload.WorkflowJob.ID == 0 || payload.WorkflowJob.RunID == 0 {
+		return fmt.Errorf("workflow_job external_id and run_id are required")
+	}
+	owner := strings.TrimSpace(payload.Repository.Owner.Login)
+	name := strings.TrimSpace(payload.Repository.Name)
+	if payload.Repository.ID == 0 || owner == "" || name == "" {
+		return fmt.Errorf("workflow_job repository id/owner/name required")
+	}
+	repo, err := p.ensureRepo(ctx, ev.InstanceID, payload.Repository.ID, owner, name, payload.Repository.FullName)
 	if err != nil {
 		return err
 	}
@@ -661,6 +1299,11 @@ func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 		s := string(payload.WorkflowJob.Steps)
 		steps = &s
 	}
+	var labels *string
+	if len(payload.WorkflowJob.Labels) > 0 && string(payload.WorkflowJob.Labels) != "null" {
+		s := string(payload.WorkflowJob.Labels)
+		labels = &s
+	}
 	job, err := p.store.UpsertJob(ctx, repo.ID, run.ID, models.Job{
 		ExternalID:         payload.WorkflowJob.ID,
 		Name:               payload.WorkflowJob.Name,
@@ -672,6 +1315,8 @@ func (p *Processor) applyJob(ctx context.Context, ev store.WebhookEvent) error {
 		StartedAt:          parseWebhookTime(payload.WorkflowJob.StartedAt),
 		CompletedAt:        parseWebhookTime(payload.WorkflowJob.CompletedAt),
 		StepsJSON:          steps,
+		LabelsJSON:         labels,
+		Message:            strings.TrimSpace(payload.WorkflowJob.Message),
 	})
 	if err != nil {
 		return err

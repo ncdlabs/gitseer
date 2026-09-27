@@ -141,6 +141,7 @@ type ghUser struct {
 
 type ghOrg struct {
 	ID        int64  `json:"id"`
+	NodeID    string `json:"node_id"`
 	Login     string `json:"login"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
@@ -148,6 +149,7 @@ type ghOrg struct {
 
 type ghRepo struct {
 	ID            int64  `json:"id"`
+	NodeID        string `json:"node_id"`
 	Name          string `json:"name"`
 	FullName      string `json:"full_name"`
 	Private       bool   `json:"private"`
@@ -165,6 +167,7 @@ type ghRepo struct {
 
 type ghPR struct {
 	ID             int64  `json:"id"`
+	NodeID         string `json:"node_id"`
 	Number         int64  `json:"number"`
 	Title          string `json:"title"`
 	Body           string `json:"body"`
@@ -193,6 +196,7 @@ type ghPR struct {
 
 type ghRun struct {
 	ID         int64  `json:"id"`
+	NodeID     string `json:"node_id"`
 	Name       string `json:"name"`
 	Event      string `json:"event"`
 	Status     string `json:"status"`
@@ -220,6 +224,7 @@ type ghRunsResponse struct {
 
 type ghJob struct {
 	ID          int64           `json:"id"`
+	NodeID      string          `json:"node_id"`
 	RunID       int64           `json:"run_id"`
 	Name        string          `json:"name"`
 	Status      string          `json:"status"`
@@ -229,6 +234,8 @@ type ghJob struct {
 	CompletedAt string          `json:"completed_at"`
 	RunnerID    *int64          `json:"runner_id"`
 	RunnerName  string          `json:"runner_name"`
+	Labels      json.RawMessage `json:"labels"`
+	Message     string          `json:"message"`
 	Steps       json.RawMessage `json:"steps"`
 }
 
@@ -427,6 +434,22 @@ func (c *Client) DetectCapabilities(ctx context.Context) (*models.Capabilities, 
 		caps.RerunWorkflowAPI = true
 		caps.CancelWorkflowAPI = true
 	}
+	// Org runners inventory when token can list at least one org's runners.
+	if orgs, err := c.ListMembershipOrgs(ctx); err == nil {
+		for _, org := range orgs {
+			path := fmt.Sprintf("/orgs/%s/actions/runners", url.PathEscape(org))
+			resp, err := c.do(ctx, http.MethodGet, path, url.Values{"per_page": {"1"}}, "")
+			if err != nil {
+				continue
+			}
+			code := resp.StatusCode
+			resp.Body.Close()
+			if code >= 200 && code < 300 {
+				caps.RunnersAPI = true
+				break
+			}
+		}
+	}
 	return caps, nil
 }
 
@@ -450,6 +473,7 @@ func (c *Client) ListOrganizations(ctx context.Context) ([]models.Organization, 
 			}
 			out = append(out, models.Organization{
 				ExternalID: o.ID,
+				NodeID:     strings.TrimSpace(o.NodeID),
 				Name:       name,
 				FullName:   full,
 				AvatarURL:  o.AvatarURL,
@@ -906,6 +930,7 @@ func mapRepo(r ghRepo) models.Repository {
 	}
 	return models.Repository{
 		ExternalID:    r.ID,
+		NodeID:        strings.TrimSpace(r.NodeID),
 		Owner:         owner,
 		Name:          r.Name,
 		FullName:      r.FullName,
@@ -921,6 +946,7 @@ func mapRepo(r ghRepo) models.Repository {
 func mapPR(p ghPR) models.PullRequest {
 	pr := models.PullRequest{
 		ExternalID:     p.ID,
+		NodeID:         strings.TrimSpace(p.NodeID),
 		Number:         p.Number,
 		Title:          p.Title,
 		BodyExcerpt:    truncate(p.Body, 500),
@@ -972,6 +998,7 @@ func mapRun(r ghRun) models.WorkflowRun {
 	}
 	return models.WorkflowRun{
 		ExternalID:         r.ID,
+		NodeID:             strings.TrimSpace(r.NodeID),
 		Name:               name,
 		Event:              r.Event,
 		Branch:             r.HeadBranch,
@@ -1002,8 +1029,14 @@ func mapJob(j ghJob) models.Job {
 		s := string(j.Steps)
 		steps = &s
 	}
+	var labels *string
+	if len(j.Labels) > 0 && string(j.Labels) != "null" {
+		s := string(j.Labels)
+		labels = &s
+	}
 	return models.Job{
 		ExternalID:         j.ID,
+		NodeID:             strings.TrimSpace(j.NodeID),
 		Name:               j.Name,
 		Status:             st,
 		Conclusion:         conc,
@@ -1015,6 +1048,8 @@ func mapJob(j ghJob) models.Job {
 		StartedAt:          parseOptionalTime(j.StartedAt),
 		CompletedAt:        parseOptionalTime(j.CompletedAt),
 		StepsJSON:          steps,
+		LabelsJSON:         labels,
+		Message:            strings.TrimSpace(j.Message),
 	}
 }
 

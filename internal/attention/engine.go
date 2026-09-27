@@ -224,6 +224,13 @@ func (e *Engine) EvaluateRun(ctx context.Context, instanceID int64, run *models.
 	if err := e.evalLongRunning(ctx, instanceID, run); err != nil {
 		return err
 	}
+	if jobs, err := e.store.ListJobsByRunID(ctx, run.ID); err == nil {
+		for i := range jobs {
+			if err := e.EvaluateJob(ctx, instanceID, &jobs[i], run); err != nil {
+				e.log.Debug("attention evaluate job", "err", err, "job_id", jobs[i].ID)
+			}
+		}
+	}
 	// Legacy fingerprints from pre-matrix engine.
 	_ = e.resolve(ctx, fingerprint("failed_run", fmt.Sprintf("%d", run.RepoID), fmt.Sprintf("%d", run.ExternalID)))
 	return nil
@@ -451,14 +458,90 @@ func (e *Engine) evalAwaitingManualJob(ctx context.Context, instanceID int64, jo
 	return e.resolve(ctx, fp)
 }
 
-func (e *Engine) evalRunnerUnavailable(ctx context.Context, instanceID int64, job *models.Job, _ *models.WorkflowRun) error {
-	// Stub: forge job payloads and DetectCapabilities expose runners_api for listing,
-	// but neither Gitea nor GitHub reliably signal "queued because runner offline".
-	// Keep resolving any prior fingerprints; document in capability matrix / docs.
+func (e *Engine) evalRunnerUnavailable(ctx context.Context, instanceID int64, job *models.Job, run *models.WorkflowRun) error {
 	fp := fingerprint(TypeRunnerUnavailable, fmt.Sprintf("%d", job.RepoID), fmt.Sprintf("%d", job.ExternalID))
-	_ = instanceID
-	_ = job
+	queued := job.Status == models.StatusQueued || job.Status == models.StatusWaiting
+	matched, reason := jobSignalsRunnerUnavailable(job)
+	// Open only on a positive forge signal while the job is still queued/waiting.
+	// Do not alert on "queued with no runner assigned" alone — that is normal.
+	if queued && matched {
+		meta, _ := json.Marshal(map[string]any{
+			"job_id": job.ID, "run_id": job.RunID, "signal": reason,
+			"upstream_conclusion": job.UpstreamConclusion, "message": job.Message,
+		})
+		title := fmt.Sprintf("Queued job waiting on unavailable runner: %s", job.Name)
+		if run != nil && run.RepoFull != "" {
+			title = fmt.Sprintf("Queued job waiting on unavailable runner: %s (%s)", job.Name, run.RepoFull)
+		}
+		return e.open(ctx, models.AttentionItem{
+			InstanceID: instanceID, RepoID: job.RepoID, Type: TypeRunnerUnavailable,
+			Severity: SeverityWarning, EntityType: "job", EntityID: job.ID,
+			Title: title, MetadataJSON: string(meta), Fingerprint: fp,
+		})
+	}
 	return e.resolve(ctx, fp)
+}
+
+// jobSignalsRunnerUnavailable reports a best-effort positive offline/unavailable
+// signal from job conclusion, message, labels, steps, or name when present.
+// Ordinary queued jobs with no such text return false (no fake always-on alerts).
+func jobSignalsRunnerUnavailable(job *models.Job) (bool, string) {
+	if job == nil {
+		return false, ""
+	}
+	parts := []string{
+		job.UpstreamConclusion,
+		job.Conclusion,
+		job.UpstreamStatus,
+		job.Name,
+		job.RunnerName,
+		job.Message,
+	}
+	if job.LabelsJSON != nil {
+		parts = append(parts, *job.LabelsJSON)
+	}
+	if job.StepsJSON != nil {
+		parts = append(parts, *job.StepsJSON)
+	}
+	blob := strings.ToLower(strings.Join(parts, "\n"))
+	if blob == "" {
+		return false, ""
+	}
+	for _, phrase := range runnerUnavailablePhrases {
+		if strings.Contains(blob, phrase) {
+			return true, phrase
+		}
+	}
+	return false, ""
+}
+
+// Phrases that indicate runner unavailability — not normal "waiting for a runner" queue text.
+var runnerUnavailablePhrases = []string{
+	"runner offline",
+	"runner is offline",
+	"runners are offline",
+	"runner has been offline",
+	"no runners available",
+	"no runner available",
+	"no matching runner",
+	"no matching runners",
+	"could not find a runner",
+	"could not find any runner",
+	"unable to find a runner",
+	"unable to find any runner",
+	"there are no runners",
+	"no online runners",
+	"no active runners",
+	"runner was not found",
+	"runners were not found",
+	"the runner matching the labels was not found",
+	"hosted runners are currently unavailable",
+	"self-hosted runner offline",
+	"failed to request a runner",
+	"runner_unavailable",
+	"runner-unavailable",
+	"runner_system_failure",
+	"stuck_or_timeout_failure",
 }
 
 func isApproved(reviewState string) bool {

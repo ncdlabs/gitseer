@@ -17,16 +17,16 @@
 - **UI:** Vite/React SPA built into `internal/server/ui/dist` and served by the same process
 - **Module:** `github.com/ncdlabs/gitseer`
 - **HTTP:** chi router; migrations via goose (SQL in `migrations/`)
-- **Forges:** Gitea + GitHub via `internal/forge` (`forge_type` on `instances`). Multiple instances per type supported via `/api/v1/instances`. GitLab / Bitbucket are Coming Soon (no clients yet).
+- **Forges:** Gitea, GitHub, GitLab, Bitbucket, and Forgejo via `internal/forge` (`forge_type` on `instances`). Multiple instances per type supported via `/api/v1/instances`.
 
 ## Package boundaries
 
 | Package | Responsibility |
 |---------|----------------|
-| `internal/forge` (+ `gitea`, `github`) | Forge HTTP clients, factory, type normalization |
+| `internal/forge` (+ `gitea`, `github`, `gitlab`, `bitbucket`, `forgejo`) | Forge HTTP clients, factory, type normalization |
 | `internal/store` | Persistence (hand-written SQL) |
 | `internal/sync` | Periodic reconcile + history import (per-instance) |
-| `internal/webhooks` | Ingest + process Gitea and GitHub events |
+| `internal/webhooks` | Ingest + process forge webhook events (HMAC / token fail-closed) |
 | `internal/api` | `/api/v1` handlers |
 | `internal/auth` / `internal/authz` | Sessions, OAuth, CSRF, ACL |
 | `internal/attention` | Attention rule engine |
@@ -39,7 +39,7 @@
 | `internal/uiinstall` | Gitea custom template install |
 | `internal/retention` | Aged data purge |
 
-Raw forge wire types stay in `internal/forge/gitea` and `internal/forge/github`. Domain models live in `internal/models`.
+Raw forge wire types stay in the forge implementation packages. Domain models live in `internal/models`.
 
 ## Data flow
 
@@ -73,7 +73,7 @@ Set `server.external_url` to the public URL **including** any path prefix. GitSe
 
 ## Design constraints
 
-- Dual-forge: **Gitea + GitHub** in scope; **GitLab / Bitbucket** Coming Soon
+- Multi-forge: **Gitea, GitHub, GitLab, Bitbucket, Forgejo** in scope (ADR-029)
 - No Redis
 - Write ops: **Rerun Workflow** / **Cancel Workflow** via per-instance user tokens (`UserAccessTokenForInstance`); no silent service-PAT fallback for non-admin; bootstrap admin may use service PAT with UI warning when no user token
 - Capability detection for Actions APIs; degrade when missing

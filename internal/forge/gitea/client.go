@@ -290,16 +290,18 @@ type giteaRunsResponse struct {
 }
 
 type giteaJob struct {
-	ID          int64  `json:"id"`
-	RunID       int64  `json:"run_id"`
-	Name        string `json:"name"`
-	Status      string `json:"status"`
-	Conclusion  string `json:"conclusion"`
-	HTMLURL     string `json:"html_url"`
-	StartedAt   string `json:"started_at"`
-	CompletedAt string `json:"completed_at"`
-	RunnerID    *int64 `json:"runner_id"`
-	RunnerName  string `json:"runner_name"`
+	ID          int64           `json:"id"`
+	RunID       int64           `json:"run_id"`
+	Name        string          `json:"name"`
+	Status      string          `json:"status"`
+	Conclusion  string          `json:"conclusion"`
+	HTMLURL     string          `json:"html_url"`
+	StartedAt   string          `json:"started_at"`
+	CompletedAt string          `json:"completed_at"`
+	RunnerID    *int64          `json:"runner_id"`
+	RunnerName  string          `json:"runner_name"`
+	Labels      json.RawMessage `json:"labels"`
+	Message     string          `json:"message"`
 	Steps       json.RawMessage `json:"steps"`
 }
 
@@ -490,6 +492,11 @@ func (c *Client) DetectCapabilities(ctx context.Context) (*models.Capabilities, 
 		// Cancel endpoint landed in newer Gitea; still advertise when Actions works and
 		// treat forge 404/405 as ErrUnsupported at call time.
 		caps.CancelWorkflowAPI = true
+	}
+	if err := c.probeOK(ctx, http.MethodGet, "/admin/actions/runners", url.Values{"limit": {"1"}, "page": {"1"}}); err == nil {
+		caps.RunnersAPI = true
+	} else if err := c.probeOK(ctx, http.MethodGet, "/user/actions/runners", url.Values{"limit": {"1"}, "page": {"1"}}); err == nil {
+		caps.RunnersAPI = true
 	}
 	return caps, nil
 }
@@ -1031,6 +1038,11 @@ func mapJob(j giteaJob) models.Job {
 		s := string(j.Steps)
 		steps = &s
 	}
+	var labels *string
+	if len(j.Labels) > 0 && string(j.Labels) != "null" {
+		s := string(j.Labels)
+		labels = &s
+	}
 	return models.Job{
 		ExternalID:         j.ID,
 		Name:               j.Name,
@@ -1044,6 +1056,8 @@ func mapJob(j giteaJob) models.Job {
 		StartedAt:          parseOptionalTime(j.StartedAt),
 		CompletedAt:        parseOptionalTime(j.CompletedAt),
 		StepsJSON:          steps,
+		LabelsJSON:         labels,
+		Message:            strings.TrimSpace(j.Message),
 	}
 }
 

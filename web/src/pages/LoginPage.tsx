@@ -47,9 +47,16 @@ export function LoginPage({ onLoggedIn }: Props) {
   const basePath = window.__GITSEER_BASE__ || ui.base_path || "";
   const oauthHref = `${basePath}/api/v1/auth/login`;
   const githubOAuthHref = `${basePath}/api/v1/auth/github/login`;
+  const gitlabOAuthHref = `${basePath}/api/v1/auth/gitlab/login`;
+  const bitbucketOAuthHref = `${basePath}/api/v1/auth/bitbucket/login`;
+  const forgejoOAuthHref = `${basePath}/api/v1/auth/forgejo/login`;
   const showOAuth = configState === "ready" && ui.oauth_enabled === true;
   const showGitHubOAuth = configState === "ready" && ui.github_oauth_enabled === true;
-  const showForgeOAuth = showOAuth || showGitHubOAuth;
+  const showGitLabOAuth = configState === "ready" && ui.gitlab_oauth_enabled === true;
+  const showBitbucketOAuth = configState === "ready" && ui.bitbucket_oauth_enabled === true;
+  const showForgejoOAuth = configState === "ready" && ui.forgejo_oauth_enabled === true;
+  const showForgeOAuth =
+    showOAuth || showGitHubOAuth || showGitLabOAuth || showBitbucketOAuth || showForgejoOAuth;
   const showBootstrap = configState === "ready" && ui.bootstrap_enabled === true;
 
   return (
@@ -69,9 +76,32 @@ export function LoginPage({ onLoggedIn }: Props) {
               Continue with Gitea
             </a>
           )}
+          {showForgejoOAuth && (
+            <a className={`btn${!showOAuth ? " primary" : ""}`} href={forgejoOAuthHref}>
+              Continue with Forgejo
+            </a>
+          )}
           {showGitHubOAuth && (
-            <a className={`btn${showOAuth ? "" : " primary"}`} href={githubOAuthHref}>
+            <a className={`btn${!showOAuth && !showForgejoOAuth ? " primary" : ""}`} href={githubOAuthHref}>
               Continue with GitHub
+            </a>
+          )}
+          {showGitLabOAuth && (
+            <a
+              className={`btn${!showOAuth && !showForgejoOAuth && !showGitHubOAuth ? " primary" : ""}`}
+              href={gitlabOAuthHref}
+            >
+              Continue with GitLab
+            </a>
+          )}
+          {showBitbucketOAuth && (
+            <a
+              className={`btn${
+                !showOAuth && !showForgejoOAuth && !showGitHubOAuth && !showGitLabOAuth ? " primary" : ""
+              }`}
+              href={bitbucketOAuthHref}
+            >
+              Continue with Bitbucket
             </a>
           )}
 
