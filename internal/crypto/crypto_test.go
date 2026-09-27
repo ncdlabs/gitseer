@@ -1,6 +1,11 @@
 package crypto_test
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"io"
 	"strings"
 	"testing"
 
@@ -19,6 +24,13 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	if ct == "" || ct == "super-secret" {
 		t.Fatalf("ciphertext = %q", ct)
 	}
+	raw, err := base64.StdEncoding.DecodeString(ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 4 || string(raw[:3]) != "GSe" || raw[3] != 1 {
+		t.Fatalf("expected versioned envelope header GSe\\x01, got %q", raw[:min(4, len(raw))])
+	}
 	pt, err := gitseercrypto.Decrypt(key, ct)
 	if err != nil {
 		t.Fatal(err)
@@ -26,6 +38,56 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	if pt != "super-secret" {
 		t.Fatalf("plaintext = %q", pt)
 	}
+}
+
+func TestDecryptLegacyUnversioned(t *testing.T) {
+	key, err := gitseercrypto.KeyFromString("twenty-four-chars-ok-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := sealLegacyForTest(key, "legacy-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := gitseercrypto.Decrypt(key, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt != "legacy-secret" {
+		t.Fatalf("plaintext = %q", pt)
+	}
+	// Reencrypt upgrades to versioned envelope.
+	upgraded, err := gitseercrypto.Reencrypt(key, key, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(upgraded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 4 || string(raw[:3]) != "GSe" || raw[3] != 1 {
+		t.Fatalf("reencrypt should write versioned envelope, got %q", raw[:min(4, len(raw))])
+	}
+	if !gitseercrypto.LooksLikeCiphertext(legacy) {
+		t.Fatal("legacy blob should look like ciphertext")
+	}
+}
+
+func sealLegacyForTest(key []byte, plaintext string) (string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	out := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(out), nil
 }
 
 func TestLooksLikeCiphertext(t *testing.T) {

@@ -145,7 +145,7 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 | ADR-019 | **Config:** YAML file + env overrides (`GITSEER_*`); secrets via `_FILE` suffix pattern | Foundation |
 | ADR-020 | **Frontend:** Vite + React 18/19 + TS; TanStack Query + TanStack Table; React Flow for DAGs; CSS variables + small primitives (no heavy UI kit) | Foundation |
 | ADR-021 | **Session store:** server-side sessions in DB (SQLite/PG); signed cookie session ID; no JWT-as-session for V1 | Auth phase |
-| ADR-022 | **Credential encryption:** AES-256-GCM; passphrase via `GITSEER_ENCRYPTION_KEY` (min 16 at config load; wizard paste min 24) hashed with SHA-256 to a 32-byte AES key; rotate via `gitseer rotate-encryption-key` (re-seal DB secrets, update on-disk key file when used) | Auth/sync |
+| ADR-022 | **Credential encryption:** AES-256-GCM sealed envelope (`GSe` + version byte + nonce‖ciphertext); passphrase via `GITSEER_ENCRYPTION_KEY` (min 16 at config load; wizard paste min 24) hashed with SHA-256 to a 32-byte AES key (v1 derivation — not a password KDF); Decrypt accepts legacy unversioned blobs; rotate via `gitseer rotate-encryption-key` (re-seal DB secrets under current envelope, update on-disk key file when used) | Auth/sync |
 | ADR-023 | **User repo ACL cache:** table `user_repository_access` refreshed on login + periodic + webhook-driven invalidation; **every** list/aggregate query joins/filters by it | Authz — critical |
 | ADR-024 | **Webhook processing:** accept → persist raw envelope → `202`/`200` quickly → in-process worker pool (no Redis) | Sync |
 | ADR-025 | **SSE:** one stream per authenticated session; events are opaque entity refs (`type`, `id`, `repo_id`); clients refetch via Query | Realtime |

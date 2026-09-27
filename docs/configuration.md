@@ -88,7 +88,7 @@ Unreadable `*_FILE` paths fail config load (no silent clear).
 
 ## Encryption key
 
-`GITSEER_ENCRYPTION_KEY` (or file / wizard-persisted `gitseer.encryption_key` beside the DB) is required to **persist** forge secrets and OAuth tokens in the database. The passphrase is hashed with SHA-256 to derive the AES key (not a password KDF — use high-entropy keys).
+`GITSEER_ENCRYPTION_KEY` (or file / wizard-persisted `gitseer.encryption_key` beside the DB) is required to **persist** forge secrets and OAuth tokens in the database. The passphrase is hashed with SHA-256 to derive the AES key (envelope version 1 — not a password KDF; use high-entropy keys). Ciphertext is base64(`GSe` ‖ version ‖ nonce ‖ ciphertext); older unversioned blobs still decrypt.
 
 | Path | Minimum length |
 |------|----------------|

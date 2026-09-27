@@ -135,22 +135,17 @@ func upsertMarkedFile(path, begin, end, snippet string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if strings.Contains(existing, begin) && strings.Contains(existing, end) {
-		updated, err := replaceBetween(existing, begin, end, snippet)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(path, []byte(updated), 0o644)
+	// Strip every marked block first so re-install / restructured templates cannot
+	// double-insert when markers are duplicated or partially left behind.
+	cleaned, err := removeAllBetween(existing, begin, end)
+	if err != nil {
+		return err
 	}
-	// Preserve any admin content; append marked block.
-	out := existing
+	out := cleaned
 	if out != "" && !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
-	out += snippet
-	if !strings.HasSuffix(out, "\n") {
-		out += "\n"
-	}
+	out += strings.TrimRight(snippet, "\n") + "\n"
 	return os.WriteFile(path, []byte(out), 0o644)
 }
 
@@ -162,7 +157,7 @@ func stripMarkedFile(path, begin, end string) error {
 		}
 		return err
 	}
-	updated, err := removeBetween(string(b), begin, end)
+	updated, err := removeAllBetween(string(b), begin, end)
 	if err != nil {
 		return err
 	}
@@ -173,28 +168,25 @@ func stripMarkedFile(path, begin, end string) error {
 	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
-func replaceBetween(content, begin, end, replacement string) (string, error) {
-	start := strings.Index(content, begin)
-	stop := strings.Index(content, end)
-	if start < 0 || stop < 0 || stop < start {
-		return "", fmt.Errorf("malformed markers in file")
+// removeAllBetween removes every begin…end region (idempotent). Orphan begin/end
+// pairs (begin without matching end, or unequal counts) fail closed.
+func removeAllBetween(content, begin, end string) (string, error) {
+	begins := strings.Count(content, begin)
+	ends := strings.Count(content, end)
+	if begins != ends {
+		return "", fmt.Errorf("malformed markers: found %d %q and %d %q (run uninstall-ui or fix the template)", begins, begin, ends, end)
 	}
-	stop += len(end)
-	return content[:start] + strings.TrimRight(replacement, "\n") + content[stop:], nil
-}
-
-func removeBetween(content, begin, end string) (string, error) {
-	start := strings.Index(content, begin)
-	stop := strings.Index(content, end)
-	if start < 0 || stop < 0 {
-		return content, nil
+	for begins > 0 {
+		start := strings.Index(content, begin)
+		stop := strings.Index(content[start:], end)
+		if start < 0 || stop < 0 {
+			return "", fmt.Errorf("malformed markers in file")
+		}
+		stop = start + stop + len(end)
+		content = content[:start] + content[stop:]
+		begins--
 	}
-	if stop < start {
-		return "", fmt.Errorf("malformed markers in file")
-	}
-	stop += len(end)
-	out := content[:start] + content[stop:]
-	return out, nil
+	return content, nil
 }
 
 func sanitizeGitSeerURL(raw string) (string, error) {

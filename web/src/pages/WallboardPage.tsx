@@ -7,7 +7,11 @@ import { relativeAge } from "../lib/relativeAge";
 
 const TOKEN_KEY = "gitseer-wallboard-token";
 
-/** Public read-only wallboard (token in query or localStorage). */
+/**
+ * Public read-only wallboard (token in query or localStorage).
+ * localStorage is deliberate for shared-display kiosks (no session cookie); the
+ * token is read-only scoped and CSP script-src 'self' keeps XSS risk low.
+ */
 export function WallboardPage() {
   const [params, setParams] = useSearchParams();
   const queryToken = params.get("token") || "";
@@ -67,8 +71,9 @@ export function WallboardPage() {
         </div>
         <p className="settings-form__hint">
           Threat model: anyone with the token can read summary and open attention. Tokens do not allow writes,
-          sync, settings, or forge credentials. Prefer rotating/revoking tokens if a display is shared or
-          compromised. Prefer HTTPS and avoid embedding tokens in public bookmarks when possible.
+          sync, settings, or forge credentials. The token is stored in this browser&apos;s localStorage so a
+          shared wallboard display stays signed in across reloads — revoke it if the display is compromised.
+          Prefer HTTPS and Bearer over query-string tokens when possible.
         </p>
       </div>
     );

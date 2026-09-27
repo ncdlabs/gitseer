@@ -186,9 +186,11 @@ func ApplyPathPrefix(redirectTo, prefix string) string {
 	return strings.TrimRight(prefix, "/") + redirectTo
 }
 
-// constantTimeStringEqual compares a and b in roughly constant time without using a
-// password-hashing algorithm. Length is compared first via ConstantTimeEq; both
-// values are padded into fixed buffers so ConstantTimeCompare always sees equal length.
+// constantTimeStringEqual compares a and b without leaking which bytes differ.
+// subtle.ConstantTimeCompare alone is not enough: it returns immediately when
+// lengths differ, which would let an attacker time bootstrap-password guesses
+// by length. We zero-pad both sides into fixed buffers so Compare always runs
+// the same work, then AND with ConstantTimeEq on the original lengths.
 func constantTimeStringEqual(a, b string) bool {
 	const maxLen = 4096
 	if len(a) > maxLen || len(b) > maxLen {

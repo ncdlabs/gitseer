@@ -11,6 +11,7 @@ Markers:
 - `<!-- BEGIN GITSEER-TABS -->` … `<!-- END GITSEER-TABS -->`
 
 Admin content outside markers is preserved. `uninstall-ui` removes only marker blocks.
+`install-ui` strips every existing marker pair before writing, so re-runs cannot double-insert.
 
 GitSeer links use `target="_blank"` so clicking them from Gitea opens GitSeer in a new tab and leaves the current Gitea page.
 

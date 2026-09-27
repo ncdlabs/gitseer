@@ -11,7 +11,7 @@ FROM golang:1.26-alpine AS backend
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum* ./
-RUN go mod download || true
+RUN go mod download
 COPY . .
 COPY --from=frontend /src/web/dist ./internal/server/ui/dist
 # Avoid `go mod tidy` in-image (QEMU amd64 builds often SIGSEGV the toolchain).

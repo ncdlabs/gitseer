@@ -70,6 +70,76 @@ func TestInstallIncludesInstanceID(t *testing.T) {
 	}
 }
 
+func TestInstallIdempotentNoDoubleInsert(t *testing.T) {
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom")
+	if err := Install(custom, "https://gitseer.example.com", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(custom, "https://gitseer.example.com/v2", 0); err != nil {
+		t.Fatal(err)
+	}
+	links := filepath.Join(custom, "templates", "custom", ExtraLinksRel)
+	b, err := os.ReadFile(links)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Count(s, beginLinks) != 1 || strings.Count(s, endLinks) != 1 {
+		t.Fatalf("expected single marker pair after re-install: %s", s)
+	}
+	if !strings.Contains(s, "https://gitseer.example.com/v2") {
+		t.Fatalf("URL not updated: %s", s)
+	}
+	if strings.Count(s, "https://gitseer.example.com") != 1 {
+		t.Fatalf("expected exactly one gitseer URL: %s", s)
+	}
+}
+
+func TestInstallRejectsMalformedMarkers(t *testing.T) {
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom")
+	tmpl := filepath.Join(custom, "templates", "custom")
+	if err := os.MkdirAll(tmpl, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tmpl, ExtraLinksRel)
+	if err := os.WriteFile(path, []byte(beginLinks+"\norphan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(custom, "https://gitseer.example.com", 0); err == nil {
+		t.Fatal("expected error on begin without end")
+	}
+}
+
+func TestInstallStripsDuplicateMarkers(t *testing.T) {
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom")
+	tmpl := filepath.Join(custom, "templates", "custom")
+	if err := os.MkdirAll(tmpl, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tmpl, ExtraLinksRel)
+	dup := beginLinks + "\nold\n" + endLinks + "\n" + beginLinks + "\nalso\n" + endLinks + "\n"
+	if err := os.WriteFile(path, []byte(dup), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(custom, "https://gitseer.example.com", 0); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Count(s, beginLinks) != 1 {
+		t.Fatalf("expected one begin after install: %s", s)
+	}
+	if strings.Contains(s, "old") || strings.Contains(s, "also") {
+		t.Fatalf("old blocks not stripped: %s", s)
+	}
+}
+
 func TestSnippetFilesMatchesInstall(t *testing.T) {
 	files, err := SnippetFiles("https://gitseer.example.com/", 7)
 	if err != nil {
