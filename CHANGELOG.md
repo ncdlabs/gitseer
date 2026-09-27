@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-27
+
 ### Added
 
 - Dual-forge feature completeness: PR `review_state` from forge review APIs + `pull_request_review` webhooks; GitHub Checks/status merge into `ci_state`; status/check webhook apply.
