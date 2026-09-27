@@ -146,10 +146,19 @@ jobs:
             ghcr.io/ncdlabs/gitseer:latest
 
       # New org packages default to private; strangers cannot pull until public.
+      # GITHUB_TOKEN often cannot change org package visibility (404); RELEASE_TOKEN
+      # (repo admin PAT with packages admin / admin:org) can.
       - name: Make GHCR package public
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "RELEASE_TOKEN secret is required to publish a public GHCR package" >&2
+            exit 1
+          fi
+          echo "Listing org container packages (debug)…"
+          gh api "/orgs/ncdlabs/packages?package_type=container" --jq '.[].name' || true
           for attempt in 1 2 3 4 5; do
             if gh api \
               --method PUT \
