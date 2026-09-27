@@ -137,22 +137,48 @@ func (s *Service) SetEncryptionKey(key []byte) {
 	s.encKey = append([]byte(nil), key...)
 }
 
-// SafeRedirectPath allows only same-app relative paths (no scheme, no //).
+// SafeRedirectPath allows only same-app relative paths (no scheme, no // or /\).
 func SafeRedirectPath(redirectTo string) string {
 	redirectTo = strings.TrimSpace(redirectTo)
 	if redirectTo == "" {
 		return "/"
 	}
-	if strings.Contains(redirectTo, "://") || strings.HasPrefix(redirectTo, "//") {
+	// Require a single leading "/", and reject protocol-relative "//" / "/\" forms.
+	if len(redirectTo) < 1 || redirectTo[0] != '/' ||
+		(len(redirectTo) > 1 && (redirectTo[1] == '/' || redirectTo[1] == '\\')) {
 		return "/"
 	}
-	if strings.ContainsAny(redirectTo, "\\\r\n\t") {
-		return "/"
-	}
-	if !strings.HasPrefix(redirectTo, "/") {
+	if strings.Contains(redirectTo, "://") || strings.ContainsAny(redirectTo, "\\\r\n\t") {
 		return "/"
 	}
 	return redirectTo
+}
+
+// ApplyPathPrefix prepends the app path prefix to a SafeRedirectPath result when needed.
+func ApplyPathPrefix(redirectTo, prefix string) string {
+	redirectTo = SafeRedirectPath(redirectTo)
+	if prefix == "" || strings.HasPrefix(redirectTo, prefix) {
+		return redirectTo
+	}
+	if redirectTo == "/" {
+		return strings.TrimRight(prefix, "/") + "/"
+	}
+	return strings.TrimRight(prefix, "/") + redirectTo
+}
+
+// constantTimeStringEqual compares a and b in roughly constant time without using a
+// password-hashing algorithm. Length is compared first via ConstantTimeEq; both
+// values are padded into fixed buffers so ConstantTimeCompare always sees equal length.
+func constantTimeStringEqual(a, b string) bool {
+	const maxLen = 4096
+	if len(a) > maxLen || len(b) > maxLen {
+		return false
+	}
+	var ab, bb [maxLen]byte
+	copy(ab[:], a)
+	copy(bb[:], b)
+	lenEq := subtle.ConstantTimeEq(int32(len(a)), int32(len(b)))
+	return subtle.ConstantTimeCompare(ab[:], bb[:]) == 1 && lenEq == 1
 }
 
 // LoginBootstrap validates the shared setup password and creates a session.
@@ -163,10 +189,7 @@ func (s *Service) LoginBootstrap(ctx context.Context, password, ip, ua string) (
 	if bootstrapPW == "" {
 		return nil, "", fmt.Errorf("bootstrap auth is not configured")
 	}
-	// Hash both sides so ConstantTimeCompare always runs on equal-length digests.
-	got := sha256.Sum256([]byte(password))
-	want := sha256.Sum256([]byte(bootstrapPW))
-	if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+	if !constantTimeStringEqual(password, bootstrapPW) {
 		return nil, "", ErrInvalidCredentials
 	}
 	user, err := s.store.EnsureBootstrapUser(ctx)

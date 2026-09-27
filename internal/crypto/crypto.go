@@ -89,6 +89,9 @@ func LooksLikeBase64Blob(stored string) bool {
 // operators should use a high-entropy key (wizard-generated or ≥24 random chars).
 // Changing the derivation would invalidate existing sealed rows.
 // Minimum length remains 16 for compatibility with existing installs; prefer ≥24 for new keys.
+//
+// CodeQL may flag SHA-256 here as weak password hashing; that is a false positive —
+// the input is an encryption key, not a user password.
 func KeyFromString(s string) ([]byte, error) {
 	if s == "" {
 		return nil, fmt.Errorf("encryption key is empty")

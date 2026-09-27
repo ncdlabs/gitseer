@@ -57,15 +57,7 @@ func (h *Handler) githubOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auth.SetSessionCookie(w, result.SessionToken)
 	_, _ = h.auth.IssueCSRFToken(w)
-	redirectTo := auth.SafeRedirectPath(result.RedirectTo)
-	if prefix := h.cfg.PathPrefix(); prefix != "" && !strings.HasPrefix(redirectTo, prefix) {
-		if redirectTo == "/" {
-			redirectTo = prefix + "/"
-		} else if strings.HasPrefix(redirectTo, "/") {
-			redirectTo = prefix + redirectTo
-		}
-	}
-	http.Redirect(w, r, redirectTo, http.StatusFound)
+	http.Redirect(w, r, auth.ApplyPathPrefix(result.RedirectTo, h.cfg.PathPrefix()), http.StatusFound)
 }
 
 func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {

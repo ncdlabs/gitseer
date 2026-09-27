@@ -44,6 +44,7 @@ func TestSafeRedirectPath(t *testing.T) {
 		"/pipelines/1":         "/pipelines/1",
 		"https://evil.example": "/",
 		"//evil.example":       "/",
+		"/\\evil.example":      "/",
 		"pipelines":            "/",
 		"/\r\nLocation: x":     "/",
 	}
@@ -51,5 +52,34 @@ func TestSafeRedirectPath(t *testing.T) {
 		if got := SafeRedirectPath(in); got != want {
 			t.Fatalf("SafeRedirectPath(%q)=%q want %q", in, got, want)
 		}
+	}
+}
+
+func TestApplyPathPrefix(t *testing.T) {
+	cases := []struct {
+		path, prefix, want string
+	}{
+		{"/pipelines", "", "/pipelines"},
+		{"/pipelines", "/app", "/app/pipelines"},
+		{"/", "/app", "/app/"},
+		{"/app/x", "/app", "/app/x"},
+		{"//evil", "/app", "/app/"},
+	}
+	for _, tc := range cases {
+		if got := ApplyPathPrefix(tc.path, tc.prefix); got != tc.want {
+			t.Fatalf("ApplyPathPrefix(%q,%q)=%q want %q", tc.path, tc.prefix, got, tc.want)
+		}
+	}
+}
+
+func TestConstantTimeStringEqual(t *testing.T) {
+	if !constantTimeStringEqual("same", "same") {
+		t.Fatal("expected equal strings to match")
+	}
+	if constantTimeStringEqual("a", "b") {
+		t.Fatal("expected different strings to mismatch")
+	}
+	if constantTimeStringEqual("short", "longer") {
+		t.Fatal("expected different lengths to mismatch")
 	}
 }
