@@ -4,10 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-27
+
 ### Fixed
 
 - Bitbucket OAuth now hashes user IDs with `bitbucket.StableID` (FNV-64a), matching sync/webhooks. Next login remaps any stale 1.0.1 OAuth identity hash in place.
-
 ## [1.0.1] - 2026-09-27
 
 ### Added
