@@ -90,7 +90,7 @@ The [cut-release](../.github/workflows/cut-release.yaml) workflow bumps `cmd/git
 
 Repo secrets:
 
-- `RELEASE_TOKEN` (**required** for cut-release) — classic PAT (`repo`) or fine-grained token for a repo admin who can bypass the locked / PR-required `main` branch. Used to push the version commit + tag; a PAT (not `GITHUB_TOKEN`) is also required so the tag push triggers `release.yaml`.
+- `RELEASE_TOKEN` (**required** for cut-release and for making the GHCR package **public**) — classic PAT with `repo` plus `read:packages` / `write:packages` (and org package admin as needed), or a fine-grained token for a repo admin who can bypass the locked / PR-required `main` branch. Used to push the version commit + tag; a PAT (not `GITHUB_TOKEN`) is also required so the tag push triggers `release.yaml`. Without packages scopes, the release image may push as a private org package and anonymous `podman pull` will fail.
 - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — optional Docker Hub publish (skipped when unset; GHCR still publishes and is the documented public path). GHCR uses `GITHUB_TOKEN`.
 
 ```bash
