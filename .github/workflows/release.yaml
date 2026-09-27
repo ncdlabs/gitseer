@@ -146,19 +146,24 @@ jobs:
             ghcr.io/ncdlabs/gitseer:latest
 
       # New org packages default to private; strangers cannot pull until public.
-      # GITHUB_TOKEN often cannot change org package visibility (404); RELEASE_TOKEN
-      # (repo admin PAT with packages admin / admin:org) can.
+      # GITHUB_TOKEN can usually read visibility; flipping private→public often needs
+      # RELEASE_TOKEN with packages scopes. Skip the flip when already public.
       - name: Make GHCR package public
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "${GH_TOKEN}" ]]; then
-            echo "RELEASE_TOKEN secret is required to publish a public GHCR package" >&2
+          vis="$(gh api "/orgs/ncdlabs/packages/container/gitseer" --jq .visibility 2>/dev/null || echo unknown)"
+          if [[ "$vis" == "public" ]]; then
+            echo "ghcr.io/ncdlabs/gitseer is already public"
+            exit 0
+          fi
+          if [[ -z "${RELEASE_TOKEN}" ]]; then
+            echo "RELEASE_TOKEN is required to flip GHCR visibility (current=${vis})" >&2
             exit 1
           fi
-          echo "Listing org container packages (debug)…"
-          gh api "/orgs/ncdlabs/packages?package_type=container" --jq '.[].name' || true
+          export GH_TOKEN="$RELEASE_TOKEN"
           for attempt in 1 2 3 4 5; do
             if gh api \
               --method PUT \
@@ -171,7 +176,14 @@ jobs:
             echo "visibility update attempt ${attempt} failed; retrying…"
             sleep $((attempt * 2))
           done
-          echo "Failed to set package visibility to public" >&2
+          # Final check with GITHUB_TOKEN in case the flip succeeded but listing scopes differ.
+          export GH_TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          vis="$(gh api "/orgs/ncdlabs/packages/container/gitseer" --jq .visibility 2>/dev/null || echo unknown)"
+          if [[ "$vis" == "public" ]]; then
+            echo "ghcr.io/ncdlabs/gitseer is public"
+            exit 0
+          fi
+          echo "Failed to set package visibility to public (current=${vis}). RELEASE_TOKEN needs read:packages/write:packages (+ org package admin)." >&2
           exit 1
 
       - name: Extract changelog section
