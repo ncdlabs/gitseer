@@ -19,7 +19,7 @@
 - Creates/uses bootstrap admin with allow-all repository access
 - Leave empty in Compose by default to disable
 
-GitHub inventory uses a **service PAT** on the GitHub instance. There is no GitHub OAuth login in this slice.
+GitHub inventory uses a **service PAT** on the GitHub instance for sync/job logs (bootstrap). There is no GitHub OAuth login in this slice; ordinary OAuth users are **not** auto-granted GitHub repository ACL.
 
 ## Primary Gitea instance
 
@@ -60,7 +60,7 @@ Issued via `/api/v1/ui-config` and rotated on session create / `/auth/me`.
 - Bootstrap admins see all repos
 - Sync does **not** auto-grant ACL rows
 - ACL refresh: on OAuth login and every `auth.acl_refresh_interval` (default **6h**) for users with decryptable OAuth tokens, scoped to that user’s Gitea `instance_id`
-- On the same refresh, authenticated OAuth users also receive read ACL for every indexed GitHub repository visible to each GitHub instance’s service PAT (no per-user GitHub OAuth this slice)
+- The same refresh **clears** any prior GitHub ACL rows for that user (GitHub has no per-user OAuth in this slice; bootstrap admins keep allow-all)
 - OAuth access tokens are refreshed via `refresh_token` when expiry is within ~2 minutes
 - Token / integration-secret persistence in the DB requires an encryption key (seal fail-closed without it). Env/config min length **16**; wizard paste min **24** — see [Configuration](configuration.md#encryption-key). The setup wizard **Prepare** step can generate or paste a key when env/config is unset.
 - Gitea login `bootstrap` is reserved; OAuth cannot inherit the bootstrap-admin row

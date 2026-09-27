@@ -126,7 +126,8 @@ func (h *Handler) deleteInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 // forgeStatusEntry builds one system-status forges[] row from an instance.
-func forgeStatusEntry(inst *models.Instance) map[string]any {
+// When redactSensitive is true, SSRF/unsigned flags are omitted (non-admin viewers).
+func forgeStatusEntry(inst *models.Instance, redactSensitive bool) map[string]any {
 	ft := inst.ForgeType
 	if ft == "" {
 		ft = models.ForgeTypeGitea
@@ -144,10 +145,12 @@ func forgeStatusEntry(inst *models.Instance) map[string]any {
 		"connected":                 strings.TrimSpace(inst.Version) != "",
 		"webhook_hmac":              strings.TrimSpace(inst.WebhookSecretCiphertext) != "",
 		"oauth_configured":          oauthConfigured,
-		"allow_private_network":     inst.AllowPrivateNetwork,
-		"allow_unsigned":            inst.AllowUnsignedWebhooks,
 		"token_configured":          tokenConfigured,
 		"webhook_secret_configured": strings.TrimSpace(inst.WebhookSecretCiphertext) != "",
+	}
+	if !redactSensitive {
+		entry["allow_private_network"] = inst.AllowPrivateNetwork
+		entry["allow_unsigned"] = inst.AllowUnsignedWebhooks
 	}
 	if strings.TrimSpace(inst.Version) != "" {
 		entry["version"] = inst.Version

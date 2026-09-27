@@ -351,11 +351,17 @@ func IsLoopbackExternalURL(raw string) bool {
 }
 
 // CookieSecureResolved returns whether the session cookie should be Secure.
+// Explicit auth.cookie_secure wins. Otherwise: https:// → true; empty external_url
+// → true (fail-closed when public URL unset); http:// (including localhost) → false.
 func (c Config) CookieSecureResolved() bool {
 	if c.Auth.CookieSecure != nil {
 		return *c.Auth.CookieSecure
 	}
-	return strings.HasPrefix(strings.ToLower(c.Server.ExternalURL), "https://")
+	u := strings.TrimSpace(c.Server.ExternalURL)
+	if u == "" {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(u), "https://")
 }
 
 // PathPrefix returns the HTTP path prefix derived from external_url (e.g. "/gitseer") or "".

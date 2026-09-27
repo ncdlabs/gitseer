@@ -280,3 +280,45 @@ func TestFullSyncClosesOrphanedInFlightRuns(t *testing.T) {
 		t.Fatalf("jobs=%+v", jobs)
 	}
 }
+
+func TestFullSyncLeavesInFlightOnForbidden(t *testing.T) {
+	ctx := context.Background()
+	svc, st := setupSync(t)
+
+	f := &mockForge{
+		actionsEnabled: true,
+		repos: []models.Repository{
+			{ExternalID: 1, Owner: "coThink", Name: "api", FullName: "coThink/api", DefaultBranch: "main"},
+		},
+		getRunErr: map[int64]error{12550: fmt.Errorf("gitea api 403 Forbidden: denied")},
+	}
+	if _, err := svc.FullSync(ctx, f, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.GetPrimaryInstance(ctx)
+	if err != nil || inst == nil {
+		t.Fatalf("instance: %v", err)
+	}
+	repos, err := st.ListAllAliveRepos(ctx, inst.ID)
+	if err != nil || len(repos) != 1 {
+		t.Fatalf("repos: %v len=%d", err, len(repos))
+	}
+	run, err := st.UpsertWorkflowRun(ctx, repos[0].ID, models.WorkflowRun{
+		ExternalID: 12550, Name: "ci.yaml", Status: models.StatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.FullSync(ctx, f, models.ForgeTypeGitea, "lab", "https://git.example.com", 30); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.GetWorkflowRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.StatusQueued {
+		t.Fatalf("403 must not cancel in-flight run, status=%s", got.Status)
+	}
+}

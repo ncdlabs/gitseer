@@ -329,16 +329,24 @@ func (s *Store) ClaimPendingWebhooks(ctx context.Context, limit int) ([]WebhookE
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Retry failed applies with exponential-ish backoff until MaxWebhookAttempts.
+	retryBefore := formatTime(time.Now().UTC().Add(-30 * time.Second))
 	selectSQL := `
 SELECT id, instance_id, delivery_id, event_type, payload_json, attempts
-FROM webhook_events WHERE status='pending' ORDER BY id ASC LIMIT ?`
+FROM webhook_events
+WHERE status='pending'
+   OR (status='error' AND attempts < ? AND processed_at IS NOT NULL AND processed_at < ?)
+ORDER BY id ASC LIMIT ?`
 	if s.driver == "postgres" {
 		selectSQL = `
 SELECT id, instance_id, delivery_id, event_type, payload_json, attempts
-FROM webhook_events WHERE status='pending' ORDER BY id ASC LIMIT ?
+FROM webhook_events
+WHERE status='pending'
+   OR (status='error' AND attempts < ? AND processed_at IS NOT NULL AND processed_at < ?)
+ORDER BY id ASC LIMIT ?
 FOR UPDATE SKIP LOCKED`
 	}
-	rows, err := tx.QueryContext(ctx, s.sql(selectSQL), limit)
+	rows, err := tx.QueryContext(ctx, s.sql(selectSQL), MaxWebhookAttempts, retryBefore, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -361,8 +369,8 @@ FOR UPDATE SKIP LOCKED`
 	var out []WebhookEvent
 	for _, e := range candidates {
 		res, err := tx.ExecContext(ctx, s.sql(`
-UPDATE webhook_events SET status='processing', processing_started_at=?
-WHERE id=? AND status='pending'`), now, e.ID)
+UPDATE webhook_events SET status='processing', processing_started_at=?, error=''
+WHERE id=? AND (status='pending' OR status='error')`), now, e.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -385,6 +393,9 @@ type WebhookEvent struct {
 	Payload    string
 	Attempts   int
 }
+
+// MaxWebhookAttempts caps apply retries for status=error rows.
+const MaxWebhookAttempts = 5
 
 func (s *Store) MarkWebhookProcessed(ctx context.Context, id int64, errMsg string) error {
 	now := formatTime(time.Now().UTC())

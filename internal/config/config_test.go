@@ -125,6 +125,28 @@ func TestValidateRejectsSkipSetupOnPublicURL(t *testing.T) {
 	}
 }
 
+func TestCookieSecureResolved(t *testing.T) {
+	cfg := Default()
+	cfg.Server.ExternalURL = ""
+	if !cfg.CookieSecureResolved() {
+		t.Fatal("empty external_url should default Secure=true")
+	}
+	cfg.Server.ExternalURL = "https://gitseer.example.com"
+	if !cfg.CookieSecureResolved() {
+		t.Fatal("https should be Secure")
+	}
+	cfg.Server.ExternalURL = "http://127.0.0.1:8090"
+	if cfg.CookieSecureResolved() {
+		t.Fatal("http localhost should not force Secure")
+	}
+	b := false
+	cfg.Auth.CookieSecure = &b
+	cfg.Server.ExternalURL = "https://gitseer.example.com"
+	if cfg.CookieSecureResolved() {
+		t.Fatal("explicit false must win")
+	}
+}
+
 func TestValidateRejectsShortEncryptionKey(t *testing.T) {
 	cfg := Default()
 	cfg.Auth.EncryptionKey = "short"

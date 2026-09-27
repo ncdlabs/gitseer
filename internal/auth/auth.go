@@ -29,6 +29,7 @@ import (
 const CookieName = "gitseer_session"
 const CSRFCookieName = "gitseer_csrf"
 const CSRFHeaderName = "X-CSRF-Token"
+const OAuthStateCookieName = "gitseer_oauth_state"
 
 var ErrUnauthorized = errors.New("unauthorized")
 var ErrInvalidCredentials = errors.New("invalid credentials")
@@ -173,8 +174,8 @@ func (s *Service) LoginBootstrap(ctx context.Context, password, ip, ua string) (
 	return user, token, nil
 }
 
-// BeginOAuth creates PKCE state and returns the Gitea authorize URL.
-func (s *Service) BeginOAuth(ctx context.Context, redirectTo string) (authorizeURL string, err error) {
+// BeginOAuth creates PKCE state, sets an HttpOnly state cookie, and returns the Gitea authorize URL.
+func (s *Service) BeginOAuth(ctx context.Context, w http.ResponseWriter, redirectTo string) (authorizeURL string, err error) {
 	if !s.OAuthEnabled() {
 		return "", ErrOAuthNotConfigured
 	}
@@ -192,6 +193,7 @@ func (s *Service) BeginOAuth(ctx context.Context, redirectTo string) (authorizeU
 	if err := s.store.SaveOAuthState(ctx, state, verifier, redirectTo, expires); err != nil {
 		return "", err
 	}
+	s.setOAuthStateCookie(w, state)
 	s.mu.RLock()
 	clientID := s.cfg.OAuthClientID
 	baseURL := s.cfg.GiteaBaseURL
@@ -208,14 +210,22 @@ func (s *Service) BeginOAuth(ctx context.Context, redirectTo string) (authorizeU
 	return authURL, nil
 }
 
-// CompleteOAuth validates state, exchanges the code, upserts the user, and creates a session.
+// CompleteOAuth validates state (DB + cookie), exchanges the code, upserts the user, and creates a session.
 // Returns user, session cookie token, post-login redirect path, and access token for ACL refresh.
-func (s *Service) CompleteOAuth(ctx context.Context, code, state, ip, ua string) (*models.User, string, string, string, error) {
+func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.ResponseWriter, code, state, ip, ua string) (*models.User, string, string, string, error) {
 	if !s.OAuthEnabled() {
 		return nil, "", "", "", ErrOAuthNotConfigured
 	}
 	if code == "" || state == "" {
 		return nil, "", "", "", fmt.Errorf("missing code or state")
+	}
+	cookieState := ""
+	if c, err := r.Cookie(OAuthStateCookieName); err == nil {
+		cookieState = c.Value
+	}
+	s.clearOAuthStateCookie(w)
+	if cookieState == "" || subtle.ConstantTimeCompare([]byte(cookieState), []byte(state)) != 1 {
+		return nil, "", "", "", fmt.Errorf("oauth state cookie mismatch")
 	}
 	verifier, redirectTo, err := s.store.TakeOAuthState(ctx, state)
 	if err != nil {
@@ -536,6 +546,30 @@ func (s *Service) SetSessionCookie(w http.ResponseWriter, token string) {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   s.cfg.CookieSecure,
 		MaxAge:   int(s.cfg.SessionTTL.Seconds()),
+	})
+}
+
+func (s *Service) setOAuthStateCookie(w http.ResponseWriter, state string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     OAuthStateCookieName,
+		Value:    state,
+		Path:     s.cfg.CookiePath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   s.cfg.CookieSecure,
+		MaxAge:   int((10 * time.Minute).Seconds()),
+	})
+}
+
+func (s *Service) clearOAuthStateCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     OAuthStateCookieName,
+		Value:    "",
+		Path:     s.cfg.CookiePath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   s.cfg.CookieSecure,
+		MaxAge:   -1,
 	})
 }
 

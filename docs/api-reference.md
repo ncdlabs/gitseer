@@ -85,10 +85,10 @@ HMAC-verified; rate limited. See [Webhooks and Sync](webhooks-and-sync.md).
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/metrics` | Prometheus; **requires session or Bearer metrics token** |
+| GET | `/metrics` | Prometheus; session when no scrape token; **Bearer-only** when `server.metrics_token` / `GITSEER_METRICS_TOKEN` is set |
 
 Series include repository/PR/run gauges, webhook counters, sync histograms, and Gitea API counters (`gitseer_gitea_api_*`). Labels are status/event oriented — never repository names. GitHub API request counters are not exported yet.
 
 ## UI config
 
-The SPA also loads `/api/v1/ui-config` for CSRF issuance and client bootstrap (see `web/src/api/client.ts`). Fields: `base_path`, `oauth_enabled`, `bootstrap_enabled`, `allow_skip_setup` (true only when `dev.allow_skip_setup` / `GITSEER_ALLOW_SKIP_SETUP` is set — local `npm run start`), `dev_bootstrap_password` (loopback hosts only when skip-setup is on — login prefill), `csrf_token`.
+The SPA also loads `/api/v1/ui-config` for CSRF issuance and client bootstrap (see `web/src/api/client.ts`). Fields: `base_path`, `oauth_enabled`, `bootstrap_enabled` (false after setup unless skip-setup), `allow_skip_setup` (true only when `dev.allow_skip_setup` / `GITSEER_ALLOW_SKIP_SETUP` is set — local `npm run start`), `dev_bootstrap_password` (only when skip-setup is on, `external_url` is loopback, **and** the TCP peer is loopback), `csrf_token`.

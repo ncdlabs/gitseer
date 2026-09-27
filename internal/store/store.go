@@ -310,6 +310,27 @@ func (s *Store) GetRepositoryByOwnerName(ctx context.Context, owner, name string
 	return s.GetRepositoryByOwnerNameInInstance(ctx, owner, name, 0)
 }
 
+// ListRepositoriesByOwnerName returns all alive repos matching owner/name (any instance).
+func (s *Store) ListRepositoriesByOwnerName(ctx context.Context, owner, name string) ([]models.Repository, error) {
+	rows, err := s.query(ctx, `
+SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
+       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
+FROM repositories WHERE owner = ? AND name = ? AND deleted_at IS NULL ORDER BY id ASC`, owner, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.Repository
+	for rows.Next() {
+		repo, err := scanRepo(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *repo)
+	}
+	return out, rows.Err()
+}
+
 // ErrAmbiguousRepository is returned when owner/name matches multiple alive repos
 // across instances and no instance_id was provided.
 var ErrAmbiguousRepository = fmt.Errorf("repository owner/name is ambiguous across forge instances")
@@ -325,32 +346,17 @@ SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_bra
 FROM repositories WHERE instance_id = ? AND owner = ? AND name = ? AND deleted_at IS NULL`, instanceID, owner, name)
 		return scanRepo(row)
 	}
-	rows, err := s.query(ctx, `
-SELECT id, instance_id, org_id, external_id, owner, name, full_name, default_branch,
-       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
-FROM repositories WHERE owner = ? AND name = ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 2`, owner, name)
+	repos, err := s.ListRepositoriesByOwnerName(ctx, owner, name)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var found *models.Repository
-	for rows.Next() {
-		repo, err := scanRepo(rows)
-		if err != nil {
-			return nil, err
-		}
-		if found != nil {
-			return nil, ErrAmbiguousRepository
-		}
-		found = repo
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if found == nil {
+	if len(repos) == 0 {
 		return nil, sql.ErrNoRows
 	}
-	return found, nil
+	if len(repos) > 1 {
+		return nil, ErrAmbiguousRepository
+	}
+	return &repos[0], nil
 }
 
 func scanRepo(row scanner) (*models.Repository, error) {

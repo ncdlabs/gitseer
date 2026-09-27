@@ -86,8 +86,14 @@ func (h *Handler) MetricsHandler() http.Handler {
 		promhttp.Handler().ServeHTTP(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.metricsBearerOK(r) {
-			inner.ServeHTTP(w, r)
+		want := strings.TrimSpace(h.cfg.Server.MetricsToken)
+		if want != "" {
+			// When a scrape token is configured, require Bearer only (no session bypass).
+			if h.metricsBearerOK(r) {
+				inner.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		h.requireAuth(inner).ServeHTTP(w, r)
@@ -108,6 +114,18 @@ func (h *Handler) metricsBearerOK(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// bootstrapAuthAvailable is true when the bootstrap password is set and either
+// setup is incomplete or local skip-setup recovery is enabled.
+func (h *Handler) bootstrapAuthAvailable() bool {
+	if !h.auth.BootstrapEnabled() {
+		return false
+	}
+	if h.settings != nil && h.settings.SetupCompleted() && !h.cfg.Dev.AllowSkipSetup {
+		return false
+	}
+	return true
 }
 
 func (h *Handler) Routes(r chi.Router) {
@@ -220,7 +238,11 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
-	if !h.auth.BootstrapEnabled() {
+	if !h.bootstrapAuthAvailable() {
+		if h.auth.BootstrapEnabled() {
+			writeError(w, http.StatusServiceUnavailable, "bootstrap auth is disabled after setup; use OAuth or set GITSEER_ALLOW_SKIP_SETUP for local recovery")
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "bootstrap auth is not configured; set GITSEER_AUTH_BOOTSTRAP_PASSWORD")
 		return
 	}
@@ -256,7 +278,7 @@ func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) oauthLogin(w http.ResponseWriter, r *http.Request) {
 	redirectTo := auth.SafeRedirectPath(r.URL.Query().Get("redirect"))
-	url, err := h.auth.BeginOAuth(r.Context(), redirectTo)
+	url, err := h.auth.BeginOAuth(r.Context(), w, redirectTo)
 	if err != nil {
 		if errors.Is(err, auth.ErrOAuthNotConfigured) {
 			writeError(w, http.StatusServiceUnavailable, "oauth is not configured; set GITSEER_AUTH_OAUTH_CLIENT_ID, GITSEER_SERVER_EXTERNAL_URL, and GITSEER_GITEA_URL")
@@ -276,7 +298,7 @@ func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
-	user, token, redirectTo, accessToken, err := h.auth.CompleteOAuth(r.Context(), code, state, r.RemoteAddr, r.UserAgent())
+	user, token, redirectTo, accessToken, err := h.auth.CompleteOAuth(r.Context(), r, w, code, state, r.RemoteAddr, r.UserAgent())
 	if err != nil {
 		h.log.Error("oauth callback", "err", err)
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -425,35 +447,10 @@ func (h *Handler) refreshUserACL(ctx context.Context, userID int64, userAccessTo
 			ft = models.ForgeTypeGitea
 		}
 		if ft == models.ForgeTypeGitHub {
-			// GitHub ACL is PAT-scoped (no per-user GitHub OAuth this slice): grant every
-			// indexed repo the service PAT can see to authenticated users.
-			token, err := h.instanceSyncToken(ctx, inst)
-			if err != nil || token == "" {
-				continue
-			}
-			client, err := forge.NewFromInstance(inst, token)
-			if err != nil {
-				return err
-			}
+			// GitHub has no per-user OAuth in this slice. Never grant the service PAT's
+			// full inventory to ordinary OAuth users — include the instance ID so prior
+			// over-grants are cleared on refresh. Bootstrap admins use GrantBootstrapAll*.
 			githubInstanceIDs = append(githubInstanceIDs, inst.ID)
-			for page := 1; ; page++ {
-				p, err := client.ListRepositories(ctx, forge.ListReposOpts{Page: page, PageSize: 50})
-				if err != nil {
-					return err
-				}
-				var externalIDs []int64
-				for _, repo := range p.Items {
-					externalIDs = append(externalIDs, repo.ExternalID)
-				}
-				ids, err := h.store.MapExternalIDsToRepoIDs(ctx, inst.ID, externalIDs)
-				if err != nil {
-					return err
-				}
-				repoIDs = append(repoIDs, ids...)
-				if !p.HasMore {
-					break
-				}
-			}
 			continue
 		}
 		if ft != models.ForgeTypeGitea {
@@ -642,10 +639,12 @@ func (h *Handler) giteaThemeForUser(ctx context.Context, user *models.User) (the
 }
 
 func (h *Handler) systemStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.buildSystemStatus(r.Context()))
+	user := userFromCtx(r.Context())
+	redact := user == nil || !user.IsBootstrapAdmin
+	writeJSON(w, http.StatusOK, h.buildSystemStatus(r.Context(), redact))
 }
 
-func (h *Handler) buildSystemStatus(ctx context.Context) map[string]any {
+func (h *Handler) buildSystemStatus(ctx context.Context, redactSensitive bool) map[string]any {
 	uiName := h.cfg.UI.InstanceName
 	integ := h.effectiveIntegration()
 	gh := h.effectiveGitHub()
@@ -660,7 +659,7 @@ func (h *Handler) buildSystemStatus(ctx context.Context) map[string]any {
 	var firstGitea, firstGitHub *models.Instance
 	for i := range instances {
 		inst := &instances[i]
-		forges = append(forges, forgeStatusEntry(inst))
+		forges = append(forges, forgeStatusEntry(inst, redactSensitive))
 		switch inst.ForgeType {
 		case models.ForgeTypeGitHub:
 			if firstGitHub == nil {
@@ -696,7 +695,7 @@ func (h *Handler) buildSystemStatus(ctx context.Context) map[string]any {
 		"ui_name":             uiName,
 		"gitea_configured":    giteaConfigured,
 		"github_configured":   githubConfigured,
-		"bootstrap_auth":      h.auth.BootstrapEnabled(),
+		"bootstrap_auth":      h.bootstrapAuthAvailable(),
 		"oauth_enabled":       h.auth.OAuthEnabled(),
 		"path_prefix":         h.cfg.PathPrefix(),
 		"instance_connected":  len(instances) > 0,
@@ -743,7 +742,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"setup_completed":        h.settings.SetupCompleted(),
 		"encryption_configured":  h.settings.EncryptionConfigured(),
 		"encryption_source":      h.settings.EncryptionSource(),
-		"status":                 h.buildSystemStatus(r.Context()),
+		"status":                 h.buildSystemStatus(r.Context(), !editable),
 	})
 }
 
@@ -803,7 +802,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 		"settings":        updated,
 		"integration":     integ,
 		"setup_completed": h.settings.SetupCompleted(),
-		"status":          h.buildSystemStatus(r.Context()),
+		"status":          h.buildSystemStatus(r.Context(), false),
 	})
 }
 
@@ -1411,7 +1410,7 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"setup_completed": true,
-		"status":          h.buildSystemStatus(r.Context()),
+		"status":          h.buildSystemStatus(r.Context(), false),
 	})
 }
 
@@ -1546,20 +1545,44 @@ func (h *Handler) getRepository(w http.ResponseWriter, r *http.Request) {
 	owner := chi.URLParam(r, "owner")
 	name := chi.URLParam(r, "repo")
 	instanceID := parseQueryInt64(r.URL.Query().Get("instance_id"))
-	repo, err := h.store.GetRepositoryByOwnerNameInInstance(r.Context(), owner, name, instanceID)
-	if err != nil {
-		if errors.Is(err, store.ErrAmbiguousRepository) {
-			writeError(w, http.StatusConflict, "multiple repositories match owner/name; pass instance_id")
+
+	var candidates []models.Repository
+	if instanceID > 0 {
+		repo, err := h.store.GetRepositoryByOwnerNameInInstance(r.Context(), owner, name, instanceID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
+		candidates = []models.Repository{*repo}
+	} else {
+		repos, err := h.store.ListRepositoriesByOwnerName(r.Context(), owner, name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		candidates = repos
+	}
+
+	var accessible []models.Repository
+	for i := range candidates {
+		ok, err := h.authz.CanAccessRepo(r.Context(), user, candidates[i].ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if ok {
+			accessible = append(accessible, candidates[i])
+		}
+	}
+	if len(accessible) == 0 {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	ok, err := h.authz.CanAccessRepo(r.Context(), user, repo.ID)
-	if err != nil || !ok {
-		writeError(w, http.StatusNotFound, "not found")
+	if len(accessible) > 1 {
+		writeError(w, http.StatusConflict, "multiple repositories match owner/name; pass instance_id")
 		return
 	}
+	repo := accessible[0]
 	if inst, ierr := h.store.GetInstanceByID(r.Context(), repo.InstanceID); ierr == nil && inst != nil {
 		ft := inst.ForgeType
 		if ft == "" {

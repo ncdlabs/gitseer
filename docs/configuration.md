@@ -27,7 +27,7 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitseer/blob/main
 | `gitea.allow_private_network` | Allow private/lab Gitea IPs (SSRF guard) |
 | `gitea.allow_unsigned_webhooks` | Lab-only unsigned webhook accept |
 | `github.url` | GitHub.com or GitHub Enterprise base URL |
-| `github.token` / files | Service PAT (sync/ACL for GitHub inventory; no GitHub OAuth login in this slice) |
+| `github.token` / files | Service PAT (sync for GitHub inventory; no GitHub OAuth / no OAuth-user ACL grant in this slice) |
 | `github.webhook_secret` | HMAC secret (required when URL set unless unsigned allowed) |
 | `github.allow_private_network` | Allow private/lab GitHub Enterprise IPs |
 | `github.allow_unsigned_webhooks` | Lab-only unsigned webhook accept |

@@ -18,6 +18,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/config"
 	"github.com/ncdlabs/gitseer/internal/database"
 	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	"github.com/ncdlabs/gitseer/internal/ratelimit"
 	"github.com/ncdlabs/gitseer/internal/realtime"
 	"github.com/ncdlabs/gitseer/internal/retention"
 	"github.com/ncdlabs/gitseer/internal/server/proxyprefix"
@@ -126,16 +127,23 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		} else {
 			csrf, _ = authsvc.IssueCSRFToken(w)
 		}
+		bootstrapEnabled := cfg.Auth.BootstrapPassword != ""
+		if bootstrapEnabled && settingsMgr != nil && settingsMgr.SetupCompleted() && !cfg.Dev.AllowSkipSetup {
+			bootstrapEnabled = false
+		}
 		payload := map[string]any{
 			"base_path":         prefix,
 			"oauth_enabled":     authsvc.OAuthEnabled(),
-			"bootstrap_enabled": cfg.Auth.BootstrapPassword != "",
+			"bootstrap_enabled": bootstrapEnabled,
 			"allow_skip_setup":  cfg.Dev.AllowSkipSetup,
 			"csrf_token":        csrf,
 		}
-		// Local npm start only: prefill login with the bootstrap password on loopback hosts.
-		// Do not expose the password for .local / LAN hostnames even when skip-setup is allowed.
-		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" && config.IsLoopbackExternalURL(cfg.Server.ExternalURL) {
+		// Local npm start only: prefill login with the bootstrap password when the
+		// TCP peer is loopback, skip-setup is on, and external_url is loopback/empty.
+		// Never expose the password for LAN peers or when trust is only via headers.
+		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" &&
+			config.IsLoopbackExternalURL(cfg.Server.ExternalURL) &&
+			ratelimit.PeerIsLoopback(req) {
 			payload["dev_bootstrap_password"] = cfg.Auth.BootstrapPassword
 		}
 		_ = json.NewEncoder(w).Encode(payload)

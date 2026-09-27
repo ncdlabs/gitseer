@@ -917,15 +917,7 @@ func (m *Manager) open(stored string) (string, error) {
 		return "", nil
 	}
 	if len(m.encKey) != 32 {
-		if gitseercrypto.LooksLikeCiphertext(stored) {
-			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
-		}
-		// No key: only accept obvious legacy plaintext (non-base64). Ambiguous
-		// base64 blobs require the encryption key rather than fail-open as tokens.
-		if gitseercrypto.LooksLikeBase64Blob(stored) {
-			return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
-		}
-		return stored, nil
+		return "", fmt.Errorf("GITSEER_ENCRYPTION_KEY is required to decrypt stored secrets")
 	}
 	pt, err := gitseercrypto.Decrypt(m.encKey, stored)
 	if err != nil {
@@ -934,7 +926,7 @@ func (m *Manager) open(stored string) (string, error) {
 	return pt, nil
 }
 
-// OpenSecret decrypts a stored ciphertext (or returns plaintext for legacy rows).
+// OpenSecret decrypts a stored ciphertext. Requires GITSEER_ENCRYPTION_KEY.
 // Used by sync and webhooks for per-instance credentials.
 func (m *Manager) OpenSecret(stored string) (string, error) {
 	return m.open(stored)

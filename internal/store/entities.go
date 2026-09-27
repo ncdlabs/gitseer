@@ -466,26 +466,32 @@ ORDER BY wr.id`, repoID)
 // CompleteOrphanedWorkflowRun marks a missing forge run (and its incomplete jobs) as cancelled.
 func (s *Store) CompleteOrphanedWorkflowRun(ctx context.Context, runID int64) (*models.WorkflowRun, error) {
 	now := formatTime(time.Now().UTC())
-	_, err := s.exec(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, s.sql(`
 UPDATE workflow_runs
 SET status='completed',
     conclusion='cancelled',
     upstream_status='completed',
     upstream_conclusion='cancelled',
     completed_at=COALESCE(completed_at, ?)
-WHERE id=? AND status IN ('queued', 'waiting', 'running')`, now, runID)
-	if err != nil {
+WHERE id=? AND status IN ('queued', 'waiting', 'running')`), now, runID); err != nil {
 		return nil, err
 	}
-	_, err = s.exec(ctx, `
+	if _, err := tx.ExecContext(ctx, s.sql(`
 UPDATE jobs
 SET status='completed',
     conclusion='cancelled',
     upstream_status='completed',
     upstream_conclusion='cancelled',
     completed_at=COALESCE(completed_at, ?)
-WHERE run_id=? AND status IN ('queued', 'waiting', 'running')`, now, runID)
-	if err != nil {
+WHERE run_id=? AND status IN ('queued', 'waiting', 'running')`), now, runID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetWorkflowRunByID(ctx, runID)

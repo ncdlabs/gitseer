@@ -601,7 +601,7 @@ func TestMetricsRequiresAuthOrBearer(t *testing.T) {
 		t.Fatalf("bearer status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	// Wrong bearer → falls through to session auth → 401
+	// Wrong bearer → 401 (session is not accepted when metrics_token is set)
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	rec = httptest.NewRecorder()
@@ -610,7 +610,7 @@ func TestMetricsRequiresAuthOrBearer(t *testing.T) {
 		t.Fatalf("bad bearer status=%d", rec.Code)
 	}
 
-	// Session cookie still works
+	// Session cookie must NOT work when metrics_token is configured
 	r := chi.NewRouter()
 	h.Routes(r)
 	loginBody, _ := json.Marshal(map[string]string{"password": "test-pass"})
@@ -635,8 +635,8 @@ func TestMetricsRequiresAuthOrBearer(t *testing.T) {
 	}
 	rec = httptest.NewRecorder()
 	h.MetricsHandler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("session status=%d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("session with metrics_token status=%d want 401", rec.Code)
 	}
 }
 

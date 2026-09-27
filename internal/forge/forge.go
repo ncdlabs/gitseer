@@ -9,7 +9,9 @@ import (
 	"github.com/ncdlabs/gitseer/internal/models"
 )
 
-// ErrNotFound indicates the forge resource no longer exists (HTTP 404).
+// ErrNotFound indicates the forge resource no longer exists (HTTP 404 only).
+// Callers must not treat Forbidden/Unauthorized as NotFound — that can cancel
+// live in-flight workflow runs during orphan reconciliation.
 var ErrNotFound = errors.New("forge resource not found")
 
 // IsNotFound reports whether err is or wraps ErrNotFound.

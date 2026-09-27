@@ -91,6 +91,13 @@ func remoteIP(remoteAddr string) string {
 	return host
 }
 
+// PeerIsLoopback reports whether the immediate TCP peer is a loopback address.
+// Does not honor X-Forwarded-* (must not trust client headers for password exposure).
+func PeerIsLoopback(r *http.Request) bool {
+	ip := net.ParseIP(remoteIP(r.RemoteAddr))
+	return ip != nil && ip.IsLoopback()
+}
+
 func ipInNets(ipStr string, nets []*net.IPNet) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {

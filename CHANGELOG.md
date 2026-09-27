@@ -6,14 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Dual-forge feature completeness: PR `review_state` from forge review APIs + `pull_request_review` webhooks; GitHub Checks/status merge into `ci_state`; status/check webhook apply; OAuth ACL refresh also grants GitHub repos visible to each instance PAT.
+- Dual-forge feature completeness: PR `review_state` from forge review APIs + `pull_request_review` webhooks; GitHub Checks/status merge into `ci_state`; status/check webhook apply.
 - Repository detail route `/repositories/:owner/:repo` (optional `instance_id`) for install-ui deep links; `gitseer install-ui --instance-id`.
 - Prometheus `gitseer_github_api_requests_total` / `gitseer_github_api_errors_total` (parity with Gitea).
 - Review badges on the Pull Requests list; repository inventory links to the in-app detail page.
 - Setup create-webhook prefers per-instance Gitea delivery URLs; Gitea webhook event set includes `status` and `pull_request_review`.
+- Failed webhook applies retry with backoff (up to 5 attempts).
 
 ### Fixed
 
+- Orphan reconcile treats only forge **404** as gone (403/other errors no longer cancel Active Actions rows); orphan run+jobs close in one transaction.
+- OAuth ACL refresh no longer grants GitHub inventory from the service PAT to ordinary users; prior GitHub ACL rows are cleared on refresh (bootstrap admins unchanged).
+- `GET /api/v1/ui-config` exposes `dev_bootstrap_password` only when skip-setup is on, `external_url` is loopback, **and** the TCP peer is loopback.
+- Bootstrap login / `bootstrap_enabled` disabled after setup completes (unless `GITSEER_ALLOW_SKIP_SETUP`).
+- When `GITSEER_METRICS_TOKEN` is set, `/metrics` accepts Bearer only (session cookie no longer bypasses).
+- Non-admin `forges[]` / system status omit `allow_private_network` / `allow_unsigned`.
+- Stored secrets fail closed without `GITSEER_ENCRYPTION_KEY` (no plaintext fallback).
+- OAuth begin/callback bind PKCE state to an HttpOnly cookie.
+- Ambiguous `owner/repo` lookup checks ACL before returning 409 (no existence leak).
+- Empty `server.external_url` defaults session cookies to `Secure` (explicit `auth.cookie_secure` still wins).
 - Full sync closes in-flight workflow runs that 404 on the forge (missed webhook / purged history ghosts in Active Actions), including incomplete jobs.
 
 - Per-instance webhook routes no longer inherit the legacy global Gitea HMAC secret or global allow-unsigned (closes fail-open for GitHub/secondary forges).

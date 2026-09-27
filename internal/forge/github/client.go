@@ -723,7 +723,7 @@ func (c *Client) GetWorkflowRun(ctx context.Context, repo models.RepoRef, runExt
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusNotFound {
 		return nil, forge.ErrNotFound
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -751,8 +751,11 @@ func (c *Client) ListJobs(ctx context.Context, repo models.RepoRef, runExternalI
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
-		return nil, nil
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, forge.ErrNotFound
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))

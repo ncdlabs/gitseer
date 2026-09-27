@@ -377,6 +377,42 @@ func TestWebhookReaper(t *testing.T) {
 	}
 }
 
+func TestClaimPendingWebhooksRetriesError(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "wh-retry.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	inst, _ := st.UpsertInstanceByURL(ctx, "lab", "https://git.example.com", "1.25", `{}`)
+	id, ok, err := st.InsertWebhookEvent(ctx, inst.ID, "d-retry", "push", `{}`)
+	if err != nil || !ok {
+		t.Fatalf("insert id=%d ok=%v err=%v", id, ok, err)
+	}
+	claimed, err := st.ClaimPendingWebhooks(ctx, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim=%d err=%v", len(claimed), err)
+	}
+	if err := st.MarkWebhookProcessed(ctx, claimed[0].ID, "apply failed"); err != nil {
+		t.Fatal(err)
+	}
+	// Fresh error is within backoff window — should not reclaim yet.
+	none, err := st.ClaimPendingWebhooks(ctx, 10)
+	if err != nil || len(none) != 0 {
+		t.Fatalf("immediate reclaim=%d err=%v", len(none), err)
+	}
+	_, err = db.ExecContext(ctx, `UPDATE webhook_events SET processed_at=? WHERE id=?`,
+		time.Now().UTC().Add(-2*time.Minute).Format(time.RFC3339Nano), claimed[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retried, err := st.ClaimPendingWebhooks(ctx, 10)
+	if err != nil || len(retried) != 1 {
+		t.Fatalf("retry claim=%d err=%v", len(retried), err)
+	}
+}
+
 func TestSummaryTimeRange(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "summary.db"), "")
