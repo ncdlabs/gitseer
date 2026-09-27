@@ -96,7 +96,10 @@ Copy the SQLite file (`database.path`) or run `pg_dump` for Postgres while write
 
 ## OAuth
 
-See root `README.md` — register redirect URI `{external_url}/api/v1/auth/callback` on Gitea and set `GITSEER_AUTH_OAUTH_CLIENT_ID` + `GITSEER_SERVER_EXTERNAL_URL`. Prefer a public OAuth client (PKCE). The setup wizard at `/setup` can create the OAuth app or accept pasted client id/secret. GitHub uses a service PAT only (no GitHub OAuth login in this slice).
+See root `README.md` and [Authentication and ACL](authentication-and-acl.md).
+
+- **Gitea:** register redirect URI `{external_url}/api/v1/auth/callback` and set client id/secret (prefer a public OAuth client with PKCE). The setup wizard at `/setup` can create the OAuth app or accept pasted credentials.
+- **GitHub:** register redirect URI `{external_url}/api/v1/auth/github/callback` on a GitHub OAuth App; configure client id/secret on the GitHub forge instance in Settings → Integration. Inventory sync still uses the service PAT; per-user ACL and write ops use the linked GitHub OAuth token when present.
 
 ## Setup wizard and Settings
 

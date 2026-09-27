@@ -28,4 +28,10 @@ Operator and developer reference for GitSeer (dual-forge Gitea + GitHub; technic
 
 ## Wiki
 
-The same guides are prepared for the GitHub wiki (`../gitseer.wiki` sibling clone). Publish after creating the first wiki page in the GitHub UI (the `.wiki.git` remote does not exist until then): [ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki).
+The same guides are published to the GitHub wiki ([ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki)). Local clone: `../gitseer.wiki`. Sync + push:
+
+```bash
+./scripts/publish-wiki.sh
+```
+
+GitHub does not create the `.wiki.git` remote until the first page exists — if clone fails, open the wiki in the GitHub UI, create a stub **Home** page, then re-run the script.
