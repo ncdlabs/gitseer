@@ -22,3 +22,7 @@ Thanks for contributing to GitSeer (repository / Go module path `gitseer`).
 
 - Include tests for authz, forge normalization, and store upserts when touching those areas.
 - Keep changes proportional; follow `docs/implementation-plan.md`.
+
+## Releases (maintainers)
+
+Public container + GitHub Release publishing is tag-gated. See [docs/upgrade.md](docs/upgrade.md#cutting-a-public-release) and `./scripts/cut-release.sh`.

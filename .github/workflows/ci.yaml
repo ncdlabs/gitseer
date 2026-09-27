@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -48,3 +49,9 @@ jobs:
           cache-dependency-path: web/package.json
       - run: npm install
       - run: npm run build
+
+  ci:
+    needs: [go, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI passed"

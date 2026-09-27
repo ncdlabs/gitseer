@@ -73,12 +73,41 @@ podman compose -f compose.yaml up --build -d
 
 Multi-forge OAuth (Gitea, Forgejo, GitHub, GitLab, Bitbucket) is supported in 1.0. Forgejo reuses Gitea identity columns — a single user row cannot hold distinct Gitea and Forgejo forge identities simultaneously.
 
+## Cutting a public release
+
+Public releases are **tag-gated**. Cut a version with:
+
+```bash
+./scripts/cut-release.sh          # patch (default)
+./scripts/cut-release.sh minor
+./scripts/cut-release.sh major
+./scripts/cut-release.sh 1.2.3    # explicit
+./scripts/cut-release.sh patch --push
+```
+
+The script bumps `cmd/gitseer/main.go`, Helm `Chart.yaml` (`version` / `appVersion`), and moves `CHANGELOG.md` `[Unreleased]` into `## [X.Y.Z] - date`, then commits and creates annotated tag `vX.Y.Z`. Pushing the tag runs CI, then [`.github/workflows/release.yaml`](../.github/workflows/release.yaml), which:
+
+- Publishes linux/amd64 images to `ghcr.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`) and `docker.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`)
+- Creates a GitHub Release with the linux/amd64 binary, checksum, and SBOM
+
+Repo secrets required for Docker Hub: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`. GHCR uses `GITHUB_TOKEN`.
+
+Lab / k3s-home continues to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill — that registry is **not** updated by this workflow. Do not bump `values-k3s-home.yaml` from the cut-release script.
+
+Pull a public image:
+
+```bash
+podman pull ghcr.io/ncdlabs/gitseer:1.0.1
+# or
+podman pull docker.io/ncdlabs/gitseer:1.0.1
+```
+
 ## Deferred release hardening
 
-Tracked for follow-up; not blockers for this lab ship:
+Tracked for follow-up; not blockers for public amd64 releases:
 
 - Multi-architecture container images (host cross-compile is amd64-only; QEMU multi-stage `go build` is unreliable here)
 - Cosign-signed release images (needs operator key/CI secrets)
 - Published integration matrix CI against every supported Gitea/GitLab version
 
-CI already runs unit tests, frontend build, `govulncheck`, and SBOM artifact generation.
+CI already runs unit tests, frontend build, `govulncheck`, and SBOM artifact generation. Tag pushes also publish the container + GitHub Release assets above.

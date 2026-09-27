@@ -14,7 +14,7 @@ Operator and developer guides for GitSeer (multi-forge; technical IDs are `gitse
 | [API reference](api-reference.md) | `/api/v1` and webhooks |
 | [Webhooks and sync](webhooks-and-sync.md) | Near-realtime + reconcile |
 | [Deployment](deployment.md) | Compose, binary, Helm, proxy |
-| [Upgrade](upgrade.md) | Backup, Helm/binary upgrade, rollback, schema notes |
+| [Upgrade](upgrade.md) | Backup, Helm/binary upgrade, rollback, cutting public releases, schema notes |
 | [Compatibility](compatibility.md) | Forge and runtime matrix for 1.0 |
 | [Operations](operations.md) | Metrics, retention, backup |
 | [Development](development.md) | Local toolchain and guidelines |

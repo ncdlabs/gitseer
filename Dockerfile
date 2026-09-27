@@ -16,7 +16,10 @@ COPY . .
 COPY --from=frontend /src/web/dist ./internal/server/ui/dist
 # Avoid `go mod tidy` in-image (QEMU amd64 builds often SIGSEGV the toolchain).
 ENV GOTOOLCHAIN=local
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/gitseer ./cmd/gitseer
+ARG VERSION=
+RUN LDFLAGS="-s -w"; \
+  if [ -n "$VERSION" ]; then LDFLAGS="$LDFLAGS -X main.version=${VERSION}"; fi; \
+  CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="$LDFLAGS" -o /out/gitseer ./cmd/gitseer
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget \

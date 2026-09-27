@@ -206,6 +206,17 @@ Runtime settings and multi-instance Gitea/GitHub integration can also be managed
 
 ---
 
+## Releases
+
+Tagged releases publish a linux/amd64 binary (GitHub Releases) and container images to **GHCR** and **Docker Hub**:
+
+```bash
+podman pull ghcr.io/ncdlabs/gitseer:<version>
+podman pull docker.io/ncdlabs/gitseer:<version>
+```
+
+Maintainers cut a release with `./scripts/cut-release.sh` (then push the `v*` tag). Details: [docs/upgrade.md](docs/upgrade.md#cutting-a-public-release).
+
 ## How to contribute
 
 1. Fork and branch.

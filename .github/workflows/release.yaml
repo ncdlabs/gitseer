@@ -1,0 +1,160 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to re-publish (e.g. v1.0.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yaml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            REF="${{ inputs.tag }}"
+          else
+            REF="${{ github.ref_name }}"
+          fi
+          if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "tag must look like vX.Y.Z, got: $REF" >&2
+            exit 1
+          fi
+          VER="${REF#v}"
+          echo "tag=$REF" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+
+      - name: Verify version matches tag
+        run: |
+          SRC="$(sed -n 's/^var version = "\([^"]*\)"/\1/p' cmd/gitseer/main.go | head -n1)"
+          if [[ "$SRC" != "${{ steps.ver.outputs.version }}" ]]; then
+            echo "cmd/gitseer/main.go version=$SRC does not match tag ${{ steps.ver.outputs.tag }}" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package.json
+
+      - name: Build frontend
+        run: make frontend
+
+      - name: Build linux/amd64 binary
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags="-s -w -X main.version=${VER}" \
+            -o "dist/gitseer_${VER}_linux_amd64" ./cmd/gitseer
+          (
+            cd dist
+            sha256sum "gitseer_${VER}_linux_amd64" > "gitseer_${VER}_linux_amd64.sha256"
+          )
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/gitseer-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+          tags: |
+            ghcr.io/ncdlabs/gitseer:${{ steps.ver.outputs.version }}
+            ghcr.io/ncdlabs/gitseer:latest
+            ncdlabs/gitseer:${{ steps.ver.outputs.version }}
+            ncdlabs/gitseer:latest
+
+      - name: Extract changelog section
+        id: notes
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, os
+          ver = os.environ["VER"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          m = re.search(rf"(?ms)^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text)
+          body = (m.group(1).strip() if m else "_No CHANGELOG section found for this version._")
+          pathlib.Path("dist/release-notes.md").write_text(
+              f"## GitSeer {ver}\n\n{body}\n\n"
+              f"### Container images\n\n"
+              f"```bash\n"
+              f"podman pull ghcr.io/ncdlabs/gitseer:{ver}\n"
+              f"podman pull docker.io/ncdlabs/gitseer:{ver}\n"
+              f"```\n\n"
+              f"linux/amd64 only. Lab deploys continue to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill.\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VER: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          ASSETS=(
+            "dist/gitseer_${VER}_linux_amd64"
+            "dist/gitseer_${VER}_linux_amd64.sha256"
+            "dist/gitseer-sbom.spdx.json"
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" --notes-file dist/release-notes.md
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --title "GitSeer ${VER}" \
+              --notes-file dist/release-notes.md
+          fi
