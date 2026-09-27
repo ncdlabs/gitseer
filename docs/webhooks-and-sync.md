@@ -39,6 +39,6 @@ Organization or repository webhook → `{external_url}/api/webhooks/github/{inst
 
 Manual Sync and background reconcile both take a per-`instance_id` lease (`sync_leases`). Lease TTL matches `sync.reconcile_interval`. If another holder already has the lease, that instance’s sync is skipped until it expires. Leases are DB-backed and work across replicas for reconcile exclusivity. SSE remains in-process (see [Deployment](deployment.md#replicas)). Default Helm `replicaCount: 1`.
 
-## Consistency model
+## Consistency
 
-Near-real-time via webhooks + eventual consistency via reconcile. Each forge remains authoritative; GitSeer stores an operational index across instances.
+Webhooks apply updates immediately; periodic reconcile fills gaps. Each forge is authoritative; GitSeer indexes across instances.

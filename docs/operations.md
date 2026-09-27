@@ -5,7 +5,7 @@
 - Unauthenticated: `GET /health/live` (process), `GET /health/ready` (DB)
 - Authenticated: `GET /api/v1/system/status` (`forges[]` per instance with ops checklist, sync phase, lease holder, webhook 24h stats, capability matrix, encryption health)
 - Attention mutes/snoozes and severity overrides: see [Attention Engine](attention-engine.md) (`POST /api/v1/attention/{id}/mute`, Settings → Preferences → **Attention Severity Overrides**)
-- Outbound notifications: Settings → **Notifications** (SMTP / Slack / Discord / generic HTTPS). Immediate alerts on attention open (min severity, default critical) and optional daily digest at `digest_hour_utc`. Delivered via `notification_outbox` worker; secrets sealed with encryption key. No ncdLabs-hosted relay (ADR-015 / ADR-032). **Send Test Notification** queues one message per enabled channel.
+- Outbound notifications: Settings → **Notifications** (SMTP / Slack / Discord / generic HTTPS). Immediate alerts on attention open (min severity, default critical) and optional daily digest at `digest_hour_utc`. Delivered via `notification_outbox` worker; secrets sealed with encryption key. Self-hosted only — no ncdLabs relay. **Send Test Notification** queues one message per enabled channel.
 - Settings → **Status**: pass/warn/fail checklist, **Ensure Webhook**, **Verify Delivery**, **Sync Now**
 - UI header **Sync Now** for on-demand reconcile (bootstrap admin; per-instance sync leases — skips if another holder holds the lease)
 
@@ -49,7 +49,7 @@ Editable in Settings → Preferences / env / config.
 
 ## Backup / restore
 
-First-class CLI (preferred over ad-hoc file copy):
+CLI (preferred over copying DB files by hand):
 
 ```bash
 gitseer backup --out /path/to/backup [--config config.yaml]

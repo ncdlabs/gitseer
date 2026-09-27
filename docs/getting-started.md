@@ -54,9 +54,9 @@ See [Setup Wizard](setup-wizard.md).
 
 ## 4. Sync and invite users
 
-1. Sign in (Gitea OAuth or bootstrap password).
+1. Sign in (Gitea OAuth, GitHub OAuth, or bootstrap password).
 2. Click **Sync now** so the catalog is populated.
-3. Other users sign in with Gitea; ACL is refreshed on login and on an interval (default 6h), scoped to that user’s Gitea instance.
+3. Other users sign in with forge OAuth; ACL refreshes on login and on an interval (default 6h), scoped to instances where the user has a stored token.
 
 ## 5. Point forge webhooks at GitSeer
 

@@ -1,6 +1,6 @@
 # Attention Engine
 
-Package: `internal/attention`. Implements discrete PRD §10 rules. Severities are only:
+Package: `internal/attention`. Severities are only:
 
 - `critical`
 - `warning`
@@ -26,7 +26,7 @@ Legacy fingerprints (e.g. blanket `open_pull_request`) are resolved on evaluate.
 
 ## Mutes / snooze
 
-Table `attention_mutes` (migration `00010`):
+Table `attention_mutes`:
 
 - Per-item mute by fingerprint from Attention UI: **Mute** → **Snooze 24h** / **Snooze 7d** / **Mute Until Resolved**
 - Bootstrap-admin mutes are **global** (`user_id` NULL): evaluate skips opening matching fingerprints; current item is resolved immediately
@@ -50,4 +50,4 @@ Items are upserted by fingerprint and resolved when the condition clears. Global
 
 ## Personal inbox
 
-`GET /api/v1/inbox` (Stream 8) surfaces ACL-scoped attention and open PRs for the current user with reason tags: `author`, `requested_reviewer` (when attention `metadata_json` includes `requested_reviewers`), `failing_ci`, `blocked_on_me` (changes requested / merge conflict / approved-blocked on authored PRs, or review request metadata). UI: `/inbox` with saved filter presets (`saved_filters`, migration `00013`).
+`GET /api/v1/inbox` surfaces ACL-scoped attention and open PRs for the current user with reason tags: `author`, `requested_reviewer` (when attention `metadata_json` includes `requested_reviewers`), `failing_ci`, `blocked_on_me` (changes requested / merge conflict / approved-blocked on authored PRs, or review request metadata). UI: `/inbox` with saved filter presets (`saved_filters`).

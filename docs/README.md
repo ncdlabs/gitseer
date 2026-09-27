@@ -1,6 +1,6 @@
 # GitSeer documentation
 
-Operator and developer reference for GitSeer (dual-forge Gitea + GitHub; technical IDs are `gitseer`). The root [README](../README.md) is the quick start; this tree holds depth.
+Operator and developer guides for GitSeer (Gitea + GitHub; technical IDs are `gitseer`). Quick start: root [README](../README.md).
 
 | Guide | Contents |
 |-------|----------|

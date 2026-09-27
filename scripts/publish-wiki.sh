@@ -114,21 +114,17 @@ for src_name, dest_name in mapping.items():
 
 home = """# GitSeer
 
-GitSeer is a self-hosted **CI/CD and pull-request operations console** for [Gitea](https://gitea.com) and [GitHub](https://github.com) (dual-forge). It aggregates repositories, open PRs, Actions/workflow runs, and attention items into one ACL-aware UI so operators can answer:
+Self-hosted CI/CD and pull-request ops console for [Gitea](https://gitea.com) and [GitHub](https://github.com). Technical IDs: binary/module/Helm `gitseer`, env `GITSEER_*`.
 
-> **What requires my attention right now?**
-
-Each forge remains the system of record. GitSeer discovers and syncs via the forge API, stays current with webhooks, and authenticates users through bootstrap password and/or Gitea OAuth and GitHub OAuth (Authorization Code + PKCE). GitLab and Bitbucket are Coming Soon.
-
-**Native experience. External architecture.** — no forge fork, no per-repo agents, no SaaS dependency.
+Aggregates repositories, open PRs, Actions/workflow runs, and attention items into one ACL-scoped UI. Each forge stays the system of record; GitSeer syncs via API and webhooks. Login is bootstrap password and/or Gitea OAuth (PKCE) and GitHub OAuth (PKCE). No forge fork, no per-repo agents, no SaaS dependency. GitLab and Bitbucket are Coming Soon.
 
 | | |
 |--|--|
 | **Source** | [github.com/ncdlabs/gitseer](https://github.com/ncdlabs/gitseer) |
 | **License** | Apache-2.0 |
 | **Maintainer** | [ncdLabs](https://ncdlabs.com) |
-| **In-repo README** | [README.md](https://github.com/ncdlabs/gitseer/blob/main/README.md) |
-| **In-repo docs** | [docs/](https://github.com/ncdlabs/gitseer/tree/main/docs) (same guides, versioned with the code) |
+| **README** | [README.md](https://github.com/ncdlabs/gitseer/blob/main/README.md) |
+| **In-repo docs** | [docs/](https://github.com/ncdlabs/gitseer/tree/main/docs) |
 | **Live** | [gitseer.ncdlabs.com](https://gitseer.ncdlabs.com) |
 
 ## Guides
@@ -148,24 +144,24 @@ Each forge remains the system of record. GitSeer discovers and syncs via the for
 - [Development](Development)
 - [Troubleshooting](Troubleshooting)
 
-## What ships
+## Features
 
-- **Dashboard** — summary + progressive stats (Now / 1 / 7 / 30 / 90 day windows)
-- **Inbox** — personal authored / review / failing CI / blocked-on-me queue with saved filters
-- **Attention** — severities `critical` / `warning` / `waiting`, mutes/snoozes, optional log tail
-- **Repositories** — health rollup + failure clusters; deep-link detail
-- **Pull requests** — CI + review badges across accessible repos
-- **Pipelines** — runs grouped by action; rerun/cancel; Active Actions flyout / pop-out
-- **Notifications** — self-hosted SMTP + Slack/Discord/generic HTTPS (no ncdLabs relay)
-- **Setup wizard** — Prepare (encryption) → forge picker → Connect → Validate → Finish
+- **Dashboard** — summary and stats (Now / 1 / 7 / 30 / 90 day windows)
+- **Inbox** — authored / review / failing CI / blocked-on-me queue with saved filters
+- **Attention** — `critical` / `warning` / `waiting`, mute/snooze, optional log tail
+- **Repositories** — health rollup and failure clusters
+- **Pull requests** — CI and review badges across accessible repos
+- **Pipelines** — runs by action; rerun/cancel; Active Actions flyout / pop-out
+- **Notifications** — self-hosted SMTP + Slack/Discord/generic HTTPS
+- **Setup wizard** — Prepare → forge picker → Connect → Validate → Finish
 - **Settings** — Preferences / Integration / Access / Notifications / Status
-- **SSE** live updates, Prometheus metrics, retention purge, backup/restore CLI
-- Optional Gitea custom-template UI links (`install-ui` / Download Gitea UI Snippets)
+- SSE live updates, Prometheus metrics, retention purge, backup/restore CLI
+- Optional Gitea custom-template links (`install-ui` / Download Gitea UI Snippets)
 
-## Explicitly out of scope (current slice)
+## Not in scope
 
 - Writing workflow YAML, owning runners, or replacing forge Actions
-- GitLab / Bitbucket forge clients (Coming Soon — ask before implementing)
+- GitLab / Bitbucket forge clients (Coming Soon)
 - Redis / WebSockets
 - ncdLabs-hosted notification relay
 
@@ -205,15 +201,37 @@ PY
 
 cd "$WIKI"
 git add -A
-if git diff --cached --quiet; then
-  echo "Wiki already up to date."
+if ! git diff --cached --quiet; then
+  git -c user.email="${GITSEER_WIKI_EMAIL:-wiki@ncdlabs.com}" \
+      -c user.name="${GITSEER_WIKI_NAME:-GitSeer Docs}" \
+      commit -m "docs(wiki): sync guides from docs/"
+else
+  echo "No local wiki file changes."
+fi
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+# Ensure we see remote tip; wiki bootstrap often creates an unrelated Initial Home commit.
+git fetch origin 2>/dev/null || true
+if git rev-parse --verify "origin/master" >/dev/null 2>&1; then
+  remote_ref="origin/master"
+elif git rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
+  remote_ref="origin/${branch}"
+else
+  remote_ref=""
+fi
+
+if [[ -n "$remote_ref" ]] && git merge-base --is-ancestor HEAD "$remote_ref" 2>/dev/null; then
+  echo "Wiki already up to date on remote."
+  echo "Published: https://github.com/ncdlabs/gitseer/wiki"
   exit 0
 fi
 
-git -c user.email="${GITSEER_WIKI_EMAIL:-wiki@ncdlabs.com}" \
-    -c user.name="${GITSEER_WIKI_NAME:-GitSeer Docs}" \
-    commit -m "docs(wiki): sync comprehensive guides from docs/"
-
-branch="$(git rev-parse --abbrev-ref HEAD)"
-git push -u origin "HEAD:master" 2>/dev/null || git push -u origin "HEAD:${branch}"
+if [[ -n "$remote_ref" ]] && ! git merge-base --is-ancestor "$remote_ref" HEAD 2>/dev/null; then
+  # Diverged (common after first GitHub UI Home page). Prefer our synced tree.
+  echo "Remote wiki history diverged; force-pushing synced docs."
+  git push --force-with-lease -u origin "HEAD:master" 2>/dev/null \
+    || git push --force-with-lease -u origin "HEAD:${branch}"
+else
+  git push -u origin "HEAD:master" 2>/dev/null || git push -u origin "HEAD:${branch}"
+fi
 echo "Published: https://github.com/ncdlabs/gitseer/wiki"

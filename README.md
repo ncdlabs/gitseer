@@ -2,9 +2,9 @@
 
 Self-hosted CI/CD and pull-request operations console for **Gitea** and **GitHub** (dual-forge). Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `gitseer`, env `GITSEER_*`.
 
-GitSeer aggregates repositories, open pull requests, Actions/workflow runs, and attention items into one ops console so you can answer **what needs attention right now** without hopping repo to repo. Each forge stays the system of record; GitSeer syncs via API + webhooks. Login is bootstrap password and/or Gitea OAuth (PKCE); GitHub inventory uses a service PAT (GitHub OAuth login is not in this slice). GitLab and Bitbucket are Coming Soon.
+Aggregates repositories, open pull requests, Actions/workflow runs, and attention items into one ACL-aware UI. Each forge stays the system of record; GitSeer syncs via API + webhooks. Login is bootstrap password and/or Gitea OAuth (PKCE) and GitHub OAuth (PKCE). GitHub inventory sync uses a service PAT. GitLab and Bitbucket are Coming Soon.
 
-Built and maintained by **[ncdLabs](https://ncdlabs.com)**.
+Maintained by **[ncdLabs](https://ncdlabs.com)**.
 
 **Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki) · **Spec:** [docs/prd-spec.md](docs/prd-spec.md)
 
@@ -20,25 +20,25 @@ Repo names, authors, and local account labels in these shots are substituted (`o
 
 ![Login](docs/screenshots/login.png)
 
-**Attention** — prioritized CI failures, review waits, and related operational items.
+**Attention**
 
 ![Attention](docs/screenshots/attention.png)
 
-**Pull Requests** — open PRs across accessible repositories, with CI state.
+**Pull Requests**
 
 ![Pull Requests](docs/screenshots/pull-requests.png)
 
-**Pipelines** — workflow actions grouped by repository; expand a group for individual runs.
+**Pipelines**
 
 ![Pipelines](docs/screenshots/pipelines.png)
 
-**Pipeline Detail** — workflow graph, jobs, and on-demand logs.
+**Pipeline Detail**
 
 ![Pipeline Detail](docs/screenshots/pipeline-detail.png)
 
 ### Dashboard Themes
 
-GitSeer ships five theme options. System follows the OS preference (shown here resolving to dark).
+Five themes. System follows the OS preference (shown here resolving to dark).
 
 | Light | Dark |
 |-------|------|
@@ -57,7 +57,7 @@ GitSeer ships five theme options. System follows the OS preference (shown here r
 ## Features
 
 - **Dashboard** — time-scoped summary and trends (Now / 1 / 7 / 30 / 90 days)
-- **Attention** — discrete rules for CI failures, review waits, long-running runs, merge conflicts, and more
+- **Attention** — discrete rules for CI failures, review waits, long-running runs, and merge conflicts
 - **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
 - **Setup wizard** — Prepare (public URL + encryption key) → forge picker (Gitea / GitHub; GitLab & Bitbucket Coming Soon) → Connect → Validate → Finish
 - **Settings** — runtime preferences and multi-instance Gitea + GitHub integration (DB-backed secrets are write-only; instance CRUD is bootstrap-admin)
@@ -186,7 +186,7 @@ Important:
 
 - Set `server.external_url` to the public URL (including subpath). GitSeer strips only that configured prefix — not client `X-Forwarded-Prefix`.
 - When `gitea.url` is set, `GITSEER_WEBHOOK_SECRET` is required unless `GITSEER_WEBHOOK_ALLOW_UNSIGNED=true` (lab only). Same pattern for GitHub: `GITSEER_GITHUB_WEBHOOK_SECRET` when `github.url` is set.
-- OAuth redirect: `{external_url}/api/v1/auth/callback`. Prefer a public Gitea OAuth client (PKCE). GitHub uses a service PAT (no GitHub OAuth login in this slice).
+- Gitea OAuth redirect: `{external_url}/api/v1/auth/callback` (prefer a public client + PKCE). GitHub OAuth redirect: `{external_url}/api/v1/auth/github/callback`. GitHub inventory sync still uses a service PAT.
 - `GITSEER_ENCRYPTION_KEY` (env/config min **16**, prefer ≥24; wizard paste min **24**) encrypts forge secrets and OAuth tokens at rest. Required to save integration secrets to the DB; the setup wizard can generate a key file when unset.
 
 Runtime settings and multi-instance Gitea/GitHub integration can also be managed in the UI (`/settings`) after bootstrap login.

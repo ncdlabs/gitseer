@@ -71,9 +71,9 @@ Raw forge wire types stay in `internal/forge/gitea` and `internal/forge/github`.
 
 Set `server.external_url` to the public URL **including** any path prefix. GitSeer strips only that configured `PathPrefix()`. Client `X-Forwarded-Prefix` is ignored.
 
-## Design constraints (current slice)
+## Design constraints
 
-- Dual-forge: **Gitea + GitHub** in scope; **GitLab / Bitbucket** Coming Soon (ask before implementing clients)
+- Dual-forge: **Gitea + GitHub** in scope; **GitLab / Bitbucket** Coming Soon
 - No Redis
 - Write ops: **Rerun Workflow** / **Cancel Workflow** via per-instance user tokens (`UserAccessTokenForInstance`); no silent service-PAT fallback for non-admin; bootstrap admin may use service PAT with UI warning when no user token
 - Capability detection for Actions APIs; degrade when missing

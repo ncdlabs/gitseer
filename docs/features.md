@@ -2,9 +2,9 @@
 
 ## UI shell
 
-- Flat ops-console layout (IBM Plex; themes: system / light / dark / gruvbox / terminal via `data-theme`; terminal uses ANSI/ASCII graphics)
-- Light/dark palettes align with Gitea built-ins (`gitea-light` / `gitea-dark`)
-- Optional theme sync from Gitea user settings for OAuth users (mapped themes only); manual ThemePicker stops sync
+- Ops-console layout (IBM Plex; themes: system / light / dark / gruvbox / terminal via `data-theme`)
+- Light/dark palettes match Gitea built-ins (`gitea-light` / `gitea-dark`)
+- Optional theme sync from Gitea user settings for OAuth users (mapped themes only); picking a theme manually stops sync
 - List pages share a table/card view toggle (`gitseer-view-mode` in localStorage)
 
 ## Routes
@@ -22,17 +22,15 @@
 | `/actions-popout` | Active Actions detached window |
 | `/settings` | Preferences / Integration / Access / Notifications / Status tabs |
 | `/setup` | First-run wizard (bootstrap admin) |
-| Login | Gitea OAuth + optional bootstrap |
+| Login | Gitea OAuth, GitHub OAuth, optional bootstrap |
 
 ## Dashboard
 
-- Summary metrics from `GET /api/v1/summary?days=` (allowlist **0 / 1 / 7 / 30 / 90**, default **0** / Now; UI persists last choice in `gitseer-dashboard-range-days`)
-- Range persisted in `gitseer-dashboard-range-days`
-- Repositories count is inventory (not time-ranged); open PRs, attention, failed, and running respect the window (`Now` = current open/running state; failed = attention-linked only)
-- Progressive stats from `GET /api/v1/stats?days=&section=` where `section` is `core` | `trends` | `duration` | `all` (default `all`): metrics from summary, breakdowns from `core`, trend charts + conclusions from `trends`, run-duration callout from `duration` last. `Now` skips trends/duration requests
-- Background precache of all range presets (summary+core → trends → duration) after the active range settles; SSE invalidation re-warms the same layers after a short debounce
-- Lightweight SVG/CSS charts (no chart library)
-- Day-series JSON field is `day` (not `date`)
+- Summary from `GET /api/v1/summary?days=` (allowlist **0 / 1 / 7 / 30 / 90**, default **0** / Now; remembered in `gitseer-dashboard-range-days`)
+- Repo count is inventory (not time-ranged); open PRs, attention, failed, and running respect the window (`Now` = current open/running; failed = attention-linked only)
+- Stats from `GET /api/v1/stats?days=&section=` (`core` | `trends` | `duration` | `all`): breakdowns from `core`, charts from `trends`, run-duration from `duration`. `Now` skips trends/duration
+- After the active range settles, other ranges precache in the background; SSE invalidation re-warms them
+- SVG/CSS charts (no chart library); day-series JSON field is `day` (not `date`)
 
 ## Inbox
 
@@ -42,7 +40,7 @@
 
 ## Attention
 
-Discrete rule engine with severities `critical` / `warning` / `waiting`. See [Attention Engine](attention-engine.md). Attention and Inbox pages share **Save Filter** presets (`GET/POST/PUT/DELETE /api/v1/saved-filters`).
+Rule engine with severities `critical` / `warning` / `waiting`. See [Attention Engine](attention-engine.md). Attention and Inbox share **Save Filter** presets (`GET/POST/PUT/DELETE /api/v1/saved-filters`).
 Optional on-demand **Log Tail** on attention items linked to a job/run (forge fetch, capped snippet, not stored).
 
 ## Repositories
@@ -78,7 +76,7 @@ Header search (⌘/Ctrl+K) is a command palette over:
 
 - Tabbed `/settings` UI: **Preferences**, **Integration**, **Access**, **Notifications**, **Status** (hash deep-links `#preferences` / `#integration` / `#access` / `#notifications` / `#status`)
 - Preferences: instance name, sync history days, long-running threshold, **Attention Severity Overrides**, retention windows, **Apply Lab Preset** / **Apply Prod Preset**, **Purge Now**, public URL
-- **Notifications** (bootstrap admin): SMTP + Slack/Discord/generic HTTPS webhooks; severity filter (default critical); immediate + optional daily digest; secrets write-only; **Send Test Notification**. Self-hosted only (ADR-015 / ADR-032).
+- **Notifications** (bootstrap admin): SMTP + Slack/Discord/generic HTTPS webhooks; severity filter (default critical); immediate + optional daily digest; secrets write-only; **Send Test Notification**. Self-hosted only (no ncdLabs relay).
 - Attention queue: **Mute** / **Snooze 24h** / **Snooze 7d** / **Mute Until Resolved** per item
 - Integration: multi-instance list (forge badge, URL, configured flags, webhook path `/api/webhooks/{gitea|github}/{id}`) with **Add Forge** / Edit / Remove; Gitea cards include **Download Gitea UI Snippets** (zip of marker-safe templates); Gitea and GitHub supported (GitLab / Bitbucket Coming Soon). Instance list/API is **bootstrap-admin only**; other users see forge summary on Status / `GET /settings`
 - API: `GET/POST /api/v1/instances`, `PUT/DELETE /api/v1/instances/{id}` (bootstrap admin + CSRF); `GET/PUT /api/v1/settings` keeps preferences + a derived dual-forge snapshot for setup
