@@ -144,25 +144,54 @@ jobs:
           tags: |
             ghcr.io/ncdlabs/gitseer:${{ steps.ver.outputs.version }}
             ghcr.io/ncdlabs/gitseer:latest
+
+      # New org packages default to private; strangers cannot pull until public.
+      - name: Make GHCR package public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh api \
+              --method PUT \
+              -H "Accept: application/vnd.github+json" \
+              "/orgs/ncdlabs/packages/container/gitseer/visibility" \
+              -f visibility=public; then
+              echo "ghcr.io/ncdlabs/gitseer is public"
+              exit 0
+            fi
+            echo "visibility update attempt ${attempt} failed; retrying…"
+            sleep $((attempt * 2))
+          done
+          echo "Failed to set package visibility to public" >&2
+          exit 1
+
       - name: Extract changelog section
         id: notes
         env:
           VER: ${{ steps.ver.outputs.version }}
+          HUB_ENABLED: ${{ steps.hub.outputs.enabled }}
         run: |
           python3 - <<'PY'
           import pathlib, re, os
           ver = os.environ["VER"]
+          hub = os.environ.get("HUB_ENABLED", "false") == "true"
           text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
           m = re.search(rf"(?ms)^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text)
           body = (m.group(1).strip() if m else "_No CHANGELOG section found for this version._")
+          pulls = [f"podman pull ghcr.io/ncdlabs/gitseer:{ver}"]
+          if hub:
+              pulls.append(f"podman pull docker.io/ncdlabs/gitseer:{ver}")
+          else:
+              pulls.append("# Docker Hub skipped (DOCKERHUB_* secrets unset)")
+          pull_block = "\n".join(pulls)
           pathlib.Path("dist/release-notes.md").write_text(
               f"## GitSeer {ver}\n\n{body}\n\n"
               f"### Container images\n\n"
               f"```bash\n"
-              f"podman pull ghcr.io/ncdlabs/gitseer:{ver}\n"
-              f"podman pull docker.io/ncdlabs/gitseer:{ver}\n"
+              f"{pull_block}\n"
               f"```\n\n"
-              f"linux/amd64 only. Lab deploys continue to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill.\n",
+              f"linux/amd64 only. Public pulls use GHCR. Lab deploys continue to use "
+              f"`git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill.\n",
               encoding="utf-8",
           )
           PY

@@ -4,10 +4,11 @@
 
 | Path | When to use |
 |------|-------------|
-| **Install with Agent** | Paste the prompt from [docs/install.md](install.md#install-with-agent) into your coding agent |
-| **Guided installer** | First production or lab install (Gitea-oriented; add GitHub in the wizard/Settings) |
-| **Compose** | Container runtime already in place |
-| **Binary** | Single process, no Compose; good for GitHub-only via wizard |
+| **Public GHCR image** | Fastest cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64) — see root README |
+| **Release binary** | Single process from GitHub Releases (linux/amd64) |
+| **Install with Agent** | Paste the prompt from the root README into your coding agent |
+| **Guided installer** | First lab install when you already have Gitea URL/token (add other forges in wizard/Settings) |
+| **Compose** | Build from source with Podman/Docker Compose |
 | **Local dev** | Contributing / iterating on UI + API |
 
 In-repo detail: [docs/install.md](install.md).
