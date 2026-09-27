@@ -1488,3 +1488,57 @@ func TestSearchMatchesFieldsAndACL(t *testing.T) {
 	}
 }
 
+func TestUpsertBitbucketUserRemapsStaleIdentityHash(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "gitseer-bb-remap.db")
+	db, err := database.Open(ctx, "sqlite", dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceMeta(ctx, models.ForgeTypeBitbucket, "bb", "https://api.bitbucket.org/2.0", "", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleUID := int64(111)
+	created, err := st.UpsertBitbucketUser(ctx, inst.ID, models.User{
+		BitbucketUserID: &staleUID, Login: "bbuser", Email: "bb@example.com", DisplayName: "BB",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	canonicalUID := int64(222)
+	updated, err := st.UpsertBitbucketUser(ctx, inst.ID, models.User{
+		BitbucketUserID: &canonicalUID, Login: "bbuser", Email: "bb@example.com", DisplayName: "BB Updated",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != created.ID {
+		t.Fatalf("expected same user row remapped, got id=%d want=%d", updated.ID, created.ID)
+	}
+	if updated.BitbucketUserID == nil || *updated.BitbucketUserID != canonicalUID {
+		t.Fatalf("bitbucket_user_id=%v want %d", updated.BitbucketUserID, canonicalUID)
+	}
+	if updated.DisplayName != "BB Updated" {
+		t.Fatalf("display_name=%q", updated.DisplayName)
+	}
+
+	users, err := st.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bbCount int
+	for _, u := range users {
+		if u.BitbucketUserID != nil {
+			bbCount++
+		}
+	}
+	if bbCount != 1 {
+		t.Fatalf("expected one bitbucket user row, got %d", bbCount)
+	}
+}
+

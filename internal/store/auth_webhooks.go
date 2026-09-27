@@ -491,7 +491,8 @@ WHERE id=?`, bitbucketInstanceID, uid, login, u.Email, u.DisplayName, u.AvatarUR
 		if target.IsBootstrapAdmin {
 			return nil, ErrBootstrapClash
 		}
-		if target.BitbucketUserID != nil && (*target.BitbucketUserID != uid || target.BitbucketInstanceID == nil || *target.BitbucketInstanceID != bitbucketInstanceID) {
+		// Same-instance UID mismatch is allowed so a prior non-FNV OAuth hash can be remapped.
+		if target.BitbucketUserID != nil && (target.BitbucketInstanceID == nil || *target.BitbucketInstanceID != bitbucketInstanceID) {
 			return nil, ErrIdentityLinked
 		}
 		_, err = s.exec(ctx, `
@@ -507,6 +508,17 @@ WHERE id=?`, bitbucketInstanceID, uid, u.Email, u.DisplayName, u.AvatarURL, now,
 	if existing, err := s.getUserByLogin(ctx, login); err == nil {
 		if existing.IsBootstrapAdmin {
 			return nil, ErrBootstrapClash
+		}
+		// Remap stale Bitbucket identity hash for the same instance+login (1.0.1 OAuth used a non-FNV hash).
+		if existing.BitbucketUserID != nil && *existing.BitbucketUserID != uid &&
+			existing.BitbucketInstanceID != nil && *existing.BitbucketInstanceID == bitbucketInstanceID {
+			_, err := s.exec(ctx, `
+UPDATE users SET bitbucket_user_id=?, login=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, uid, login, u.Email, u.DisplayName, u.AvatarURL, now, existing.ID)
+			if err != nil {
+				return nil, err
+			}
+			return s.GetUserByID(ctx, existing.ID)
 		}
 		if existing.BitbucketUserID != nil && *existing.BitbucketUserID != uid {
 			return nil, ErrLoginConflict

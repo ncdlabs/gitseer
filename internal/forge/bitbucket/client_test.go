@@ -39,6 +39,16 @@ func TestStableID(t *testing.T) {
 	if a != b || a <= 0 {
 		t.Fatalf("stableID mismatch a=%d b=%d", a, b)
 	}
+	// Guard against regressing to the pre-fix OAuth h×31 hash (must stay FNV-64a).
+	const uuid = "11111111-1111-1111-1111-111111111111"
+	var legacy uint64
+	for i := 0; i < len(uuid); i++ {
+		legacy = legacy*31 + uint64(uuid[i])
+	}
+	legacyID := int64(legacy & 0x7fffffffffffffff)
+	if a == legacyID {
+		t.Fatalf("StableID unexpectedly matches legacy h×31 hash (%d)", legacyID)
+	}
 }
 
 func TestClientHTTptest(t *testing.T) {

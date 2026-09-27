@@ -60,6 +60,7 @@ podman compose -f compose.yaml up --build -d
 - Hit `GET /health/ready` and Settings → Status (`encryption_healthy`, forge checklist, capability matrix).
 - Trigger **Sync Now** if webhooks were quiet during the rollout.
 - Re-verify OAuth login for each forge you use (callback URLs unchanged unless you changed `server.external_url`).
+- **Bitbucket OAuth (1.0.1 → next):** OAuth login once hashed `bitbucket_user_id` differently from sync. After upgrade, the next Bitbucket sign-in remaps the existing user row in place (same login + instance). No manual SQL needed unless login conflict persists — then clear that user’s `bitbucket_user_id` / `bitbucket_instance_id` and sign in again.
 - Wallboard tokens and notification settings persist across upgrades; rotate tokens only if you suspect leakage.
 
 ## Schema and feature notes (1.0)

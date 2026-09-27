@@ -465,7 +465,7 @@ func (s *Service) fetchBitbucketUser(ctx context.Context, accessToken string) (*
 	if gu.Links != nil && gu.Links.Avatar != nil {
 		avatar = gu.Links.Avatar.Href
 	}
-	id := bitbucketStableID(firstNonEmpty(gu.UUID, gu.AccountID))
+	id := bitbucket.StableID(firstNonEmpty(gu.UUID, gu.AccountID))
 	return &models.User{
 		BitbucketUserID: &id,
 		Login:           login,
@@ -875,19 +875,4 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func bitbucketStableID(s string) int64 {
-	s = strings.Trim(strings.TrimSpace(s), "{}")
-	if s == "" {
-		return 0
-	}
-	var h uint64
-	for i := 0; i < len(s); i++ {
-		h = h*31 + uint64(s[i])
-	}
-	if h == 0 {
-		h = 1
-	}
-	return int64(h & 0x7fffffffffffffff)
 }
