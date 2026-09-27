@@ -89,7 +89,7 @@ The [cut-release](../.github/workflows/cut-release.yaml) workflow bumps `cmd/git
 Repo secrets:
 
 - `RELEASE_TOKEN` (**required** for cut-release) — classic PAT (`repo`) or fine-grained token for a repo admin who can bypass the locked / PR-required `main` branch. Used to push the version commit + tag; a PAT (not `GITHUB_TOKEN`) is also required so the tag push triggers `release.yaml`.
-- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — Docker Hub publish. GHCR publish uses `GITHUB_TOKEN`.
+- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — optional Docker Hub publish (skipped when unset; GHCR still publishes). GHCR uses `GITHUB_TOKEN`.
 
 ```bash
 gh secret set RELEASE_TOKEN --repo ncdlabs/gitseer
