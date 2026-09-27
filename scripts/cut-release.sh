@@ -28,9 +28,10 @@ usage() {
 Usage: $0 [patch|minor|major|X.Y.Z] [--push] [--allow-empty]
 
 Bumps version in $MAIN_GO, $CHART, and $CHANGELOG, commits, and tags vX.Y.Z.
-With --push, also runs: git push origin HEAD --tags
+With --push, pushes main first, then the tag (avoids orphan tags on protected main).
 
 Prefer cutting releases via GitHub Actions (Actions → Cut release) rather than locally.
+Requires repo secret RELEASE_TOKEN (admin PAT) because main is locked/PR-protected.
 EOF
 }
 
@@ -119,12 +120,15 @@ git tag -a "$tag" -m "GitSeer ${next}"
 
 echo "Created commit and tag ${tag} (${current} → ${next})"
 if [[ "$PUSH" -eq 1 ]]; then
-  git push origin HEAD --tags
-  echo "Pushed HEAD and ${tag}; release workflow should start shortly."
+  # Push the branch first so a protected-main rejection cannot leave an orphan tag.
+  git push origin HEAD:main
+  git push origin "refs/tags/${tag}"
+  echo "Pushed main and ${tag}; release workflow should start shortly."
 else
   cat <<EOF
 Next:
-  git push origin HEAD --tags
+  git push origin HEAD:main
+  git push origin "refs/tags/${tag}"
 
 Or re-run with --push.
 EOF

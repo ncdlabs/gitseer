@@ -86,7 +86,14 @@ The [cut-release](../.github/workflows/cut-release.yaml) workflow bumps `cmd/git
 - Publishes linux/amd64 images to `ghcr.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`) and `docker.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`)
 - Creates a GitHub Release with the linux/amd64 binary, checksum, and SBOM
 
-Repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (publish). If `main` is branch-protected, set `RELEASE_TOKEN` (PAT or fine-grained token with contents write + bypass) so cut-release can push the version commit and tag; otherwise `GITHUB_TOKEN` is used. GHCR publish uses `GITHUB_TOKEN`.
+Repo secrets:
+
+- `RELEASE_TOKEN` (**required** for cut-release) — classic PAT (`repo`) or fine-grained token for a repo admin who can bypass the locked / PR-required `main` branch. Used to push the version commit + tag; a PAT (not `GITHUB_TOKEN`) is also required so the tag push triggers `release.yaml`.
+- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — Docker Hub publish. GHCR publish uses `GITHUB_TOKEN`.
+
+```bash
+gh secret set RELEASE_TOKEN --repo ncdlabs/gitseer
+```
 
 Lab / k3s-home continues to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill — that registry is **not** updated by this workflow. Do not bump `values-k3s-home.yaml` from cut-release.
 
