@@ -38,13 +38,15 @@ type Integration struct {
 	OAuthClientSecret     string
 }
 
-// GitHubIntegration is the effective GitHub connection (service PAT; no OAuth in this slice).
+// GitHubIntegration is the effective GitHub connection (service PAT + optional OAuth App).
 type GitHubIntegration struct {
 	URL                   string
 	Token                 string
 	WebhookSecret         string
 	AllowPrivateNetwork   bool
 	AllowUnsignedWebhooks bool
+	OAuthClientID         string
+	OAuthClientSecret     string
 }
 
 // IntegrationPublic is the API-safe view (never includes secret values).
@@ -94,6 +96,9 @@ type IntegrationPatch struct {
 // OnIntegrationChange is invoked after a successful integration update (live apply).
 type OnIntegrationChange func(Integration)
 
+// OnGitHubChange is invoked after GitHub integration/instance changes (OAuth live apply).
+type OnGitHubChange func(GitHubIntegration)
+
 // OnExternalURLChange is invoked after server_external_url changes (live apply).
 type OnExternalURLChange func(externalURL string)
 
@@ -126,6 +131,7 @@ type Manager struct {
 	encKeyPath string
 	st         *store.Store
 	onInteg    OnIntegrationChange
+	onGitHub   OnGitHubChange
 	onExt      OnExternalURLChange
 	onEnc      OnEncryptionChange
 }
@@ -184,6 +190,13 @@ func (m *Manager) SetOnIntegrationChange(fn OnIntegrationChange) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onInteg = fn
+}
+
+// SetOnGitHubChange registers a live-apply callback for GitHub OAuth credentials.
+func (m *Manager) SetOnGitHubChange(fn OnGitHubChange) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onGitHub = fn
 }
 
 // SetOnExternalURLChange registers a live-apply callback for the public GitSeer URL.

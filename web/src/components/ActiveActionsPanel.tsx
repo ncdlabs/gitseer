@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { api, type ActiveRunItem, type ForgeStatusRow, type Job } from "../api/client";
+import { api, type ActiveRunItem, type ForgeStatusRow, type Job, type User } from "../api/client";
 import { useIsTerminalTheme } from "../hooks/useIsTerminalTheme";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 import { asciiBar } from "../lib/asciiGraphics";
 import { jobProgress, parseSteps, stepProgress } from "../lib/actionProgress";
 import { ForgeBadge } from "./ForgeBadge";
+import { WorkflowWriteActions } from "./WorkflowWriteActions";
 
 function ProgressBar({ ratio, label }: { ratio: number; label: string }) {
   const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
@@ -91,12 +92,14 @@ function ActiveRunRow({
   preferOpener,
   showForge,
   forges,
+  user,
 }: {
   item: ActiveRunItem;
   onNavigate?: () => void;
   preferOpener?: boolean;
   showForge?: boolean;
   forges?: ForgeStatusRow[];
+  user?: User | null;
 }) {
   const jobs = item.jobs || [];
   const jp = jobProgress(jobs);
@@ -105,58 +108,67 @@ function ActiveRunRow({
   const to = `/pipelines/${item.run.id}`;
 
   return (
-    <Link
-      className="actions-flyout__item"
-      to={to}
-      onClick={(event) => {
-        if (preferOpener) {
-          // Keep the popout on /actions-popout; open the run in the main window.
-          event.preventDefault();
-          navigateMainWindow(to);
-        }
-        onNavigate?.();
-      }}
-    >
-      <div className="actions-flyout__item-top">
-        <span className="actions-flyout__repo">{item.run.repo_full || "—"}</span>
-        <span className={`badge ${statusLabel(item)}`}>{statusLabel(item)}</span>
-      </div>
-      <span className="actions-flyout__run-name">
-        {showForge && (
-          <ForgeBadge
-            forgeType={item.run.forge_type}
-            instanceName={resolveInstanceName(forges ?? [], {
-              forgeType: item.run.forge_type,
-              instanceId: item.run.instance_id,
-              instanceName: item.run.instance_name,
-            })}
-          />
+    <div className="actions-flyout__item">
+      <Link
+        className="actions-flyout__item-link"
+        to={to}
+        onClick={(event) => {
+          if (preferOpener) {
+            // Keep the popout on /actions-popout; open the run in the main window.
+            event.preventDefault();
+            navigateMainWindow(to);
+          }
+          onNavigate?.();
+        }}
+      >
+        <div className="actions-flyout__item-top">
+          <span className="actions-flyout__repo">{item.run.repo_full || "—"}</span>
+          <span className={`badge ${statusLabel(item)}`}>{statusLabel(item)}</span>
+        </div>
+        <span className="actions-flyout__run-name">
+          {showForge && (
+            <ForgeBadge
+              forgeType={item.run.forge_type}
+              instanceName={resolveInstanceName(forges ?? [], {
+                forgeType: item.run.forge_type,
+                instanceId: item.run.instance_id,
+                instanceName: item.run.instance_name,
+              })}
+            />
+          )}
+          {item.run.name}
+        </span>
+        {jp.total > 0 && (
+          <div className="actions-flyout__progress">
+            <div className="actions-flyout__progress-meta">
+              <span>Jobs</span>
+              <span>
+                {jp.completed}/{jp.total}
+              </span>
+            </div>
+            <ProgressBar ratio={jp.ratio} label={`Jobs ${jp.completed} of ${jp.total}`} />
+          </div>
         )}
-        {item.run.name}
-      </span>
-      {jp.total > 0 && (
-        <div className="actions-flyout__progress">
-          <div className="actions-flyout__progress-meta">
-            <span>Jobs</span>
-            <span>
-              {jp.completed}/{jp.total}
-            </span>
+        {sp && sp.total > 0 && (
+          <div className="actions-flyout__progress">
+            <div className="actions-flyout__progress-meta">
+              <span className="actions-flyout__step-name">{sp.currentName || "Steps"}</span>
+              <span>
+                {sp.completed}/{sp.total}
+              </span>
+            </div>
+            <ProgressBar ratio={sp.ratio} label={`Steps ${sp.completed} of ${sp.total}`} />
           </div>
-          <ProgressBar ratio={jp.ratio} label={`Jobs ${jp.completed} of ${jp.total}`} />
-        </div>
-      )}
-      {sp && sp.total > 0 && (
-        <div className="actions-flyout__progress">
-          <div className="actions-flyout__progress-meta">
-            <span className="actions-flyout__step-name">{sp.currentName || "Steps"}</span>
-            <span>
-              {sp.completed}/{sp.total}
-            </span>
-          </div>
-          <ProgressBar ratio={sp.ratio} label={`Steps ${sp.completed} of ${sp.total}`} />
-        </div>
-      )}
-    </Link>
+        )}
+      </Link>
+      <WorkflowWriteActions
+        run={item.run}
+        user={user}
+        compact
+        className="actions-flyout__write-ops"
+        onDone={onNavigate}
+      />
+    </div>
   );
 }
 
@@ -169,6 +181,7 @@ export type ActiveActionsPanelProps = {
 
 export function ActiveActionsPanel({ headerActions, onNavigate, preferOpener, className }: ActiveActionsPanelProps) {
   const { showForge, forges } = useForgeInventory();
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const q = useQuery({
     queryKey: ["workflow-runs", "active"],
     queryFn: api.activeWorkflowRuns,
@@ -177,6 +190,7 @@ export function ActiveActionsPanel({ headerActions, onNavigate, preferOpener, cl
 
   const total = q.data?.total ?? 0;
   const items = q.data?.items ?? [];
+  const user = me.data ?? null;
 
   return (
     <div className={className ? `actions-panel ${className}` : "actions-panel"}>
@@ -200,6 +214,7 @@ export function ActiveActionsPanel({ headerActions, onNavigate, preferOpener, cl
               preferOpener={preferOpener}
               showForge={showForge}
               forges={forges}
+              user={user}
             />
           ))}
         </div>

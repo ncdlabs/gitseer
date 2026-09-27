@@ -10,21 +10,25 @@ const (
 )
 
 type Instance struct {
-	ID                       int64
-	Name                     string
-	ForgeType                string
-	BaseURL                  string
-	Version                  string
-	CapabilitiesJSON         string
-	SyncTokenCiphertext      string
-	WebhookSecretCiphertext  string
-	OAuthClientID            string
-	OAuthClientSecretCipher  string
-	ExternalURL              string
-	AllowPrivateNetwork      bool
-	AllowUnsignedWebhooks    bool
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	ID                      int64
+	Name                    string
+	ForgeType               string
+	BaseURL                 string
+	Version                 string
+	CapabilitiesJSON        string
+	SyncTokenCiphertext     string
+	WebhookSecretCiphertext string
+	OAuthClientID           string
+	OAuthClientSecretCipher string
+	ExternalURL             string
+	AllowPrivateNetwork     bool
+	AllowUnsignedWebhooks   bool
+	WebhookVerifiedAt       *time.Time
+	WebhookEnsureAt         *time.Time
+	WebhookEnsureError      string
+	WebhookVerifyToken      string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 type InstanceInfo struct {
@@ -40,6 +44,10 @@ type Capabilities struct {
 	RunnersAPI         bool   `json:"runners_api"`
 	WorkflowRunWebhook bool   `json:"workflow_run_webhook"`
 	WorkflowJobWebhook bool   `json:"workflow_job_webhook"`
+	// RerunWorkflowAPI: forge exposes POST .../actions/runs/{id}/rerun.
+	RerunWorkflowAPI bool `json:"rerun_workflow_api"`
+	// CancelWorkflowAPI: forge exposes POST .../actions/runs/{id}/cancel.
+	CancelWorkflowAPI bool `json:"cancel_workflow_api"`
 }
 
 type Organization struct {
@@ -209,6 +217,8 @@ type User struct {
 	ID               int64
 	InstanceID       *int64
 	GiteaUserID      *int64
+	GitHubUserID     *int64
+	GitHubInstanceID *int64
 	Login            string
 	Email            string
 	DisplayName      string
@@ -239,15 +249,15 @@ type Summary struct {
 
 // StatsReport is the authz-scoped dashboard time-series / breakdown payload.
 type StatsReport struct {
-	Days                 int            `json:"days"`
-	Since                string         `json:"since,omitempty"`
-	RunsByDay            []DayRunBucket `json:"runs_by_day"`
-	RunConclusions       []CountBucket  `json:"run_conclusions"`
-	RunDuration          *DurationStats `json:"run_duration"`
-	PRsByDay             []DayPRBucket  `json:"prs_by_day"`
-	PRCIStates           []CountBucket  `json:"pr_ci_states"`
-	AttentionBySeverity  []CountBucket  `json:"attention_by_severity"`
-	AttentionByType      []CountBucket  `json:"attention_by_type"`
+	Days                int            `json:"days"`
+	Since               string         `json:"since,omitempty"`
+	RunsByDay           []DayRunBucket `json:"runs_by_day"`
+	RunConclusions      []CountBucket  `json:"run_conclusions"`
+	RunDuration         *DurationStats `json:"run_duration"`
+	PRsByDay            []DayPRBucket  `json:"prs_by_day"`
+	PRCIStates          []CountBucket  `json:"pr_ci_states"`
+	AttentionBySeverity []CountBucket  `json:"attention_by_severity"`
+	AttentionByType     []CountBucket  `json:"attention_by_type"`
 }
 
 // DayRunBucket is one calendar day of workflow-run conclusions (stacked).
@@ -278,6 +288,40 @@ type DurationStats struct {
 	P50Seconds  float64 `json:"p50_seconds"`
 	P95Seconds  float64 `json:"p95_seconds"`
 	SampleCount int     `json:"sample_count"`
+}
+
+// Repo health grades (computed rollup; not a forge status).
+const (
+	HealthGradeHealthy  = "healthy"
+	HealthGradeDegraded = "degraded"
+	HealthGradeCritical = "critical"
+)
+
+// RepoHealth is a per-repository operational rollup (attention, default-branch CI, stale PRs, fail rate).
+type RepoHealth struct {
+	RepoID                  int64   `json:"repo_id"`
+	Score                   int     `json:"score"`
+	Grade                   string  `json:"grade"` // healthy | degraded | critical
+	OpenCriticalAttention   int     `json:"open_critical_attention"`
+	FailingDefaultBranch    bool    `json:"failing_default_branch"`
+	FailingDefaultBranchRun *int64  `json:"failing_default_branch_run_id,omitempty"`
+	StaleOpenPRs            int     `json:"stale_open_prs"`
+	CIFailRate              float64 `json:"ci_fail_rate"`
+	CIRunsInWindow          int     `json:"ci_runs_in_window"`
+	CIFailuresInWindow      int     `json:"ci_failures_in_window"`
+	WindowDays              int     `json:"window_days"`
+	StalePRDays             int     `json:"stale_pr_days"`
+}
+
+// FailureCluster aggregates repeated job failures for one repo over a window.
+type FailureCluster struct {
+	RepoID       int64      `json:"repo_id"`
+	WorkflowPath string     `json:"workflow_path"`
+	JobName      string     `json:"job_name"`
+	FailureCount int        `json:"failure_count"`
+	LastFailedAt *time.Time `json:"last_failed_at,omitempty"`
+	SampleRunID  *int64     `json:"sample_run_id,omitempty"`
+	SampleJobID  *int64     `json:"sample_job_id,omitempty"`
 }
 
 // Status vocabulary (PRD §31)

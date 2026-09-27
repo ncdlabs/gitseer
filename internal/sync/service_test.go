@@ -88,6 +88,14 @@ func (m *mockForge) GetWorkflowYAML(context.Context, models.RepoRef, string, str
 	return nil, fmt.Errorf("not found")
 }
 
+func (m *mockForge) RerunWorkflowRun(context.Context, models.RepoRef, int64) error {
+	return forge.ErrUnsupported
+}
+
+func (m *mockForge) CancelWorkflowRun(context.Context, models.RepoRef, int64) error {
+	return forge.ErrUnsupported
+}
+
 func (m *mockForge) ListAccessibleReposForUser(context.Context, string, forge.ListReposOpts) (forge.Page[models.Repository], error) {
 	return forge.Page[models.Repository]{}, nil
 }

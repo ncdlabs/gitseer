@@ -25,6 +25,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/forge/github"
 	gitseermetrics "github.com/ncdlabs/gitseer/internal/metrics"
 	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/notify"
 	"github.com/ncdlabs/gitseer/internal/ratelimit"
 	"github.com/ncdlabs/gitseer/internal/realtime"
 	"github.com/ncdlabs/gitseer/internal/settings"
@@ -36,8 +37,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// errUserTokenRequired is returned when an OAuth user has no decryptable Gitea token for user-scoped forge calls.
-var errUserTokenRequired = errors.New("user gitea token unavailable; sign in with OAuth again (requires GITSEER_ENCRYPTION_KEY)")
+// errUserTokenRequired is returned when an OAuth user has no decryptable forge token for user-scoped calls.
+var errUserTokenRequired = errors.New("user forge token unavailable; sign in with OAuth again (requires GITSEER_ENCRYPTION_KEY)")
 
 type ctxKey int
 
@@ -53,8 +54,14 @@ type Handler struct {
 	att      *attention.Engine
 	hub      *realtime.Hub
 	settings *settings.Manager
+	notify   *notify.Service
 	log      *slog.Logger
 	version  string
+}
+
+// SetNotify wires the outbound notification service (optional).
+func (h *Handler) SetNotify(n *notify.Service) {
+	h.notify = n
 }
 
 func New(
@@ -138,18 +145,32 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth).Get("/settings", h.getSettings)
 		r.With(h.requireAuth, h.requireCSRF).Put("/settings", h.putSettings)
 
+		r.With(h.requireAuth).Get("/notifications/settings", h.getNotificationSettings)
+		r.With(h.requireAuth, h.requireCSRF).Put("/notifications/settings", h.putNotificationSettings)
+		r.With(h.requireAuth, h.requireCSRF).Post("/notifications/test", h.sendTestNotification)
+
 		r.With(h.requireAuth).Get("/instances", h.listInstances)
 		r.With(h.requireAuth, h.requireCSRF).Post("/instances", h.createInstance)
 		r.With(h.requireAuth, h.requireCSRF).Put("/instances/{id}", h.updateInstance)
 		r.With(h.requireAuth, h.requireCSRF).Delete("/instances/{id}", h.deleteInstance)
+		r.With(h.requireAuth, h.requireCSRF).Post("/instances/{id}/ensure-webhook", h.ensureInstanceWebhook)
+		r.With(h.requireAuth, h.requireCSRF).Post("/instances/{id}/verify-webhook", h.verifyInstanceWebhook)
+		r.With(h.requireAuth).Get("/instances/{id}/gitea-ui-snippets", h.downloadGiteaUISnippets)
+		r.With(h.requireAuth, h.requireCSRF).Post("/admin/purge-retention", h.purgeRetention)
 
 		r.Route("/auth", func(r chi.Router) {
 			r.With(authLimit.Middleware).Get("/login", h.oauthLogin)
 			r.Get("/callback", h.oauthCallback)
+			r.With(authLimit.Middleware).Get("/github/login", h.githubOAuthLogin)
+			r.Get("/github/callback", h.githubOAuthCallback)
 			r.With(authLimit.Middleware, h.requireCSRF).Post("/bootstrap/login", h.bootstrapLogin)
 			r.With(h.requireCSRF).Post("/logout", h.logout)
 			r.Get("/me", h.me)
 		})
+
+		r.With(h.requireAuth).Get("/users", h.listUsers)
+		r.With(h.requireAuth).Get("/users/{id}/access", h.getUserAccess)
+		r.With(h.requireAuth, h.requireCSRF).Put("/users/{id}/access", h.putUserAccess)
 
 		r.With(h.requireAuth).Get("/setup/encryption", h.setupGetEncryption)
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/encryption", h.setupSetEncryption)
@@ -162,12 +183,26 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth).Get("/summary", h.summary)
 		r.With(h.requireAuth).Get("/stats", h.stats)
 		r.With(h.requireAuth).Get("/attention", h.listAttention)
+		r.With(h.requireAuth).Get("/attention/rule-overrides", h.getAttentionRuleOverrides)
+		r.With(h.requireAuth, h.requireCSRF).Put("/attention/rule-overrides", h.putAttentionRuleOverrides)
+		r.With(h.requireAuth, h.requireCSRF).Post("/attention/{id}/mute", h.muteAttention)
+		r.With(h.requireAuth, h.requireCSRF).Delete("/attention/{id}/mute", h.unmuteAttention)
+		r.With(h.requireAuth).Get("/attention/{id}/log-snippet", h.getAttentionLogSnippet)
+		r.With(h.requireAuth).Get("/inbox", h.getInbox)
+		r.With(h.requireAuth).Get("/saved-filters", h.listSavedFilters)
+		r.With(h.requireAuth, h.requireCSRF).Post("/saved-filters", h.createSavedFilter)
+		r.With(h.requireAuth, h.requireCSRF).Put("/saved-filters/{id}", h.updateSavedFilter)
+		r.With(h.requireAuth, h.requireCSRF).Delete("/saved-filters/{id}", h.deleteSavedFilter)
 		r.With(h.requireAuth).Get("/repositories", h.listRepositories)
+		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}/health", h.getRepositoryHealth)
+		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}/failure-clusters", h.getRepositoryFailureClusters)
 		r.With(h.requireAuth).Get("/repositories/{owner}/{repo}", h.getRepository)
 		r.With(h.requireAuth).Get("/pull-requests", h.listPRs)
 		r.With(h.requireAuth).Get("/workflow-runs", h.listRuns)
 		r.With(h.requireAuth).Get("/workflow-runs/active", h.listActiveRuns)
 		r.With(h.requireAuth).Get("/workflow-runs/{id}", h.getRun)
+		r.With(h.requireAuth, h.requireCSRF).Post("/workflow-runs/{id}/rerun", h.rerunWorkflowRun)
+		r.With(h.requireAuth, h.requireCSRF).Post("/workflow-runs/{id}/cancel", h.cancelWorkflowRun)
 		r.With(h.requireAuth).Get("/jobs/{id}", h.getJob)
 		r.With(h.requireAuth).Get("/jobs/{id}/logs", h.getJobLogs)
 		r.With(h.requireAuth).Get("/search", h.search)
@@ -379,7 +414,9 @@ func (h *Handler) forgeClientForUser(ctx context.Context, user *models.User) (fo
 }
 
 // forgeClientForRepo selects the forge client for the repository's instance.
-// GitHub (and bootstrap on any forge) uses the instance service token; Gitea OAuth users use their token.
+// Bootstrap admins use the instance service token. OAuth users use their per-instance
+// token when available (Gitea or GitHub). GitHub never silently falls back to the
+// service PAT for non-admin users.
 func (h *Handler) forgeClientForRepo(ctx context.Context, user *models.User, repo *models.Repository) (forge.Forge, error) {
 	if repo == nil || repo.InstanceID <= 0 {
 		return h.forgeClientForUser(ctx, user)
@@ -394,7 +431,7 @@ func (h *Handler) forgeClientForRepo(ctx context.Context, user *models.User, rep
 	}
 	token := ""
 	switch {
-	case ft == models.ForgeTypeGitHub || (user != nil && user.IsBootstrapAdmin):
+	case user != nil && user.IsBootstrapAdmin:
 		tok, err := h.instanceSyncToken(ctx, *inst)
 		if err != nil || tok == "" {
 			if ft == models.ForgeTypeGitHub {
@@ -408,11 +445,14 @@ func (h *Handler) forgeClientForRepo(ctx context.Context, user *models.User, rep
 		}
 		token = tok
 	case user != nil:
-		ut, err := h.auth.UserAccessToken(ctx, user.ID)
+		ut, err := h.auth.UserAccessTokenForInstance(ctx, user.ID, inst.ID)
 		if err != nil {
 			return nil, err
 		}
 		if ut == "" {
+			if ft == models.ForgeTypeGitHub {
+				return nil, errUserTokenRequired
+			}
 			return nil, errUserTokenRequired
 		}
 		token = ut
@@ -434,80 +474,95 @@ func (h *Handler) refreshUserACL(ctx context.Context, userID int64, userAccessTo
 	if err != nil || user == nil {
 		return fmt.Errorf("user not found")
 	}
+	prefer := int64(0)
+	if user.InstanceID != nil {
+		prefer = *user.InstanceID
+	}
+	return h.refreshUserACLWithToken(ctx, user, prefer, userAccessToken)
+}
+
+// refreshUserACLForInstance refreshes ACL rows for one forge instance using the given user token.
+func (h *Handler) refreshUserACLForInstance(ctx context.Context, userID, instanceID int64, userAccessToken string) error {
+	if userAccessToken == "" {
+		return fmt.Errorf("missing user token")
+	}
+	user, err := h.store.GetUserByID(ctx, userID)
+	if err != nil || user == nil {
+		return fmt.Errorf("user not found")
+	}
+	return h.refreshUserACLWithToken(ctx, user, instanceID, userAccessToken)
+}
+
+func (h *Handler) refreshUserACLWithToken(ctx context.Context, user *models.User, preferInstanceID int64, preferToken string) error {
 	instances, err := h.store.ListInstances(ctx)
 	if err != nil {
 		return err
 	}
-	var giteaInstanceIDs []int64
-	var githubInstanceIDs []int64
-	var repoIDs []int64
+	tokenInstIDs, _ := h.store.ListUserTokenInstanceIDs(ctx, user.ID)
+	tokenSet := map[int64]struct{}{}
+	for _, id := range tokenInstIDs {
+		tokenSet[id] = struct{}{}
+	}
+
 	for _, inst := range instances {
 		ft := inst.ForgeType
 		if ft == "" {
 			ft = models.ForgeTypeGitea
 		}
-		if ft == models.ForgeTypeGitHub {
-			// GitHub has no per-user OAuth in this slice. Never grant the service PAT's
-			// full inventory to ordinary OAuth users — include the instance ID so prior
-			// over-grants are cleared on refresh. Bootstrap admins use GrantBootstrapAll*.
-			githubInstanceIDs = append(githubInstanceIDs, inst.ID)
+		userToken := ""
+		switch {
+		case preferInstanceID == inst.ID && preferToken != "":
+			userToken = preferToken
+		case preferInstanceID > 0 && preferInstanceID != inst.ID:
+			// Caller asked to refresh a specific instance only when preferToken matches;
+			// still refresh other instances that have stored tokens.
+			if _, ok := tokenSet[inst.ID]; !ok {
+				continue
+			}
+			tok, err := h.auth.UserAccessTokenForInstance(ctx, user.ID, inst.ID)
+			if err != nil || tok == "" {
+				continue
+			}
+			userToken = tok
+		default:
+			if _, ok := tokenSet[inst.ID]; !ok {
+				// No per-user token for this instance: leave existing ACL rows alone
+				// (bootstrap-admin grants for service-PAT-only GitHub setups).
+				continue
+			}
+			tok, err := h.auth.UserAccessTokenForInstance(ctx, user.ID, inst.ID)
+			if err != nil || tok == "" {
+				continue
+			}
+			userToken = tok
+		}
+		if userToken == "" {
 			continue
 		}
-		if ft != models.ForgeTypeGitea {
-			continue
-		}
-		// OAuth tokens are issued by one Gitea; only refresh that instance's ACL.
-		if user.InstanceID != nil && *user.InstanceID != inst.ID {
-			continue
-		}
-		if user.InstanceID == nil {
-			// Orphaned / legacy users: only hit the primary OAuth-capable Gitea.
-			prim, perr := h.store.GetPrimaryGiteaInstance(ctx)
-			if perr != nil || prim == nil || prim.ID != inst.ID {
+		if ft == models.ForgeTypeGitea {
+			if user.InstanceID != nil && *user.InstanceID != inst.ID {
+				continue
+			}
+			if user.InstanceID == nil && preferInstanceID != inst.ID {
+				prim, perr := h.store.GetPrimaryGiteaInstance(ctx)
+				if perr != nil || prim == nil || prim.ID != inst.ID {
+					continue
+				}
+			}
+		} else if ft == models.ForgeTypeGitHub {
+			if user.GitHubInstanceID != nil && *user.GitHubInstanceID != inst.ID {
 				continue
 			}
 		}
-		token, err := h.instanceSyncToken(ctx, inst)
-		if err != nil || token == "" {
-			// Fall back to effective integration token for the primary Gitea URL.
-			integ := h.effectiveIntegration()
-			if integ.URL == "" || integ.Token == "" {
-				continue
-			}
-			if strings.TrimSpace(inst.BaseURL) != "" && !strings.EqualFold(strings.TrimRight(inst.BaseURL, "/"), strings.TrimRight(integ.URL, "/")) {
-				continue
-			}
-			token = integ.Token
-		}
-		client, err := forge.NewFromInstance(inst, token)
-		if err != nil {
+		if err := h.replaceACLForInstance(ctx, user.ID, inst, userToken); err != nil {
 			return err
 		}
-		giteaInstanceIDs = append(giteaInstanceIDs, inst.ID)
-		for page := 1; ; page++ {
-			p, err := client.ListAccessibleReposForUser(ctx, userAccessToken, forge.ListReposOpts{Page: page, PageSize: 50})
-			if err != nil {
-				return err
-			}
-			var externalIDs []int64
-			for _, repo := range p.Items {
-				externalIDs = append(externalIDs, repo.ExternalID)
-			}
-			ids, err := h.store.MapExternalIDsToRepoIDs(ctx, inst.ID, externalIDs)
-			if err != nil {
-				return err
-			}
-			repoIDs = append(repoIDs, ids...)
-			if !p.HasMore {
-				break
-			}
-		}
 	}
-	scopeIDs := append(append([]int64{}, giteaInstanceIDs...), githubInstanceIDs...)
-	if len(scopeIDs) == 0 {
-		// Legacy: no instance rows yet — use primary + integration.
+
+	// Legacy: no instance rows yet — use primary Gitea + integration.
+	if len(instances) == 0 && preferToken != "" {
 		integ := h.effectiveIntegration()
-		if integ.URL == "" || userAccessToken == "" {
+		if integ.URL == "" {
 			return fmt.Errorf("missing gitea url or user token")
 		}
 		client, err := gitea.New(integ.URL, integ.Token, integ.AllowPrivateNetwork)
@@ -520,7 +575,7 @@ func (h *Handler) refreshUserACL(ctx context.Context, userID int64, userAccessTo
 		}
 		var externalIDs []int64
 		for page := 1; ; page++ {
-			p, err := client.ListAccessibleReposForUser(ctx, userAccessToken, forge.ListReposOpts{Page: page, PageSize: 50})
+			p, err := client.ListAccessibleReposForUser(ctx, preferToken, forge.ListReposOpts{Page: page, PageSize: 50})
 			if err != nil {
 				return err
 			}
@@ -535,9 +590,38 @@ func (h *Handler) refreshUserACL(ctx context.Context, userID int64, userAccessTo
 		if err != nil {
 			return err
 		}
-		return h.store.ReplaceUserRepoAccessForInstances(ctx, userID, []int64{inst.ID}, ids)
+		return h.store.ReplaceUserRepoAccessForInstances(ctx, user.ID, []int64{inst.ID}, ids)
 	}
-	return h.store.ReplaceUserRepoAccessForInstances(ctx, userID, scopeIDs, repoIDs)
+	return nil
+}
+
+func (h *Handler) replaceACLForInstance(ctx context.Context, userID int64, inst models.Instance, userAccessToken string) error {
+	// ListAccessibleReposForUser authenticates as the user; the client token is only a
+	// fallback when the forge client requires a non-empty constructor token.
+	client, err := forge.NewFromInstance(inst, userAccessToken)
+	if err != nil {
+		return err
+	}
+	var repoIDs []int64
+	for page := 1; ; page++ {
+		p, err := client.ListAccessibleReposForUser(ctx, userAccessToken, forge.ListReposOpts{Page: page, PageSize: 50})
+		if err != nil {
+			return err
+		}
+		var externalIDs []int64
+		for _, repo := range p.Items {
+			externalIDs = append(externalIDs, repo.ExternalID)
+		}
+		ids, err := h.store.MapExternalIDsToRepoIDs(ctx, inst.ID, externalIDs)
+		if err != nil {
+			return err
+		}
+		repoIDs = append(repoIDs, ids...)
+		if !p.HasMore {
+			break
+		}
+	}
+	return h.store.ReplaceUserRepoAccessForInstances(ctx, userID, []int64{inst.ID}, repoIDs)
 }
 
 func (h *Handler) instanceSyncToken(_ context.Context, inst models.Instance) (string, error) {
@@ -558,11 +642,11 @@ func (h *Handler) RefreshAllUserACLs(ctx context.Context) {
 		return
 	}
 	for _, u := range users {
-		tok, err := h.auth.UserAccessToken(ctx, u.ID)
-		if err != nil || tok == "" {
+		instIDs, err := h.store.ListUserTokenInstanceIDs(ctx, u.ID)
+		if err != nil || len(instIDs) == 0 {
 			continue
 		}
-		if err := h.refreshUserACL(ctx, u.ID, tok); err != nil {
+		if err := h.refreshUserACLWithToken(ctx, &u, 0, ""); err != nil {
 			h.log.Warn("acl refresh failed", "user", u.Login, "err", err)
 		}
 	}
@@ -603,6 +687,9 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		"is_bootstrap_admin": user.IsBootstrapAdmin,
 		"authz":              authzMode,
 		"csrf_token":         csrf,
+		"has_gitea":          user.GiteaUserID != nil,
+		"has_github":         user.GitHubUserID != nil,
+		"github_oauth_enabled": h.auth.GitHubOAuthEnabled(),
 	}
 	if themeID, giteaName, ok := h.giteaThemeForUser(r.Context(), user); ok {
 		out["theme"] = string(themeID)
@@ -659,7 +746,9 @@ func (h *Handler) buildSystemStatus(ctx context.Context, redactSensitive bool) m
 	var firstGitea, firstGitHub *models.Instance
 	for i := range instances {
 		inst := &instances[i]
-		forges = append(forges, forgeStatusEntry(inst, redactSensitive))
+		entry := forgeStatusEntry(inst, redactSensitive)
+		h.enrichForgeStatusOps(ctx, inst, entry)
+		forges = append(forges, entry)
 		switch inst.ForgeType {
 		case models.ForgeTypeGitHub:
 			if firstGitHub == nil {
@@ -696,16 +785,41 @@ func (h *Handler) buildSystemStatus(ctx context.Context, redactSensitive bool) m
 		"gitea_configured":    giteaConfigured,
 		"github_configured":   githubConfigured,
 		"bootstrap_auth":      h.bootstrapAuthAvailable(),
-		"oauth_enabled":       h.auth.OAuthEnabled(),
-		"path_prefix":         h.cfg.PathPrefix(),
-		"instance_connected":  len(instances) > 0,
-		"webhook_hmac":        webhookHMAC,
-		"github_webhook_hmac": githubWebhookHMAC,
+		"oauth_enabled":        h.auth.OAuthEnabled(),
+		"github_oauth_enabled": h.auth.GitHubOAuthEnabled(),
+		"path_prefix":          h.cfg.PathPrefix(),
+		"instance_connected":   len(instances) > 0,
+		"webhook_hmac":         webhookHMAC,
+		"github_webhook_hmac":  githubWebhookHMAC,
 		"setup_completed":         setupCompleted,
 		"encryption_configured":   h.settings != nil && h.settings.EncryptionConfigured(),
 		"oauth_redirect_uri":      h.auth.RedirectURI(),
+		"github_oauth_redirect_uri": h.auth.GitHubRedirectURI(),
 		"server_external_url":     h.webhookDeliveryURLBase(),
 		"forges":                  forges,
+	}
+	encHealthy, encSource, encErr := h.encryptionHealth(ctx)
+	status["encryption_source"] = encSource
+	status["encryption_healthy"] = encHealthy
+	if encErr != "" {
+		status["encryption_error"] = encErr
+	}
+	if !redactSensitive {
+		globalStats, _ := h.store.WebhookStatsSince(ctx, 0, time.Now().UTC().Add(-24*time.Hour))
+		if globalStats != nil {
+			status["webhook_stats_24h"] = map[string]any{
+				"ok":         globalStats.OK,
+				"failed":     globalStats.Failed,
+				"pending":    globalStats.Pending,
+				"processing": globalStats.Processing,
+				"total":      globalStats.Total,
+			}
+		}
+		inFlight, _ := h.store.CountInFlightWorkflowRuns(ctx, 0)
+		wfHooks, _ := h.store.CountWebhookEventsByTypeSince(ctx, 0, time.Now().UTC().Add(-24*time.Hour),
+			[]string{"workflow_run", "workflow_job", "check_run", "check_suite"})
+		status["active_actions_in_flight"] = inFlight
+		status["active_actions_hint"] = activeActionsHint(inFlight, wfHooks, map[string]any{})
 	}
 	if firstGitea != nil {
 		status["gitea_version"] = firstGitea.Version
@@ -716,6 +830,7 @@ func (h *Handler) buildSystemStatus(ctx context.Context, redactSensitive bool) m
 	if firstGitHub != nil {
 		status["github_version"] = firstGitHub.Version
 	}
+	status["storage"] = h.storageStatus(ctx, redactSensitive)
 	return status
 }
 
@@ -1450,6 +1565,21 @@ func parseSummaryDays(raw string) (int, error) {
 	return parsed, nil
 }
 
+var errStatsSectionAllowlist = errors.New("section must be one of core, trends, duration, all")
+
+func parseStatsSection(raw string) (string, error) {
+	section := strings.TrimSpace(raw)
+	if section == "" {
+		return store.StatsSectionAll, nil
+	}
+	switch section {
+	case store.StatsSectionAll, store.StatsSectionCore, store.StatsSectionTrends, store.StatsSectionDuration:
+		return section, nil
+	default:
+		return "", errStatsSectionAllowlist
+	}
+}
+
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	user := userFromCtx(r.Context())
 	sc := h.scope(user)
@@ -1481,12 +1611,17 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	section, err := parseStatsSection(r.URL.Query().Get("section"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	snapshot := days == 0
 	since := time.Now().UTC()
 	if !snapshot {
 		since = since.AddDate(0, 0, -days)
 	}
-	rep, err := h.store.StatsReport(r.Context(), sc.UserID, sc.BootstrapAll, since, snapshot)
+	rep, err := h.store.StatsBySection(r.Context(), sc.UserID, sc.BootstrapAll, since, snapshot, section)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -1506,7 +1641,8 @@ func (h *Handler) listAttention(w http.ResponseWriter, r *http.Request) {
 		UserID: sc.UserID, BootstrapAll: sc.BootstrapAll, Severity: q.Get("severity"),
 		Type: q.Get("type"), Query: q.Get("q"), OpenOnly: q.Get("resolved") != "1",
 		ForgeType: q.Get("forge_type"), InstanceID: parseQueryInt64(q.Get("instance_id")),
-		Limit: limit, Offset: offset,
+		ExcludeMutedForUser: sc.UserID,
+		Limit:               limit, Offset: offset,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -1537,61 +1673,24 @@ func (h *Handler) listRepositories(w http.ResponseWriter, r *http.Request) {
 	if repos == nil {
 		repos = []models.Repository{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": repos, "total": total, "limit": limit, "offset": offset})
+	items, ok := h.attachRepoHealth(w, r, repos)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
 }
 
 func (h *Handler) getRepository(w http.ResponseWriter, r *http.Request) {
-	user := userFromCtx(r.Context())
-	owner := chi.URLParam(r, "owner")
-	name := chi.URLParam(r, "repo")
-	instanceID := parseQueryInt64(r.URL.Query().Get("instance_id"))
-
-	var candidates []models.Repository
-	if instanceID > 0 {
-		repo, err := h.store.GetRepositoryByOwnerNameInInstance(r.Context(), owner, name, instanceID)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "not found")
-			return
-		}
-		candidates = []models.Repository{*repo}
-	} else {
-		repos, err := h.store.ListRepositoriesByOwnerName(r.Context(), owner, name)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		candidates = repos
-	}
-
-	var accessible []models.Repository
-	for i := range candidates {
-		ok, err := h.authz.CanAccessRepo(r.Context(), user, candidates[i].ID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		if ok {
-			accessible = append(accessible, candidates[i])
-		}
-	}
-	if len(accessible) == 0 {
-		writeError(w, http.StatusNotFound, "not found")
+	repo, ok := h.resolveAccessibleRepo(w, r)
+	if !ok {
 		return
 	}
-	if len(accessible) > 1 {
-		writeError(w, http.StatusConflict, "multiple repositories match owner/name; pass instance_id")
+	health, err := h.store.RepoHealthSummary(r.Context(), repo.ID, h.healthOptsFromQuery(r))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	repo := accessible[0]
-	if inst, ierr := h.store.GetInstanceByID(r.Context(), repo.InstanceID); ierr == nil && inst != nil {
-		ft := inst.ForgeType
-		if ft == "" {
-			ft = models.ForgeTypeGitea
-		}
-		repo.ForgeType = ft
-		repo.InstanceName = inst.Name
-	}
-	writeJSON(w, http.StatusOK, repo)
+	writeJSON(w, http.StatusOK, repoWithHealth{Repository: *repo, Health: health})
 }
 
 func (h *Handler) listPRs(w http.ResponseWriter, r *http.Request) {

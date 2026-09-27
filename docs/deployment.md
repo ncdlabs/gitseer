@@ -20,9 +20,13 @@ Commands:
 ```text
 gitseer serve [--config path]
 gitseer version
+gitseer backup --out DIR [--config path]
+gitseer restore --from DIR [--config path] [--force]
 gitseer install-ui --custom-path DIR --gitseer-url URL [--instance-id N]
 gitseer uninstall-ui --custom-path DIR
 ```
+
+Settings → Integration also offers **Download Gitea UI Snippets** (same marker content as a zip) when a Gitea instance is configured; use CLI for in-place install on the Gitea host.
 
 ## Helm
 
@@ -37,6 +41,14 @@ helm upgrade --install gitseer deploy/helm/gitseer \
 ```
 
 Provide secrets via a Kubernetes Secret (`GITSEER_GITEA_TOKEN`, bootstrap password, OAuth, `GITSEER_WEBHOOK_SECRET`, `GITSEER_ENCRYPTION_KEY`, and GitHub vars when used). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup. When `GITSEER_GITHUB_URL` is set, `GITSEER_GITHUB_WEBHOOK_SECRET` must be present unless unsigned webhooks are allowed for GitHub.
+
+### Replicas
+
+Default `replicaCount: 1`. Raising replicas is supported only with caveats:
+
+- **Sync:** DB-backed per-`instance_id` leases ensure a single active reconciler per forge instance
+- **SSE:** fan-out is in-process (no Redis) — use sticky sessions or accept split event streams
+- **SQLite:** keep `replicaCount: 1` (shared SQLite across pods is unsafe)
 
 Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
 

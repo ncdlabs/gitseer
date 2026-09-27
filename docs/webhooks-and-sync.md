@@ -14,7 +14,7 @@
 - Events update runs, jobs, PRs (including review state), commit status / checks → PR `ci_state`, and trigger attention evaluation
 - Stuck `processing` webhook rows are reaped (~5 minutes)
 
-Recommended: create the forge webhook during the [Setup Wizard](setup-wizard.md) (or Settings → Integration), pointing at the per-instance URL shown in the UI, with the same secret GitSeer stores.
+Recommended: create the forge webhook during the [Setup Wizard](setup-wizard.md) (or Settings → Integration **Ensure Webhook**), pointing at the per-instance URL shown in the UI, with the same secret GitSeer stores. Use **Verify Delivery** on Status to arm verification; the next accepted delivery sets `webhook_verified_at`.
 
 ### Gitea
 
@@ -37,7 +37,7 @@ Organization or repository webhook → `{external_url}/api/webhooks/github/{inst
 
 ### Sync leases
 
-Manual Sync and background reconcile both take a per-`instance_id` lease (`sync_leases`). Lease TTL matches `sync.reconcile_interval`. If another holder already has the lease, that instance’s sync is skipped until it expires. Leases are in-process/DB-backed — suitable for a single replica (`replicaCount: 1` on SQLite).
+Manual Sync and background reconcile both take a per-`instance_id` lease (`sync_leases`). Lease TTL matches `sync.reconcile_interval`. If another holder already has the lease, that instance’s sync is skipped until it expires. Leases are DB-backed and work across replicas for reconcile exclusivity. SSE remains in-process (see [Deployment](deployment.md#replicas)). Default Helm `replicaCount: 1`.
 
 ## Consistency model
 

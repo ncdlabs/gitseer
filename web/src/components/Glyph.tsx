@@ -4,6 +4,7 @@ import { useIsTerminalTheme } from "../hooks/useIsTerminalTheme";
 export type ShellIconName =
   | "dashboard"
   | "attention"
+  | "inbox"
   | "pullRequests"
   | "pipelines"
   | "repositories"
@@ -33,6 +34,7 @@ export type ShellIconName =
 const ASCII: Record<ShellIconName, string> = {
   dashboard: "[#]",
   attention: "[!]",
+  inbox: "[i]",
   pullRequests: "[PR]",
   pipelines: "[|>]",
   repositories: "[R]",
@@ -89,6 +91,12 @@ function SvgIcon({ name, className }: { name: ShellIconName; className?: string 
       <>
         <path d="M12 3 3.7 19h16.6L12 3Z" />
         <path d="M12 9v4M12 16h.01" />
+      </>
+    ),
+    inbox: (
+      <>
+        <path d="M4 6h16v12H4z" />
+        <path d="m4 8 8 5 8-5" />
       </>
     ),
     pullRequests: (

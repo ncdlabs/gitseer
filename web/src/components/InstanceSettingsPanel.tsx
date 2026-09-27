@@ -91,7 +91,7 @@ function configuredFlags(inst: InstancePublic): string[] {
   const flags: string[] = [];
   if (inst.token_configured) flags.push("Token");
   if (inst.webhook_secret_configured) flags.push("Webhook");
-  if ((inst.forge_type || "").toLowerCase() === "gitea" && inst.oauth_client_secret_configured) {
+  if (inst.oauth_client_secret_configured || (inst.oauth_client_id || "").trim()) {
     flags.push("OAuth");
   }
   return flags;
@@ -118,9 +118,11 @@ export function InstanceSettingsPanel({ editable }: Props) {
   const [pendingRemove, setPendingRemove] = useState<InstancePublic | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
+  const [actionHint, setActionHint] = useState<string | null>(null);
 
   const dirty = useMemo(() => !sameDraft(draft, baseline), [draft, baseline]);
   const isGitea = draft.forge_type === "gitea";
+  const isGitHub = draft.forge_type === "github";
   const dialogOpen = mode === "pick" || mode === "create" || mode === "edit";
 
   useEffect(() => {
@@ -282,6 +284,11 @@ export function InstanceSettingsPanel({ editable }: Props) {
           {listError}
         </p>
       )}
+      {actionHint && (
+        <p className="settings-form__hint" role="status">
+          {actionHint}
+        </p>
+      )}
 
       {!instancesQuery.isLoading && !instancesQuery.isError && items.length === 0 && (
         <div className="empty">No forge instances configured yet.</div>
@@ -315,6 +322,70 @@ export function InstanceSettingsPanel({ editable }: Props) {
                     <button className="btn" type="button" onClick={() => openEdit(inst)}>
                       Edit
                     </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={async () => {
+                        setListError(null);
+                        setActionHint(null);
+                        try {
+                          const res = await api.ensureWebhook(inst.id);
+                          setActionHint(res.hint || (res.ok ? "Webhook ensured." : "Ensure finished."));
+                          await queryClient.invalidateQueries({ queryKey: ["settings"] });
+                        } catch (err) {
+                          setListError(err instanceof Error ? err.message : "Ensure Webhook failed");
+                        }
+                      }}
+                    >
+                      Ensure Webhook
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={async () => {
+                        setListError(null);
+                        setActionHint(null);
+                        try {
+                          const res = await api.verifyWebhook(inst.id);
+                          setActionHint(res.hint || "Verification armed.");
+                          await queryClient.invalidateQueries({ queryKey: ["settings"] });
+                        } catch (err) {
+                          setListError(err instanceof Error ? err.message : "Verify Delivery failed");
+                        }
+                      }}
+                    >
+                      Verify Delivery
+                    </button>
+                    {(inst.forge_type || "gitea").toLowerCase() === "gitea" && (
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={async () => {
+                          setListError(null);
+                          setActionHint(null);
+                          try {
+                            const { blob, filename } = await api.downloadGiteaUISnippets(inst.id, "zip");
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            URL.revokeObjectURL(url);
+                            setActionHint(
+                              "Downloaded Gitea UI snippets. Extract under Gitea custom/ or use gitseer install-ui on the Gitea host.",
+                            );
+                          } catch (err) {
+                            setListError(
+                              err instanceof Error ? err.message : "Download Gitea UI Snippets failed",
+                            );
+                          }
+                        }}
+                      >
+                        Download Gitea UI Snippets
+                      </button>
+                    )}
                     <button
                       className="btn"
                       type="button"
@@ -518,7 +589,7 @@ export function InstanceSettingsPanel({ editable }: Props) {
                       </p>
                     )}
                   </div>
-                  {isGitea && (
+                  {(isGitea || isGitHub) && (
                     <>
                       <div className="settings-form__field">
                         <input
@@ -546,9 +617,13 @@ export function InstanceSettingsPanel({ editable }: Props) {
                           autoComplete="new-password"
                         />
                         <p className="settings-form__hint">
-                          {mode === "edit" && editing?.oauth_client_secret_configured
-                            ? "Secret is configured. Leave blank to keep it."
-                            : "From the Gitea OAuth application."}
+                          {isGitHub
+                            ? mode === "edit" && editing?.oauth_client_secret_configured
+                              ? "Secret is configured. Leave blank to keep it. Callback: /api/v1/auth/github/callback"
+                              : "From the GitHub OAuth App. Register callback {external}/api/v1/auth/github/callback."
+                            : mode === "edit" && editing?.oauth_client_secret_configured
+                              ? "Secret is configured. Leave blank to keep it."
+                              : "From the Gitea OAuth application."}
                         </p>
                       </div>
                     </>

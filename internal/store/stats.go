@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"time"
@@ -9,22 +10,87 @@ import (
 	"github.com/ncdlabs/gitseer/internal/models"
 )
 
-// StatsReport returns authz-scoped dashboard series for the [since, now] window.
-// Day series are zero-filled; run_duration is nil when there are no completed samples.
-// When snapshot is true (dashboard "Now"), only current-state breakdowns are returned:
-// open PR CI states and open attention by severity/type. Historical series are empty.
+// Stats section allowlist values for progressive dashboard loading.
+const (
+	StatsSectionAll      = "all"
+	StatsSectionCore     = "core"
+	StatsSectionTrends   = "trends"
+	StatsSectionDuration = "duration"
+)
+
+// ErrInvalidStatsSection is returned when StatsBySection is given an unknown section.
+var ErrInvalidStatsSection = errors.New("section must be one of core, trends, duration, all")
+
+// StatsReport returns the full authz-scoped dashboard series for the [since, now]
+// window (section=all). Day series are zero-filled; run_duration is nil when there
+// are no completed samples. When snapshot is true (dashboard "Now"), only current-
+// state breakdowns are returned: open PR CI states and open attention by
+// severity/type. Historical series are empty.
 func (s *Store) StatsReport(ctx context.Context, userID int64, bootstrapAll bool, since time.Time, snapshot bool) (*models.StatsReport, error) {
+	return s.StatsBySection(ctx, userID, bootstrapAll, since, snapshot, StatsSectionAll)
+}
+
+// StatsBySection returns an authz-scoped StatsReport containing only the requested
+// section's fields. Unrelated SQL is not run.
+//
+//	core     — pr_ci_states, attention_by_severity, attention_by_type (+ since when !snapshot)
+//	trends   — runs_by_day, prs_by_day, run_conclusions (empty when snapshot)
+//	duration — run_duration only (nil when snapshot / no samples)
+//	all      — full report (same as StatsReport)
+func (s *Store) StatsBySection(ctx context.Context, userID int64, bootstrapAll bool, since time.Time, snapshot bool, section string) (*models.StatsReport, error) {
 	if err := requireListScope(userID, bootstrapAll); err != nil {
 		return nil, err
 	}
-	join := ""
-	args := []any{}
-	if userID > 0 && !bootstrapAll {
-		join = "INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
-		args = append(args, userID)
+	join, args := statsAuthzJoin(userID, bootstrapAll)
+
+	out := emptyStatsReport()
+	if !snapshot {
+		out.Since = formatTime(since.UTC())
 	}
 
-	out := &models.StatsReport{
+	switch section {
+	case StatsSectionCore:
+		if err := s.statsFillCore(ctx, out, join, args); err != nil {
+			return nil, err
+		}
+		return out, nil
+	case StatsSectionTrends:
+		if snapshot {
+			return out, nil
+		}
+		if err := s.statsFillTrends(ctx, out, join, args, since); err != nil {
+			return nil, err
+		}
+		return out, nil
+	case StatsSectionDuration:
+		if snapshot {
+			return out, nil
+		}
+		if err := s.statsFillDuration(ctx, out, join, args, since); err != nil {
+			return nil, err
+		}
+		return out, nil
+	case StatsSectionAll, "":
+		if err := s.statsFillCore(ctx, out, join, args); err != nil {
+			return nil, err
+		}
+		if snapshot {
+			return out, nil
+		}
+		if err := s.statsFillTrends(ctx, out, join, args, since); err != nil {
+			return nil, err
+		}
+		if err := s.statsFillDuration(ctx, out, join, args, since); err != nil {
+			return nil, err
+		}
+		return out, nil
+	default:
+		return nil, ErrInvalidStatsSection
+	}
+}
+
+func emptyStatsReport() *models.StatsReport {
+	return &models.StatsReport{
 		RunsByDay:           []models.DayRunBucket{},
 		RunConclusions:      []models.CountBucket{},
 		PRsByDay:            []models.DayPRBucket{},
@@ -32,7 +98,17 @@ func (s *Store) StatsReport(ctx context.Context, userID int64, bootstrapAll bool
 		AttentionBySeverity: []models.CountBucket{},
 		AttentionByType:     []models.CountBucket{},
 	}
+}
 
+func statsAuthzJoin(userID int64, bootstrapAll bool) (join string, args []any) {
+	if userID > 0 && !bootstrapAll {
+		join = "INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
+		args = append(args, userID)
+	}
+	return join, args
+}
+
+func (s *Store) statsFillCore(ctx context.Context, out *models.StatsReport, join string, args []any) error {
 	var err error
 	out.PRCIStates, err = s.statsCountBuckets(ctx, `
 SELECT COALESCE(NULLIF(pr.ci_state, ''), 'unknown') AS k, COUNT(*)
@@ -41,7 +117,7 @@ WHERE r.deleted_at IS NULL AND pr.state = 'open'
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	out.AttentionBySeverity, err = s.statsCountBuckets(ctx, `
@@ -51,7 +127,7 @@ WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	out.AttentionByType, err = s.statsCountBuckets(ctx, `
@@ -60,25 +136,20 @@ FROM attention_items a JOIN repositories r ON r.id = a.repo_id `+join+`
 WHERE r.deleted_at IS NULL AND a.resolved_at IS NULL
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args)
-	if err != nil {
-		return nil, err
-	}
+	return err
+}
 
-	if snapshot {
-		return out, nil
-	}
-
+func (s *Store) statsFillTrends(ctx context.Context, out *models.StatsReport, join string, args []any, since time.Time) error {
 	now := time.Now().UTC()
 	sinceUTC := since.UTC()
 	sinceStr := formatTime(sinceUTC)
 	days := dayKeys(sinceUTC, now)
-	out.Since = sinceStr
 	out.RunsByDay = make([]models.DayRunBucket, 0, len(days))
 	out.PRsByDay = make([]models.DayPRBucket, 0, len(days))
 
 	runByDay, err := s.statsRunsByDay(ctx, join, args, sinceStr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, d := range days {
 		b := runByDay[d]
@@ -95,12 +166,7 @@ WHERE r.deleted_at IS NULL
 GROUP BY k
 ORDER BY COUNT(*) DESC, k`, args, sinceStr)
 	if err != nil {
-		return nil, err
-	}
-
-	out.RunDuration, err = s.statsRunDuration(ctx, join, args, sinceStr)
-	if err != nil {
-		return nil, err
+		return err
 	}
 
 	prOpened, err := s.statsDayCounts(ctx, `
@@ -109,7 +175,7 @@ FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
 WHERE r.deleted_at IS NULL AND pr.created_at IS NOT NULL AND pr.created_at >= ?
 GROUP BY day`, args, sinceStr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	prMerged, err := s.statsDayCounts(ctx, `
 SELECT substr(pr.merged_at, 1, 10) AS day, COUNT(*)
@@ -117,7 +183,7 @@ FROM pull_requests pr JOIN repositories r ON r.id = pr.repo_id `+join+`
 WHERE r.deleted_at IS NULL AND pr.merged_at IS NOT NULL AND pr.merged_at >= ?
 GROUP BY day`, args, sinceStr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	prClosed, err := s.statsDayCounts(ctx, `
 SELECT substr(pr.closed_at, 1, 10) AS day, COUNT(*)
@@ -126,7 +192,7 @@ WHERE r.deleted_at IS NULL
   AND pr.closed_at IS NOT NULL AND pr.merged_at IS NULL AND pr.closed_at >= ?
 GROUP BY day`, args, sinceStr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, d := range days {
 		out.PRsByDay = append(out.PRsByDay, models.DayPRBucket{
@@ -136,8 +202,13 @@ GROUP BY day`, args, sinceStr)
 			Closed: prClosed[d],
 		})
 	}
+	return nil
+}
 
-	return out, nil
+func (s *Store) statsFillDuration(ctx context.Context, out *models.StatsReport, join string, args []any, since time.Time) error {
+	var err error
+	out.RunDuration, err = s.statsRunDuration(ctx, join, args, formatTime(since.UTC()))
+	return err
 }
 
 func (s *Store) statsRunsByDay(ctx context.Context, join string, baseArgs []any, sinceStr string) (map[string]models.DayRunBucket, error) {

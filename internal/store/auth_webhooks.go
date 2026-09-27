@@ -15,17 +15,19 @@ import (
 
 // Reserved / collision errors for OAuth user upserts.
 var (
-	ErrReservedLogin   = errors.New("oauth login is reserved")
-	ErrLoginConflict   = errors.New("login already linked to another account")
-	ErrBootstrapClash  = errors.New("cannot link oauth user to bootstrap admin")
-	ErrMissingGiteaUID = errors.New("gitea_user_id is required")
+	ErrReservedLogin    = errors.New("oauth login is reserved")
+	ErrLoginConflict    = errors.New("login already linked to another account")
+	ErrBootstrapClash   = errors.New("cannot link oauth user to bootstrap admin")
+	ErrMissingGiteaUID  = errors.New("gitea_user_id is required")
+	ErrMissingGitHubUID = errors.New("github_user_id is required")
+	ErrIdentityLinked   = errors.New("forge identity already linked to another account")
 )
+
+const userSelectCols = ` id, instance_id, gitea_user_id, github_user_id, github_instance_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at`
 
 func (s *Store) EnsureBootstrapUser(ctx context.Context) (*models.User, error) {
 	const login = "bootstrap"
-	row := s.queryRow(ctx, `
-SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
-FROM users WHERE login = ?`, login)
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+` FROM users WHERE login = ?`, login)
 	u, err := scanUser(row)
 	if err == nil {
 		return u, nil
@@ -47,10 +49,10 @@ RETURNING id`, login, now, now).Scan(&id)
 
 func scanUser(row scanner) (*models.User, error) {
 	var u models.User
-	var instanceID, giteaID sql.NullInt64
+	var instanceID, giteaID, githubID, githubInstID sql.NullInt64
 	var bootstrap int
 	var created, updated string
-	if err := row.Scan(&u.ID, &instanceID, &giteaID, &u.Login, &u.Email, &u.DisplayName, &u.AvatarURL, &bootstrap, &created, &updated); err != nil {
+	if err := row.Scan(&u.ID, &instanceID, &giteaID, &githubID, &githubInstID, &u.Login, &u.Email, &u.DisplayName, &u.AvatarURL, &bootstrap, &created, &updated); err != nil {
 		return nil, err
 	}
 	if instanceID.Valid {
@@ -61,6 +63,14 @@ func scanUser(row scanner) (*models.User, error) {
 		v := giteaID.Int64
 		u.GiteaUserID = &v
 	}
+	if githubID.Valid {
+		v := githubID.Int64
+		u.GitHubUserID = &v
+	}
+	if githubInstID.Valid {
+		v := githubInstID.Int64
+		u.GitHubInstanceID = &v
+	}
 	u.IsBootstrapAdmin = bootstrap != 0
 	u.CreatedAt, _ = parseTime(created)
 	u.UpdatedAt, _ = parseTime(updated)
@@ -68,9 +78,7 @@ func scanUser(row scanner) (*models.User, error) {
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id int64) (*models.User, error) {
-	row := s.queryRow(ctx, `
-SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
-FROM users WHERE id = ?`, id)
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+` FROM users WHERE id = ?`, id)
 	return scanUser(row)
 }
 
@@ -171,24 +179,154 @@ VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
 }
 
 func (s *Store) getUserByLogin(ctx context.Context, login string) (*models.User, error) {
-	row := s.queryRow(ctx, `
-SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
-FROM users WHERE login = ?`, login)
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+` FROM users WHERE login = ?`, login)
 	return scanUser(row)
 }
 
 func (s *Store) getUserByGiteaUID(ctx context.Context, instanceID *int64, giteaUID int64) (*models.User, error) {
 	var row *sql.Row
 	if instanceID == nil {
-		row = s.queryRow(ctx, `
-SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
+		row = s.queryRow(ctx, `SELECT`+userSelectCols+`
 FROM users WHERE instance_id IS NULL AND gitea_user_id = ?`, giteaUID)
 	} else {
-		row = s.queryRow(ctx, `
-SELECT id, instance_id, gitea_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at
+		row = s.queryRow(ctx, `SELECT`+userSelectCols+`
 FROM users WHERE instance_id = ? AND gitea_user_id = ?`, *instanceID, giteaUID)
 	}
 	return scanUser(row)
+}
+
+func (s *Store) getUserByGitHubUID(ctx context.Context, githubInstanceID int64, githubUID int64) (*models.User, error) {
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+`
+FROM users WHERE github_instance_id = ? AND github_user_id = ?`, githubInstanceID, githubUID)
+	return scanUser(row)
+}
+
+// UpsertGitHubUser creates or updates a user keyed by (github_instance_id, github_user_id).
+// When linkUserID is non-nil, attaches the GitHub identity to that existing account.
+func (s *Store) UpsertGitHubUser(ctx context.Context, githubInstanceID int64, u models.User, linkUserID *int64) (*models.User, error) {
+	if u.GitHubUserID == nil || *u.GitHubUserID == 0 {
+		return nil, ErrMissingGitHubUID
+	}
+	if githubInstanceID <= 0 {
+		return nil, fmt.Errorf("github instance_id is required")
+	}
+	login := strings.TrimSpace(u.Login)
+	if login == "" {
+		return nil, fmt.Errorf("login is required")
+	}
+	if strings.EqualFold(login, "bootstrap") {
+		return nil, ErrReservedLogin
+	}
+	now := formatTime(time.Now().UTC())
+	ghUID := *u.GitHubUserID
+
+	if byUID, err := s.getUserByGitHubUID(ctx, githubInstanceID, ghUID); err == nil {
+		if linkUserID != nil && *linkUserID != byUID.ID {
+			return nil, ErrIdentityLinked
+		}
+		if byUID.Login != login {
+			if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != byUID.ID {
+				// Keep existing login when GitHub login is taken by another row.
+				login = byUID.Login
+			} else if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+				return nil, oerr
+			}
+		}
+		_, err := s.exec(ctx, `
+UPDATE users SET github_instance_id=?, github_user_id=?, login=?, email=?, display_name=?, avatar_url=?, updated_at=?
+WHERE id=?`, githubInstanceID, ghUID, login, u.Email, u.DisplayName, u.AvatarURL, now, byUID.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, byUID.ID)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if linkUserID != nil {
+		target, err := s.GetUserByID(ctx, *linkUserID)
+		if err != nil {
+			return nil, err
+		}
+		if target.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if target.GitHubUserID != nil && (*target.GitHubUserID != ghUID || target.GitHubInstanceID == nil || *target.GitHubInstanceID != githubInstanceID) {
+			return nil, ErrIdentityLinked
+		}
+		_, err = s.exec(ctx, `
+UPDATE users SET github_instance_id=?, github_user_id=?, email=COALESCE(NULLIF(?, ''), email),
+  display_name=COALESCE(NULLIF(?, ''), display_name), avatar_url=COALESCE(NULLIF(?, ''), avatar_url), updated_at=?
+WHERE id=?`, githubInstanceID, ghUID, u.Email, u.DisplayName, u.AvatarURL, now, target.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, target.ID)
+	}
+
+	if existing, err := s.getUserByLogin(ctx, login); err == nil {
+		if existing.IsBootstrapAdmin {
+			return nil, ErrBootstrapClash
+		}
+		if existing.GitHubUserID != nil && *existing.GitHubUserID != ghUID {
+			return nil, ErrLoginConflict
+		}
+		if existing.GiteaUserID != nil && existing.GitHubUserID == nil {
+			// Same login already used by a Gitea-only account — require explicit link while signed in.
+			return nil, ErrLoginConflict
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	_, err := s.exec(ctx, `
+INSERT INTO users (github_instance_id, github_user_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+`, githubInstanceID, ghUID, login, u.Email, u.DisplayName, u.AvatarURL, now, now)
+	if err != nil {
+		return nil, err
+	}
+	return s.getUserByGitHubUID(ctx, githubInstanceID, ghUID)
+}
+
+// ListUsers returns all users ordered by id (bootstrap-admin ACL grant UI).
+func (s *Store) ListUsers(ctx context.Context) ([]models.User, error) {
+	rows, err := s.query(ctx, `SELECT`+userSelectCols+` FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
+// ListUserRepoIDsForInstance returns ACL repo ids for a user scoped to one forge instance.
+func (s *Store) ListUserRepoIDsForInstance(ctx context.Context, userID, instanceID int64) ([]int64, error) {
+	rows, err := s.query(ctx, `
+SELECT ura.repo_id FROM user_repository_access ura
+INNER JOIN repositories r ON r.id = ura.repo_id
+WHERE ura.user_id=? AND r.instance_id=? AND r.deleted_at IS NULL
+ORDER BY ura.repo_id`, userID, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) CreateSession(ctx context.Context, id, tokenHash string, userID int64, expires time.Time, ip, ua string) error {
@@ -220,74 +358,108 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *Store) SaveOAuthState(ctx context.Context, state, verifier, redirectTo string, expires time.Time) error {
+// OAuthStateMeta carries provider/instance/link metadata for an OAuth PKCE state.
+type OAuthStateMeta struct {
+	Provider   string
+	InstanceID *int64
+	LinkUserID *int64
+}
+
+func (s *Store) SaveOAuthState(ctx context.Context, state, verifier, redirectTo string, expires time.Time, meta OAuthStateMeta) error {
+	provider := strings.TrimSpace(meta.Provider)
+	if provider == "" {
+		provider = "gitea"
+	}
 	_, err := s.exec(ctx, `
-INSERT INTO oauth_states (state, code_verifier, redirect_to, expires_at) VALUES (?, ?, ?, ?)
-ON CONFLICT(state) DO UPDATE SET code_verifier=excluded.code_verifier, redirect_to=excluded.redirect_to, expires_at=excluded.expires_at
-`, state, verifier, redirectTo, formatTime(expires))
+INSERT INTO oauth_states (state, code_verifier, redirect_to, expires_at, provider, instance_id, link_user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(state) DO UPDATE SET
+  code_verifier=excluded.code_verifier,
+  redirect_to=excluded.redirect_to,
+  expires_at=excluded.expires_at,
+  provider=excluded.provider,
+  instance_id=excluded.instance_id,
+  link_user_id=excluded.link_user_id
+`, state, verifier, redirectTo, formatTime(expires), provider, nullInt64(meta.InstanceID), nullInt64(meta.LinkUserID))
 	return err
 }
 
-func (s *Store) TakeOAuthState(ctx context.Context, state string) (verifier, redirectTo string, err error) {
+func (s *Store) TakeOAuthState(ctx context.Context, state string) (verifier, redirectTo string, meta OAuthStateMeta, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", "", err
+		return "", "", meta, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	row := tx.QueryRowContext(ctx, s.sql(`SELECT code_verifier, redirect_to, expires_at FROM oauth_states WHERE state=?`), state)
+	row := tx.QueryRowContext(ctx, s.sql(`
+SELECT code_verifier, redirect_to, expires_at, COALESCE(provider, 'gitea'), instance_id, link_user_id
+FROM oauth_states WHERE state=?`), state)
 	var expires string
-	if err = row.Scan(&verifier, &redirectTo, &expires); err != nil {
-		return "", "", err
+	var instanceID, linkUserID sql.NullInt64
+	if err = row.Scan(&verifier, &redirectTo, &expires, &meta.Provider, &instanceID, &linkUserID); err != nil {
+		return "", "", meta, err
+	}
+	if instanceID.Valid {
+		v := instanceID.Int64
+		meta.InstanceID = &v
+	}
+	if linkUserID.Valid {
+		v := linkUserID.Int64
+		meta.LinkUserID = &v
 	}
 	res, err := tx.ExecContext(ctx, s.sql(`DELETE FROM oauth_states WHERE state=?`), state)
 	if err != nil {
-		return "", "", err
+		return "", "", meta, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return "", "", sql.ErrNoRows
+		return "", "", meta, sql.ErrNoRows
 	}
 	exp, _ := parseTime(expires)
 	if time.Now().UTC().After(exp) {
 		_ = tx.Commit()
-		return "", "", sql.ErrNoRows
+		return "", "", meta, sql.ErrNoRows
 	}
 	if err := tx.Commit(); err != nil {
-		return "", "", err
+		return "", "", meta, err
 	}
-	return verifier, redirectTo, nil
+	return verifier, redirectTo, meta, nil
 }
 
-func (s *Store) SaveUserToken(ctx context.Context, userID int64, accessCipher, refreshCipher string, expires *time.Time) error {
+func (s *Store) SaveUserToken(ctx context.Context, userID, instanceID int64, accessCipher, refreshCipher string, expires *time.Time) error {
+	if instanceID <= 0 {
+		return fmt.Errorf("instance_id is required for user tokens")
+	}
 	_, err := s.exec(ctx, `
-INSERT INTO user_tokens (user_id, access_token_ciphertext, refresh_token_ciphertext, expires_at)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(user_id) DO UPDATE SET
+INSERT INTO user_tokens (user_id, instance_id, access_token_ciphertext, refresh_token_ciphertext, expires_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(user_id, instance_id) DO UPDATE SET
   access_token_ciphertext=excluded.access_token_ciphertext,
   refresh_token_ciphertext=excluded.refresh_token_ciphertext,
   expires_at=excluded.expires_at
-`, userID, accessCipher, refreshCipher, formatTimePtr(expires))
+`, userID, instanceID, accessCipher, refreshCipher, formatTimePtr(expires))
 	return err
 }
 
-// UserTokenRow is the encrypted OAuth token material for a GitSeer user.
+// UserTokenRow is the encrypted OAuth token material for a GitSeer user on one forge instance.
 type UserTokenRow struct {
+	UserID        int64
+	InstanceID    int64
 	AccessCipher  string
 	RefreshCipher string
 	ExpiresAt     *time.Time
 }
 
-func (s *Store) GetUserToken(ctx context.Context, userID int64) (*UserTokenRow, error) {
+func (s *Store) GetUserToken(ctx context.Context, userID, instanceID int64) (*UserTokenRow, error) {
 	var access, refresh string
 	var expires sql.NullString
 	err := s.queryRow(ctx, `
 SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at
-FROM user_tokens WHERE user_id=?`, userID).Scan(&access, &refresh, &expires)
+FROM user_tokens WHERE user_id=? AND instance_id=?`, userID, instanceID).Scan(&access, &refresh, &expires)
 	if err != nil {
 		return nil, err
 	}
-	row := &UserTokenRow{AccessCipher: access, RefreshCipher: refresh}
+	row := &UserTokenRow{UserID: userID, InstanceID: instanceID, AccessCipher: access, RefreshCipher: refresh}
 	if expires.Valid && expires.String != "" {
 		t, perr := parseTime(expires.String)
 		if perr == nil {
@@ -295,6 +467,58 @@ FROM user_tokens WHERE user_id=?`, userID).Scan(&access, &refresh, &expires)
 		}
 	}
 	return row, nil
+}
+
+// GetAnyUserToken returns any stored token for the user (preferring the given instance when set).
+func (s *Store) GetAnyUserToken(ctx context.Context, userID int64, preferInstanceID int64) (*UserTokenRow, error) {
+	if preferInstanceID > 0 {
+		row, err := s.GetUserToken(ctx, userID, preferInstanceID)
+		if err == nil {
+			return row, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+	var instanceID int64
+	var access, refresh string
+	var expires sql.NullString
+	err := s.queryRow(ctx, `
+SELECT instance_id, access_token_ciphertext, refresh_token_ciphertext, expires_at
+FROM user_tokens WHERE user_id=? AND access_token_ciphertext != ''
+ORDER BY instance_id ASC LIMIT 1`, userID).Scan(&instanceID, &access, &refresh, &expires)
+	if err != nil {
+		return nil, err
+	}
+	row := &UserTokenRow{UserID: userID, InstanceID: instanceID, AccessCipher: access, RefreshCipher: refresh}
+	if expires.Valid && expires.String != "" {
+		t, perr := parseTime(expires.String)
+		if perr == nil {
+			row.ExpiresAt = &t
+		}
+	}
+	return row, nil
+}
+
+// ListUserTokenInstanceIDs returns forge instance ids that have a stored token for the user.
+func (s *Store) ListUserTokenInstanceIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := s.query(ctx, `
+SELECT instance_id FROM user_tokens
+WHERE user_id=? AND access_token_ciphertext != ''
+ORDER BY instance_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) InsertWebhookEvent(ctx context.Context, instanceID int64, deliveryID, eventType, payload string) (int64, bool, error) {

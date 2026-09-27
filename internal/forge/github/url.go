@@ -140,3 +140,26 @@ func isBlockedIP(ip net.IP) bool {
 	}
 	return false
 }
+
+// OAuthWebBase returns the host used for /login/oauth/* (github.com or GHE web root).
+// API bases like https://api.github.com map back to https://github.com.
+func OAuthWebBase(raw string) (string, error) {
+	u, err := normalizeAPIBase(raw)
+	if err != nil {
+		return "", err
+	}
+	host := strings.ToLower(u.Hostname())
+	switch host {
+	case "api.github.com":
+		return "https://github.com", nil
+	}
+	// GHE: strip /api/v3 path for the browser OAuth endpoints.
+	out := *u
+	path := strings.TrimRight(out.Path, "/")
+	path = strings.TrimSuffix(path, "/api/v3")
+	path = strings.TrimSuffix(path, "/api")
+	out.Path = path
+	out.RawQuery = ""
+	out.Fragment = ""
+	return strings.TrimRight(out.String(), "/"), nil
+}

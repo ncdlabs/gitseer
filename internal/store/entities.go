@@ -845,6 +845,7 @@ INSERT INTO attention_items (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
 ON CONFLICT(fingerprint) DO UPDATE SET
   severity=excluded.severity, title=excluded.title, metadata_json=excluded.metadata_json,
+  opened_at=CASE WHEN attention_items.resolved_at IS NOT NULL THEN excluded.opened_at ELSE attention_items.opened_at END,
   resolved_at=NULL, updated_at=excluded.updated_at
 `, item.InstanceID, item.RepoID, item.Type, item.Severity, item.EntityType, item.EntityID, item.Title, item.MetadataJSON, item.Fingerprint, now, now)
 	if err != nil {
@@ -921,8 +922,10 @@ type ListAttentionOpts struct {
 	Type         string
 	Query        string
 	OpenOnly     bool
-	Limit        int
-	Offset       int
+	// ExcludeMutedForUser when >0 hides fingerprints muted globally or by that user.
+	ExcludeMutedForUser int64
+	Limit               int
+	Offset              int
 }
 
 func (s *Store) ListAttention(ctx context.Context, opts ListAttentionOpts) ([]models.AttentionItem, int, error) {
@@ -962,6 +965,32 @@ func (s *Store) ListAttention(ctx context.Context, opts ListAttentionOpts) ([]mo
 			where = append(where, "(a.title LIKE ? OR a.type LIKE ? OR r.full_name LIKE ?)")
 			args = append(args, like, like, like)
 		}
+	}
+	if opts.ExcludeMutedForUser > 0 {
+		now := formatTime(time.Now().UTC())
+		where = append(where, `NOT EXISTS (
+SELECT 1 FROM attention_mutes m
+WHERE (m.until_at IS NULL OR m.until_at > ?)
+  AND (
+    (m.fingerprint != '' AND m.fingerprint = a.fingerprint)
+    OR (m.fingerprint = '' AND m.rule_type = a.type AND (m.repo_id IS NULL OR m.repo_id = a.repo_id))
+  )
+  AND (m.user_id IS NULL OR m.user_id = ?)
+)`)
+		args = append(args, now, opts.ExcludeMutedForUser)
+	} else if opts.BootstrapAll {
+		// Still hide globally muted items for bootstrap listings.
+		now := formatTime(time.Now().UTC())
+		where = append(where, `NOT EXISTS (
+SELECT 1 FROM attention_mutes m
+WHERE (m.until_at IS NULL OR m.until_at > ?)
+  AND m.user_id IS NULL
+  AND (
+    (m.fingerprint != '' AND m.fingerprint = a.fingerprint)
+    OR (m.fingerprint = '' AND m.rule_type = a.type AND (m.repo_id IS NULL OR m.repo_id = a.repo_id))
+  )
+)`)
+		args = append(args, now)
 	}
 	clause := strings.Join(where, " AND ")
 	var total int
@@ -1144,7 +1173,7 @@ func (s *Store) DeleteAccessForRepo(ctx context.Context, repoID int64) error {
 // ListUsersWithTokenCiphers returns non-bootstrap users that have a stored OAuth token cipher.
 func (s *Store) ListUsersWithTokenCiphers(ctx context.Context) ([]models.User, error) {
 	rows, err := s.query(ctx, `
-SELECT u.id, u.instance_id, u.gitea_user_id, u.login, u.email, u.display_name, u.avatar_url, u.is_bootstrap_admin, u.created_at, u.updated_at
+SELECT DISTINCT u.id, u.instance_id, u.gitea_user_id, u.github_user_id, u.github_instance_id, u.login, u.email, u.display_name, u.avatar_url, u.is_bootstrap_admin, u.created_at, u.updated_at
 FROM users u
 INNER JOIN user_tokens t ON t.user_id = u.id
 WHERE u.is_bootstrap_admin = 0 AND t.access_token_ciphertext != ''

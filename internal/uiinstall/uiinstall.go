@@ -50,14 +50,18 @@ func UninstallCmd(args []string) {
 	fmt.Println("GitSeer UI snippets removed.")
 }
 
-func Install(customPath, gitseerURL string, instanceID int64) error {
+// Template relative paths under Gitea custom/templates/custom/.
+const (
+	ExtraLinksRel = "extra_links.tmpl"
+	ExtraTabsRel  = "extra_tabs.tmpl"
+)
+
+// SnippetFiles returns marker-wrapped template bodies keyed by relative path
+// (extra_links.tmpl, extra_tabs.tmpl). Same content Install writes; safe for download.
+func SnippetFiles(gitseerURL string, instanceID int64) (map[string]string, error) {
 	safeURL, err := sanitizeGitSeerURL(gitseerURL)
 	if err != nil {
-		return err
-	}
-	templates := filepath.Join(customPath, "templates", "custom")
-	if err := os.MkdirAll(templates, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	href := html.EscapeString(safeURL)
 	repoPath := fmt.Sprintf("%s/repositories/{{.Owner.Name}}/{{.Repository.Name}}", href)
@@ -72,11 +76,48 @@ func Install(customPath, gitseerURL string, instanceID int64) error {
 <a class="item" href="%s" target="_blank" rel="noopener noreferrer">GitSeer</a>
 %s
 `, beginTabs, repoPath, endTabs)
+	return map[string]string{
+		ExtraLinksRel: linksSnippet,
+		ExtraTabsRel:  tabsSnippet,
+	}, nil
+}
 
-	if err := upsertMarkedFile(filepath.Join(templates, "extra_links.tmpl"), beginLinks, endLinks, linksSnippet); err != nil {
+// ConcatenatedSnippets returns a single text document with file headers for each snippet.
+func ConcatenatedSnippets(gitseerURL string, instanceID int64) (string, error) {
+	files, err := SnippetFiles(gitseerURL, instanceID)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	order := []string{ExtraLinksRel, ExtraTabsRel}
+	for i, name := range order {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("===== ")
+		b.WriteString(name)
+		b.WriteString(" =====\n")
+		b.WriteString(files[name])
+		if !strings.HasSuffix(files[name], "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return b.String(), nil
+}
+
+func Install(customPath, gitseerURL string, instanceID int64) error {
+	files, err := SnippetFiles(gitseerURL, instanceID)
+	if err != nil {
 		return err
 	}
-	return upsertMarkedFile(filepath.Join(templates, "extra_tabs.tmpl"), beginTabs, endTabs, tabsSnippet)
+	templates := filepath.Join(customPath, "templates", "custom")
+	if err := os.MkdirAll(templates, 0o755); err != nil {
+		return err
+	}
+	if err := upsertMarkedFile(filepath.Join(templates, ExtraLinksRel), beginLinks, endLinks, files[ExtraLinksRel]); err != nil {
+		return err
+	}
+	return upsertMarkedFile(filepath.Join(templates, ExtraTabsRel), beginTabs, endTabs, files[ExtraTabsRel])
 }
 
 func Uninstall(customPath string) error {

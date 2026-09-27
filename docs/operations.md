@@ -3,8 +3,24 @@
 ## Health and status
 
 - Unauthenticated: `GET /health/live` (process), `GET /health/ready` (DB)
-- Authenticated: `GET /api/v1/system/status` (`forges[]` per instance)
-- UI **Sync now** for an on-demand reconcile (bootstrap admin; per-instance sync leases — skips if another holder holds the lease)
+- Authenticated: `GET /api/v1/system/status` (`forges[]` per instance with ops checklist, sync phase, lease holder, webhook 24h stats, capability matrix, encryption health)
+- Attention mutes/snoozes and severity overrides: see [Attention Engine](attention-engine.md) (`POST /api/v1/attention/{id}/mute`, Settings → Preferences → **Attention Severity Overrides**)
+- Outbound notifications: Settings → **Notifications** (SMTP / Slack / Discord / generic HTTPS). Immediate alerts on attention open (min severity, default critical) and optional daily digest at `digest_hour_utc`. Delivered via `notification_outbox` worker; secrets sealed with encryption key. No ncdLabs-hosted relay (ADR-015 / ADR-032). **Send Test Notification** queues one message per enabled channel.
+- Settings → **Status**: pass/warn/fail checklist, **Ensure Webhook**, **Verify Delivery**, **Sync Now**
+- UI header **Sync Now** for on-demand reconcile (bootstrap admin; per-instance sync leases — skips if another holder holds the lease)
+
+### Webhook ensure / verify
+
+| Method | Path | Notes |
+|--------|------|-------|
+| POST | `/api/v1/instances/{id}/ensure-webhook` | Bootstrap admin + CSRF. Gitea: system hook. GitHub: org hook when PAT has `admin:org_hook` (optional body `{ "org", "repo" }`); otherwise returns manual preview. |
+| POST | `/api/v1/instances/{id}/verify-webhook` | Arms pending verification; next accepted delivery marks `webhook_verified_at`. Body `{ "confirm": true }` after a forge Ping if deliveries landed in the last 15 minutes. |
+
+### Encryption health
+
+Status exposes `encryption_configured`, `encryption_source`, `encryption_healthy`, and `encryption_error` (no plaintext). A decrypt probe uses one stored secret ciphertext when present, otherwise a seal/open canary. Wrong-key rotation shows as unhealthy until secrets are re-sealed.
+
+**Rotation:** set the new key in env/Secret, re-enter forge tokens/webhook/OAuth secrets in Settings (or wizard), confirm Status encryption is healthy, then retire the old key.
 
 ## Metrics
 
@@ -23,15 +39,66 @@ Scheduled purge (~6h) removes aged:
 - webhook payloads (`retention.webhooks_days`, default 30)
 - resolved attention (`retention.attention_days`, default 180)
 
-Editable in Settings / env / config.
+Editable in Settings → Preferences / env / config.
 
-## Backup
+**Storage guardrails:** `GET /api/v1/system/status` (and Settings → Status) include `storage` with SQLite file size (main + WAL/SHM) or a Postgres `pg_database_size` estimate, plus warn (512 MiB) / critical (2 GiB) thresholds. Status surfaces a warning when size crosses those levels.
 
-- **SQLite:** copy `database.path` while writers are quiet (or use filesystem snapshot)
-- **Postgres:** `pg_dump` the DSN database
-- **Encryption key file:** if the wizard wrote `gitseer.encryption_key` beside the DB, back it up with the database
+**Purge Now:** bootstrap admin + CSRF `POST /api/v1/admin/purge-retention` runs an immediate purge with the currently saved retention windows (Settings → Preferences button).
 
-Also back up `config.yaml` / secrets store (Kubernetes Secret, `.env`) — never commit secrets.
+**Lab / Prod presets:** Preferences buttons **Apply Lab Preset** (history 7d · runs 14d · webhooks 7d · attention 30d) and **Apply Prod Preset** (30 / 90 / 30 / 180) fill the form; Save Changes to persist.
+
+## Backup / restore
+
+First-class CLI (preferred over ad-hoc file copy):
+
+```bash
+gitseer backup --out /path/to/backup [--config config.yaml]
+gitseer restore --from /path/to/backup [--config config.yaml] [--force]
+```
+
+- **SQLite:** `VACUUM INTO` snapshot of `database.path`, plus `gitseer.encryption_key` when present, and `manifest.json`
+- **Postgres:** writes a `pg_dump` command file; runs `pg_dump --format=custom` when `pg_dump` is on `PATH`. Restore uses `pg_restore` with `--force`
+- Restore refuses to overwrite an existing DB or key file without `--force`
+- Always back up `config.yaml` / Kubernetes Secret / `.env` separately — never commit secrets
+
+### Helm CronJob example (optional)
+
+Not shipped by default. Example pattern: mount the data PVC + Secret, run the backup binary, push the directory to object storage or a hostPath:
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gitseer-backup
+  namespace: gitseer
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: git.ncdlabs.com/ncdlabs/gitseer:0.1.24
+              command: ["gitseer", "backup", "--out", "/backup/$(date +%Y%m%d)"]
+              envFrom:
+                - secretRef:
+                    name: gitseer
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: gitseer-data
+            - name: backup
+              emptyDir: {}
+```
+
+Adapt image tag, PVC name, and offload the `/backup` tree (e.g. `rclone` sidecar) for your cluster.
 
 ## Logs
 
@@ -39,12 +106,21 @@ Application logs: JSON or text per `log.format` / `GITSEER_LOG_FORMAT`.
 
 Job logs: fetched from the forge on demand through GitSeer (`/api/v1/jobs/{id}/logs`), not stored long-term as the primary log archive. Gitea OAuth users use their stored token; GitHub repos (and bootstrap) use the instance service PAT.
 
+## Write ops (rerun / cancel)
+
+- `POST /api/v1/workflow-runs/{id}/rerun` and `.../cancel` (CSRF + session + `CanAccessRepo`)
+- Gitea OAuth users: forge call uses `UserAccessToken` (403 if missing) — never silent service-PAT fallback
+- Bootstrap admin: may use the instance service PAT; UI warns before confirm
+- GitHub non-admin: uses per-user GitHub OAuth token when linked; otherwise 403 (bootstrap admin may use service PAT with warning; Settings → Access for manual grants)
+- Capability matrix rows: **Rerun Workflow** / **Cancel Workflow**; forge 404/405 → 501 unsupported
+- Success publishes an SSE `workflow_run` event so Active Actions / detail refetch
+
 ## Upgrades
 
-1. Backup DB + secrets (+ encryption key file if used)  
+1. Backup DB + secrets (+ encryption key file if used) via `gitseer backup`  
 2. Ship new image/binary  
 3. Run migrations automatically on start (goose)  
-4. Smoke: login, summary API, webhook delivery, sync  
+4. Smoke: login, summary API, webhook delivery, sync, Status checklist healthy  
 
 ## Security ops notes
 

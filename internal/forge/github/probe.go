@@ -78,14 +78,14 @@ type ProbeResult struct {
 	Login          string               `json:"login,omitempty"`
 	Checks         []ProbeCheck         `json:"checks"`
 	Capabilities   *models.Capabilities `json:"capabilities,omitempty"`
-	CanCreateHook  bool                 `json:"can_create_webhook"` // always false — manual only
+	CanCreateHook  bool                 `json:"can_create_webhook"` // true when PAT can manage at least one org hook
 	CanCreateOAuth bool                 `json:"can_create_oauth"`   // always false this slice
 	WebhookPreview *WebhookPreview      `json:"webhook_preview,omitempty"`
 	ManualWebhook  bool                 `json:"manual_webhook"`
 }
 
 // ProbeConnection verifies reachability, auth, and repo read access for a GitHub PAT.
-// Webhook delivery is always manual (no system-hooks API); oauth app auto-create is out of scope.
+// Org webhook auto-create is available when the PAT has admin:org_hook on a membership org.
 func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL string) (*ProbeResult, error) {
 	out := &ProbeResult{
 		ForgeType:     models.ForgeTypeGitHub,
@@ -150,13 +150,31 @@ func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL string)
 		})
 	}
 
+	orgs, orgsErr := c.ListMembershipOrgs(ctx)
+	canHook := false
+	hookDetail := "GitHub has no system-hooks API; add a webhook manually in each org/repo (or use Ensure Webhook with admin:org_hook)"
+	if orgsErr == nil {
+		for _, org := range orgs {
+			if c.CanManageOrgHooks(ctx, org) {
+				canHook = true
+				hookDetail = fmt.Sprintf("Can manage org hooks (e.g. %s)", org)
+				break
+			}
+		}
+	}
+	out.CanCreateHook = canHook
+	out.ManualWebhook = !canHook
+	hookStatus := ProbeSkip
+	if canHook {
+		hookStatus = ProbeOK
+	}
 	out.Checks = append(out.Checks, ProbeCheck{
-		ID: "system_hooks", Group: GroupPermissions, Label: "Manage system webhooks", Status: ProbeSkip,
-		Detail: "GitHub has no system-hooks API; add a webhook manually in each org/repo (or use org hooks)",
+		ID: "system_hooks", Group: GroupPermissions, Label: "Manage org webhooks", Status: hookStatus,
+		Detail: hookDetail,
 	})
 	out.Checks = append(out.Checks, ProbeCheck{
 		ID: "oauth_apps", Group: GroupPermissions, Label: "Manage OAuth applications", Status: ProbeSkip,
-		Detail: "GitHub OAuth login is not configured in this release; sync uses the service PAT",
+		Detail: "Configure a GitHub OAuth App (Authorization Code + PKCE) on the instance for per-user login; sync still uses the service PAT",
 	})
 
 	out.OK = allRequiredOK(out.Checks)

@@ -37,6 +37,7 @@ func setupAPI(t *testing.T) (*Handler, *store.Store, *auth.Service) {
 	t.Cleanup(func() { _ = db.Close() })
 	st := store.NewWithDriver(db, "sqlite")
 	cfg := config.Default()
+	cfg.Database.Path = dbPath // keep wizard encryption key beside temp DB (isolate from CWD data/)
 	cfg.Auth.BootstrapPassword = "test-pass"
 	cfg.Server.ExternalURL = "http://localhost:8090"
 	cfg.Gitea.URL = "https://git.example.com"
@@ -220,6 +221,18 @@ func TestOAuthLoginUnavailableWithoutConfig(t *testing.T) {
 	}
 }
 
+func TestGitHubOAuthLoginUnavailableWithoutConfig(t *testing.T) {
+	h, _, _ := setupAPI(t)
+	r := chi.NewRouter()
+	h.Routes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/login", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestStatsRequiresAuth(t *testing.T) {
 	h, _, _ := setupAPI(t)
 	r := chi.NewRouter()
@@ -332,6 +345,171 @@ func TestStatsAllowlistAndOK(t *testing.T) {
 	}
 	if nowPayload.RunDuration != nil || len(nowPayload.RunConclusions) != 0 {
 		t.Fatalf("now snapshot should omit historical series, got %+v", nowPayload)
+	}
+
+	// Default section=all (omit or empty) still returns full report.
+	allReq := httptest.NewRequest(http.MethodGet, "/api/v1/stats?days=7&section=all", nil)
+	for _, c := range cookies {
+		allReq.AddCookie(c)
+	}
+	allRec := httptest.NewRecorder()
+	r.ServeHTTP(allRec, allReq)
+	if allRec.Code != http.StatusOK {
+		t.Fatalf("section=all status=%d body=%s", allRec.Code, allRec.Body.String())
+	}
+	var allPayload models.StatsReport
+	if err := json.Unmarshal(allRec.Body.Bytes(), &allPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(allPayload.RunsByDay) == 0 || allPayload.RunDuration == nil {
+		t.Fatalf("section=all should include trends+duration, got %+v", allPayload)
+	}
+
+	badSection := httptest.NewRequest(http.MethodGet, "/api/v1/stats?days=7&section=nope", nil)
+	for _, c := range cookies {
+		badSection.AddCookie(c)
+	}
+	badSectionRec := httptest.NewRecorder()
+	r.ServeHTTP(badSectionRec, badSection)
+	if badSectionRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid section status=%d body=%s", badSectionRec.Code, badSectionRec.Body.String())
+	}
+}
+
+func TestStatsSections(t *testing.T) {
+	h, st, authsvc := setupAPI(t)
+	ctx := context.Background()
+	inst, err := st.UpsertInstanceByURL(ctx, "test", "https://git.example.com", "1.26.0", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 9, Owner: "acme", Name: "widgets", FullName: "acme/widgets", DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	started := now.Add(-2 * time.Minute)
+	completed := now.Add(-time.Minute)
+	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 1, Name: "ci", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+		StartedAt: &started, CompletedAt: &completed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := now.Add(-time.Hour)
+	_, err = st.UpsertPullRequest(ctx, repo.ID, models.PullRequest{
+		ExternalID: 1, Number: 1, Title: "open", State: "open", CIState: models.CIStatePending,
+		CreatedAt: &opened, UpdatedAt: &opened,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertAttention(ctx, models.AttentionItem{
+		InstanceID: inst.ID, RepoID: repo.ID, Type: "stale_pr", Severity: "warning",
+		EntityType: "pull_request", EntityID: 1, Title: "stale", Fingerprint: "fp-stats-section",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	router := chi.NewRouter()
+	h.Routes(router)
+
+	loginBody, _ := json.Marshal(map[string]string{"password": "test-pass"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/bootstrap/login", bytes.NewReader(loginBody))
+	probe := httptest.NewRecorder()
+	csrf, err := authsvc.IssueCSRFToken(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range probe.Result().Cookies() {
+		loginReq.AddCookie(c)
+	}
+	loginReq.Header.Set(auth.CSRFHeaderName, csrf)
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginRec.Code, loginRec.Body.String())
+	}
+	cookies := loginRec.Result().Cookies()
+
+	getStats := func(t *testing.T, path string) models.StatsReport {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		var payload models.StatsReport
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	core := getStats(t, "/api/v1/stats?days=7&section=core")
+	if core.Days != 7 || core.Since == "" {
+		t.Fatalf("core days/since = %+v", core)
+	}
+	if len(core.PRCIStates) == 0 || len(core.AttentionBySeverity) == 0 || len(core.AttentionByType) == 0 {
+		t.Fatalf("core missing breakdowns: %+v", core)
+	}
+	if len(core.RunsByDay) != 0 || len(core.PRsByDay) != 0 || len(core.RunConclusions) != 0 || core.RunDuration != nil {
+		t.Fatalf("core should omit trends/duration, got %+v", core)
+	}
+
+	trends := getStats(t, "/api/v1/stats?days=7&section=trends")
+	if trends.Days != 7 || trends.Since == "" || len(trends.RunsByDay) == 0 {
+		t.Fatalf("trends payload = %+v", trends)
+	}
+	success := 0
+	for _, b := range trends.RunsByDay {
+		success += b.Success
+	}
+	if success != 1 {
+		t.Fatalf("trends success runs=%d", success)
+	}
+	if len(trends.PRCIStates) != 0 || trends.RunDuration != nil {
+		t.Fatalf("trends should omit core/duration, got %+v", trends)
+	}
+
+	duration := getStats(t, "/api/v1/stats?days=7&section=duration")
+	if duration.Days != 7 || duration.Since == "" || duration.RunDuration == nil || duration.RunDuration.SampleCount != 1 {
+		t.Fatalf("duration payload = %+v", duration)
+	}
+	if len(duration.RunsByDay) != 0 || len(duration.PRCIStates) != 0 {
+		t.Fatalf("duration should omit trends/core, got %+v", duration)
+	}
+
+	// days=0 snapshot: core/all work; trends/duration stay empty.
+	nowCore := getStats(t, "/api/v1/stats?days=0&section=core")
+	if nowCore.Days != 0 || nowCore.Since != "" || len(nowCore.PRCIStates) == 0 {
+		t.Fatalf("now core = %+v", nowCore)
+	}
+	if len(nowCore.RunsByDay) != 0 || nowCore.RunDuration != nil {
+		t.Fatalf("now core should omit historical, got %+v", nowCore)
+	}
+	nowAll := getStats(t, "/api/v1/stats?days=0&section=all")
+	if nowAll.Days != 0 || nowAll.Since != "" || len(nowAll.RunsByDay) != 0 || nowAll.RunDuration != nil {
+		t.Fatalf("now all snapshot = %+v", nowAll)
+	}
+	if len(nowAll.PRCIStates) == 0 {
+		t.Fatalf("now all should include core breakdowns: %+v", nowAll)
+	}
+	nowTrends := getStats(t, "/api/v1/stats?days=0&section=trends")
+	if len(nowTrends.RunsByDay) != 0 || len(nowTrends.PRsByDay) != 0 || len(nowTrends.RunConclusions) != 0 {
+		t.Fatalf("now trends should be empty, got %+v", nowTrends)
+	}
+	nowDuration := getStats(t, "/api/v1/stats?days=0&section=duration")
+	if nowDuration.RunDuration != nil {
+		t.Fatalf("now duration should be nil, got %+v", nowDuration)
 	}
 }
 
@@ -642,14 +820,12 @@ func TestMetricsRequiresAuthOrBearer(t *testing.T) {
 
 
 func TestInstancesCRUDAndStatusForges(t *testing.T) {
-	h, st, authsvc := setupAPI(t)
+	h, _, authsvc := setupAPI(t)
 	// Encryption required to store secrets via instances API.
 	h.cfg.Auth.EncryptionKey = "twenty-four-char-key-ok!!"
-	settingsMgr := settings.New(h.cfg, st)
-	if err := settingsMgr.Load(context.Background()); err != nil {
+	if err := h.settings.SetEncryptionKey(h.cfg.Auth.EncryptionKey); err != nil {
 		t.Fatal(err)
 	}
-	h.settings = settingsMgr
 
 	r := chi.NewRouter()
 	h.Routes(r)

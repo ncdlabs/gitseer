@@ -2,6 +2,7 @@ package attention
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -163,5 +164,66 @@ func TestNoOpenPRNoise(t *testing.T) {
 	_, total, err := st.ListAttention(ctx, store.ListAttentionOpts{BootstrapAll: true, OpenOnly: true})
 	if err != nil || total != 0 {
 		t.Fatalf("expected no attention for quiet open PR, total=%d err=%v", total, err)
+	}
+}
+
+func TestMuteSkipsOpen(t *testing.T) {
+	ctx, st, eng, instID, repo := setup(t)
+	run, _ := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 99, Name: "CI", Branch: "main", Status: models.StatusCompleted,
+		Conclusion: models.ConclusionFailure, RepoFull: "o/r",
+	})
+	fp := fingerprint(TypeFailedDefaultBranch, fmt.Sprintf("%d", run.RepoID), fmt.Sprintf("%d", run.ExternalID))
+	_, err := st.InsertAttentionMute(ctx, store.AttentionMute{Fingerprint: fp})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.EvaluateRun(ctx, instID, run); err != nil {
+		t.Fatal(err)
+	}
+	if openCount(t, st, TypeFailedDefaultBranch) != 0 {
+		t.Fatal("expected mute to skip open")
+	}
+}
+
+func TestSeverityOverride(t *testing.T) {
+	ctx, st, eng, instID, repo := setup(t)
+	eng.SetSeverityOverrides(map[string]string{TypeLongRunning: SeverityCritical})
+	started := time.Now().UTC().Add(-3 * time.Hour)
+	run, _ := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 21, Name: "slow", Status: models.StatusRunning, StartedAt: &started,
+	})
+	if err := eng.EvaluateRun(ctx, instID, run); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := st.ListAttention(ctx, store.ListAttentionOpts{
+		BootstrapAll: true, OpenOnly: true, Type: TypeLongRunning,
+	})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if items[0].Severity != SeverityCritical {
+		t.Fatalf("severity=%s want critical", items[0].Severity)
+	}
+}
+
+func TestUntilResolvedMuteClearedOnResolve(t *testing.T) {
+	ctx, st, eng, instID, repo := setup(t)
+	run, _ := st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 33, Name: "CI", Branch: "main", Status: models.StatusCompleted,
+		Conclusion: models.ConclusionFailure, RepoFull: "o/r",
+	})
+	fp := fingerprint(TypeFailedDefaultBranch, fmt.Sprintf("%d", run.RepoID), fmt.Sprintf("%d", run.ExternalID))
+	_, err := st.InsertAttentionMute(ctx, store.AttentionMute{Fingerprint: fp})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Conclusion = models.ConclusionSuccess
+	if err := eng.EvaluateRun(ctx, instID, run); err != nil {
+		t.Fatal(err)
+	}
+	muted, err := st.IsAttentionMuted(ctx, store.MuteMatch{Fingerprint: fp, GlobalOnly: true})
+	if err != nil || muted {
+		t.Fatalf("expected until-resolved mute cleared, muted=%v err=%v", muted, err)
 	}
 }

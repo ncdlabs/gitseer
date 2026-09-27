@@ -6,6 +6,7 @@ import {
   openOnForgeLabel,
   repoLabel,
   safeExternalHref,
+  type User,
   type WorkflowNode,
   type WorkflowRun,
 } from "../api/client";
@@ -14,6 +15,7 @@ import { ForgeBadge } from "../components/ForgeBadge";
 import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
 import { WorkflowDAG } from "../components/WorkflowDAG";
+import { WorkflowWriteActions } from "../components/WorkflowWriteActions";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 import { useViewMode } from "../hooks/useViewMode";
 import { relativeAge } from "../lib/relativeAge";
@@ -281,6 +283,7 @@ export function PipelineDetailPage() {
   const { showForge, forges } = useForgeInventory();
   const runId = Number(id);
   const validId = Number.isFinite(runId) && runId > 0;
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const q = useQuery({
     queryKey: ["run", runId],
     queryFn: () => api.workflowRun(runId),
@@ -307,6 +310,7 @@ export function PipelineDetailPage() {
   if (!q.data) return <div className="error">Run not found.</div>;
   const { run, jobs, graph } = q.data;
   const forgeHref = safeExternalHref(run.html_url);
+  const user = (me.data as User | undefined) ?? null;
   return (
     <>
       <div className="topbar">
@@ -334,11 +338,14 @@ export function PipelineDetailPage() {
             · <span className={`badge ${run.conclusion || run.status}`}>{run.conclusion || run.status}</span>
           </p>
         </div>
-        {forgeHref && (
-          <a className="btn" href={forgeHref} target="_blank" rel="noreferrer">
-            {openOnForgeLabel(run.forge_type).replace(" →", "")}
-          </a>
-        )}
+        <div className="topbar__actions">
+          <WorkflowWriteActions run={run} user={user} />
+          {forgeHref && (
+            <a className="btn" href={forgeHref} target="_blank" rel="noreferrer">
+              {openOnForgeLabel(run.forge_type).replace(" →", "")}
+            </a>
+          )}
+        </div>
       </div>
       <div className="panel panel--padded dag-panel">
         <h2>Workflow Graph</h2>

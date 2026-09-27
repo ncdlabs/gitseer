@@ -34,7 +34,7 @@ Then confirmation modals:
 
 | Modal | Actions |
 |-------|---------|
-| Webhook | **Create Webhook** (`POST /api/v1/setup/create-webhook`) or **I'll Add It in Gitea** / GitHub manual instructions |
+| Webhook | **Create Webhook** (`POST /api/v1/setup/create-webhook`) or **I'll Add It in Gitea** / GitHub manual instructions. After setup, Settings → Status / Integration: **Ensure Webhook** + **Verify Delivery**. |
 | OAuth | **Create OAuth App** (`POST /api/v1/setup/create-oauth`), **I'll Configure It**, or **Skip OAuth** (Gitea; bootstrap-only) |
 
 ### 5. Finish
@@ -53,5 +53,7 @@ Then confirmation modals:
 | POST | `/api/v1/setup/create-oauth` | Bootstrap admin + CSRF |
 | POST | `/api/v1/setup/complete` | Bootstrap admin + CSRF |
 | POST | `/api/v1/setup/sync-repos` | Bootstrap admin + CSRF |
+| POST | `/api/v1/instances/{id}/ensure-webhook` | Bootstrap admin + CSRF (post-setup) |
+| POST | `/api/v1/instances/{id}/verify-webhook` | Bootstrap admin + CSRF (post-setup) |
 
 See [Authentication and ACL](authentication-and-acl.md) and [API Reference](api-reference.md).

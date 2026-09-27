@@ -6,16 +6,20 @@ import { AppShell } from "./components/AppShell";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { MAIN_WINDOW_NAME, NAV_CHANNEL } from "./components/ActiveActionsPanel";
 import { useTheme } from "./hooks/useTheme";
+import { prefetchDashboardRanges } from "./lib/prefetchDashboard";
 import { AttentionPage } from "./pages/AttentionPage";
 import { ActionsPopoutPage } from "./pages/ActionsPopoutPage";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { InboxPage } from "./pages/InboxPage";
 import { PipelineDetailPage, PipelinesPage } from "./pages/PipelinesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
 import { PullRequestsPage, RepositoriesPage } from "./pages/RepositoriesPage";
 import { RepositoryDetailPage } from "./pages/RepositoryDetailPage";
 import "./styles/app.css";
+
+const DASHBOARD_REWARM_MS = 1500;
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -39,6 +43,13 @@ function useRealtimeInvalidation() {
   useEffect(() => {
     const base = window.__GITSEER_BASE__ || "";
     const es = new EventSource(`${base}/api/v1/events`);
+    let rewarmTimer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleDashboardRewarm = () => {
+      if (rewarmTimer) clearTimeout(rewarmTimer);
+      rewarmTimer = setTimeout(() => {
+        void prefetchDashboardRanges(queryClient);
+      }, DASHBOARD_REWARM_MS);
+    };
     const onMessage = (event: MessageEvent) => {
       let type = "";
       try {
@@ -48,11 +59,13 @@ function useRealtimeInvalidation() {
         /* unparseable → default invalidation */
       }
       if (type === "workflow_run" || type === "workflow_job") {
-        invalidateKeys(queryClient, ["workflow-runs", "runs", "run", "summary", "stats", "attention"]);
+        invalidateKeys(queryClient, ["workflow-runs", "runs", "run", "summary", "stats", "attention", "inbox"]);
+        scheduleDashboardRewarm();
         return;
       }
       if (type === "pull_request") {
-        invalidateKeys(queryClient, ["prs", "summary", "stats", "attention"]);
+        invalidateKeys(queryClient, ["prs", "summary", "stats", "attention", "inbox"]);
+        scheduleDashboardRewarm();
         return;
       }
       invalidateKeys(queryClient, [
@@ -62,15 +75,18 @@ function useRealtimeInvalidation() {
         "summary",
         "stats",
         "attention",
+        "inbox",
         "prs",
         "repositories",
       ]);
+      scheduleDashboardRewarm();
     };
     es.addEventListener("message", onMessage);
     es.onerror = () => {
       /* browser reconnects; avoid tight loops */
     };
     return () => {
+      if (rewarmTimer) clearTimeout(rewarmTimer);
       es.removeEventListener("message", onMessage);
       es.close();
     };
@@ -184,6 +200,7 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
             <AppShell user={user} theme={theme} onTheme={setTheme} onLogout={onLogout} onSync={syncNow} syncing={syncing}>
               <Routes>
                 <Route path="/" element={<DashboardPage />} />
+                <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/attention" element={<AttentionPage />} />
                 <Route path="/repositories" element={<RepositoriesPage />} />
                 <Route path="/repositories/:owner/:repo" element={<RepositoryDetailPage />} />

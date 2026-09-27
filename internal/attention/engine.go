@@ -34,12 +34,17 @@ const (
 	TypeMergeConflict       = "merge_conflict"
 )
 
+// OnOpenedFunc is invoked when an attention item is newly opened or reopened after resolve.
+type OnOpenedFunc func(ctx context.Context, item *models.AttentionItem)
+
 // Engine evaluates and upserts/resolves attention items.
 type Engine struct {
-	store            *store.Store
-	log              *slog.Logger
-	mu               sync.RWMutex
-	longRunningAfter time.Duration
+	store             *store.Store
+	log               *slog.Logger
+	mu                sync.RWMutex
+	longRunningAfter  time.Duration
+	severityOverrides map[string]string
+	onOpened          OnOpenedFunc
 }
 
 func New(st *store.Store, log *slog.Logger) *Engine {
@@ -53,7 +58,13 @@ func NewWithConfig(st *store.Store, log *slog.Logger, longRunningAfter time.Dura
 	if longRunningAfter <= 0 {
 		longRunningAfter = 2 * time.Hour
 	}
-	return &Engine{store: st, log: log, longRunningAfter: longRunningAfter}
+	e := &Engine{store: st, log: log, longRunningAfter: longRunningAfter, severityOverrides: map[string]string{}}
+	if st != nil {
+		if m, err := st.MapAttentionRuleOverrides(context.Background()); err == nil && m != nil {
+			e.severityOverrides = m
+		}
+	}
+	return e
 }
 
 // SetLongRunningAfter updates the long-running workflow threshold.
@@ -66,10 +77,78 @@ func (e *Engine) SetLongRunningAfter(d time.Duration) {
 	e.mu.Unlock()
 }
 
+// SetOnOpened registers a callback for newly opened / reopened attention items.
+func (e *Engine) SetOnOpened(fn OnOpenedFunc) {
+	e.mu.Lock()
+	e.onOpened = fn
+	e.mu.Unlock()
+}
+
+// SetSeverityOverrides replaces in-memory rule_type → severity overrides.
+func (e *Engine) SetSeverityOverrides(m map[string]string) {
+	cp := make(map[string]string, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	e.mu.Lock()
+	e.severityOverrides = cp
+	e.mu.Unlock()
+}
+
+// ReloadSeverityOverrides loads overrides from the store.
+func (e *Engine) ReloadSeverityOverrides(ctx context.Context) error {
+	m, err := e.store.MapAttentionRuleOverrides(ctx)
+	if err != nil {
+		return err
+	}
+	e.SetSeverityOverrides(m)
+	return nil
+}
+
 func (e *Engine) longRunningThreshold() time.Duration {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.longRunningAfter
+}
+
+func (e *Engine) severityFor(ruleType, defaultSeverity string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if sev, ok := e.severityOverrides[ruleType]; ok && sev != "" {
+		return sev
+	}
+	return defaultSeverity
+}
+
+// KnownRuleTypes lists discrete PRD §10 rule keys (for settings UI / docs).
+func KnownRuleTypes() []string {
+	return []string{
+		TypeFailedDefaultBranch,
+		TypePRCIFailure,
+		TypeDeployFailure,
+		TypeRequiredCheckFailed,
+		TypeAwaitingManual,
+		TypeApprovedBlockedCI,
+		TypeAwaitingReview,
+		TypeApprovedBehind,
+		TypeRunnerUnavailable,
+		TypeLongRunning,
+		TypeMergeConflict,
+	}
+}
+
+// DefaultSeverityFor returns the built-in severity for a rule type.
+func DefaultSeverityFor(ruleType string) string {
+	switch ruleType {
+	case TypeFailedDefaultBranch, TypePRCIFailure, TypeDeployFailure, TypeRequiredCheckFailed:
+		return SeverityCritical
+	case TypeApprovedBlockedCI, TypeAwaitingManual, TypeLongRunning, TypeApprovedBehind, TypeMergeConflict, TypeRunnerUnavailable:
+		return SeverityWarning
+	case TypeAwaitingReview:
+		return SeverityWaiting
+	default:
+		return SeverityWarning
+	}
 }
 
 func fingerprint(parts ...string) string {
@@ -82,12 +161,47 @@ func fingerprint(parts ...string) string {
 }
 
 func (e *Engine) open(ctx context.Context, item models.AttentionItem) error {
-	_, err := e.store.UpsertAttention(ctx, item)
-	return err
+	muted, err := e.store.IsAttentionMuted(ctx, store.MuteMatch{
+		Fingerprint: item.Fingerprint,
+		RuleType:    item.Type,
+		RepoID:      item.RepoID,
+		GlobalOnly:  true,
+	})
+	if err != nil {
+		return err
+	}
+	if muted {
+		return nil
+	}
+	item.Severity = e.severityFor(item.Type, item.Severity)
+	var previouslyResolved bool
+	var existed bool
+	if prev, err := e.store.GetAttentionByFingerprint(ctx, item.Fingerprint); err == nil && prev != nil {
+		existed = true
+		previouslyResolved = prev.ResolvedAt != nil
+	}
+	out, err := e.store.UpsertAttention(ctx, item)
+	if err != nil {
+		return err
+	}
+	newlyOpened := !existed || previouslyResolved
+	if newlyOpened && out != nil {
+		e.mu.RLock()
+		fn := e.onOpened
+		e.mu.RUnlock()
+		if fn != nil {
+			fn(ctx, out)
+		}
+	}
+	return nil
 }
 
 func (e *Engine) resolve(ctx context.Context, fp string) error {
-	return e.store.ResolveAttentionByFingerprint(ctx, fp)
+	if err := e.store.ResolveAttentionByFingerprint(ctx, fp); err != nil {
+		return err
+	}
+	// Clear "until resolved" mutes when the underlying condition clears.
+	return e.store.ClearUntilResolvedMutes(ctx, fp)
 }
 
 func (e *Engine) EvaluateRun(ctx context.Context, instanceID int64, run *models.WorkflowRun) error {
@@ -338,10 +452,12 @@ func (e *Engine) evalAwaitingManualJob(ctx context.Context, instanceID int64, jo
 }
 
 func (e *Engine) evalRunnerUnavailable(ctx context.Context, instanceID int64, job *models.Job, _ *models.WorkflowRun) error {
-	// No-op until forge exposes runner-unavailable signals alongside queued jobs.
-	// Gitea Actions payloads do not currently carry a reliable "runner offline" flag.
+	// Stub: forge job payloads and DetectCapabilities expose runners_api for listing,
+	// but neither Gitea nor GitHub reliably signal "queued because runner offline".
+	// Keep resolving any prior fingerprints; document in capability matrix / docs.
 	fp := fingerprint(TypeRunnerUnavailable, fmt.Sprintf("%d", job.RepoID), fmt.Sprintf("%d", job.ExternalID))
 	_ = instanceID
+	_ = job
 	return e.resolve(ctx, fp)
 }
 

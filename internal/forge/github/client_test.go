@@ -162,6 +162,18 @@ func TestClientHTTptest(t *testing.T) {
 			},
 		})
 	})
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/actions/runs/55/rerun", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/actions/runs/55/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
 	mux.HandleFunc("/api/v3/repos/acme/gitseer/actions/jobs/77/logs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("log line\n"))
@@ -195,7 +207,7 @@ func TestClientHTTptest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !caps.ActionsAPI || !caps.JobLogsAPI || caps.OAuthProvider || caps.SystemHooksAPI {
+	if !caps.ActionsAPI || !caps.JobLogsAPI || !caps.RerunWorkflowAPI || !caps.CancelWorkflowAPI || caps.SystemHooksAPI {
 		t.Fatalf("caps=%+v", caps)
 	}
 
@@ -236,6 +248,13 @@ func TestClientHTTptest(t *testing.T) {
 	jobs, err := client.ListJobs(ctx, ref, 55)
 	if err != nil || len(jobs) != 1 || jobs[0].Name != "build" {
 		t.Fatalf("jobs=%v err=%v", jobs, err)
+	}
+
+	if err := client.RerunWorkflowRun(ctx, ref, 55); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	if err := client.CancelWorkflowRun(ctx, ref, 55); err != nil {
+		t.Fatalf("cancel: %v", err)
 	}
 
 	logs, err := client.GetJobLogs(ctx, ref, 77)

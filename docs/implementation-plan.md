@@ -3,7 +3,7 @@
 **Status:** Execution-ready blueprint (amended for dual-forge / GitSeer branding)  
 **Source of truth:** [`./docs/prd-spec.md`](./prd-spec.md)  
 **Repository state at planning:** greenfield (PRD only; no commits; no application code)  
-**Date:** 2026-09-20 (ADR-029 dual-forge amendment 2026-09-24)  
+**Date:** 2026-09-20 (ADR-029 dual-forge amendment 2026-09-24; ADR-031 GitHub OAuth 2026-09-26; ADR-032 notifications 2026-09-26)  
 **License target:** Apache-2.0  
 
 This document is the implementation blueprint future Cursor Agent sessions should follow. Do not silently reinterpret major PRD requirements. If repository reality later conflicts with this plan, update both this file and `PROJECT_SHARED_STATE.md`.
@@ -72,7 +72,7 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 | N16 | Capability detection + graceful degradation | §5 |
 | N17 | Target Gitea API family ~1.26 (docs cite 1.26.4) | §5 |
 | N18 | Subpath reverse-proxy is first-class | §46 |
-| N19 | Read-first V1; writes (rerun/cancel) deferred | §32 |
+| N19 | Write ops (rerun/cancel) allowed with user-token rules; no silent service-PAT fallback for non-admin | §32 (amended) |
 | N20 | Apache-2.0 recommended | §50 |
 
 ### MVP vs V1.0
@@ -152,9 +152,12 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 | ADR-026 | **Minimum Gitea version:** declare after capability matrix spike (see Open Questions); degrade Actions features when APIs missing | Before M1 exit |
 | ADR-027 | **Module path:** `github.com/ncdlabs/gitseer` (binary `gitseer`, Helm chart/namespace `gitseer`, env `GITSEER_*`) | Foundation |
 | ADR-028 | **Compose filename:** `compose.yaml` (project preference for `.yaml`) while keeping `docker-compose.yaml` symlink or doc alias if useful | Packaging |
-| ADR-029 | **Dual-forge:** Gitea + GitHub are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). GitLab and Bitbucket remain **Coming Soon** (picker only) until explicitly approved. No GitHub OAuth login in this slice (service PAT). | Dual-forge slice |
+| ADR-029 | **Dual-forge:** Gitea + GitHub are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). GitLab and Bitbucket remain **Coming Soon** (picker only) until explicitly approved. Service PAT remains required for GitHub sync; per-user GitHub OAuth is ADR-031. | Dual-forge slice |
+| ADR-030 | **Write ops:** `RerunWorkflowRun` / `CancelWorkflowRun` on `forge.Forge` with API + UI. Non-admin users must use their per-instance forge token (`UserAccessTokenForInstance`); never silent service-PAT fallback. Bootstrap admin may use service PAT with explicit UI warning when no user GitHub token exists. | Stream 4 |
+| ADR-031 | **GitHub OAuth identity parity:** GitHub Authorization Code + PKCE login (`/api/v1/auth/github/login` + callback), tokens in `user_tokens` keyed by `(user_id, instance_id)`, optional link of both forge identities on one user, ACL refresh only for instances with a user token (preserves admin manual grants). Amends ADR-029 “no GitHub OAuth login”. | Stream 6 |
+| ADR-032 | **Outbound notifications:** SMTP digests + Slack/Discord/generic HTTPS webhooks via self-hosted `notification_outbox` worker (`internal/notify`). Secrets sealed with encryption key. No ncdLabs-hosted relay (reaffirms ADR-015). Triggers: attention open matching min severity (default critical); optional daily digest at `digest_hour_utc`. | Stream 7 |
 
-**No ADR needed yet for:** Forgejo, write ops (post-MVP), notifications, GitLab/Bitbucket clients.
+**No ADR needed yet for:** Forgejo, GitLab/Bitbucket clients.
 
 ---
 

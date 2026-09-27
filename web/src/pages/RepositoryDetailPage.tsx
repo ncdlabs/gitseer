@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, openOnForgeLabel, safeExternalHref } from "../api/client";
+import { FailureClustersPanel } from "../components/FailureClustersPanel";
 import { ForgeBadge } from "../components/ForgeBadge";
+import { HealthBadge } from "../components/HealthBadge";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 
 /** Deep-link target for Gitea install-ui and bookmarks: /repositories/:owner/:repo?instance_id= */
@@ -45,6 +47,7 @@ export function RepositoryDetailPage() {
 
   const r = q.data;
   const href = safeExternalHref(r.html_url);
+  const health = r.health;
   const instanceName = resolveInstanceName(forges, {
     forgeType: r.forge_type,
     instanceId: r.instance_id,
@@ -62,6 +65,7 @@ export function RepositoryDetailPage() {
                 <ForgeBadge forgeType={r.forge_type} instanceName={instanceName} />{" "}
               </>
             )}
+            <HealthBadge health={health} />{" "}
             Default branch {r.default_branch || "—"}
             {r.private ? " · private" : " · public"}
             {r.archived ? " · archived" : ""}
@@ -78,11 +82,66 @@ export function RepositoryDetailPage() {
           </Link>
         </div>
       </div>
+
+      {health && (
+        <div className="panel panel--padded repo-health-summary">
+          <h2>Health Summary</h2>
+          <p className="muted">
+            Rollup of open critical attention, default-branch CI, stale open PRs ({health.stale_pr_days}d), and CI fail
+            rate over {health.window_days} days.
+          </p>
+          <dl className="repo-health-summary__grid">
+            <div>
+              <dt>Score</dt>
+              <dd>
+                <HealthBadge health={health} />
+              </dd>
+            </div>
+            <div>
+              <dt>Critical Attention</dt>
+              <dd>{health.open_critical_attention}</dd>
+            </div>
+            <div>
+              <dt>Default Branch</dt>
+              <dd>
+                {health.failing_default_branch ? (
+                  health.failing_default_branch_run_id ? (
+                    <Link to={`/pipelines/${health.failing_default_branch_run_id}`}>Failing</Link>
+                  ) : (
+                    "Failing"
+                  )
+                ) : (
+                  "Passing / unknown"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Stale Open PRs</dt>
+              <dd>{health.stale_open_prs}</dd>
+            </div>
+            <div>
+              <dt>CI Fail Rate</dt>
+              <dd>
+                {health.ci_runs_in_window > 0
+                  ? `${(health.ci_fail_rate * 100).toFixed(0)}% (${health.ci_failures_in_window}/${health.ci_runs_in_window})`
+                  : "No completed runs"}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
       <div className="panel panel--padded">
-        <p className="muted">
-          Open pull requests and workflow runs for this repository appear on the inventory pages.
-          Use Sync if this forge was just connected.
-        </p>
+        <h2>Failure Clusters</h2>
+        <p className="muted">Repeated failed jobs grouped by workflow path and job name (last 7 days).</p>
+        <FailureClustersPanel
+          owner={owner}
+          repo={repo}
+          instanceId={instanceId && instanceId > 0 ? instanceId : undefined}
+        />
+      </div>
+
+      <div className="panel panel--padded">
         <Link className="btn" to="/repositories">
           Back To Repositories
         </Link>

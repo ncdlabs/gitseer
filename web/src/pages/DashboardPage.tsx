@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { AttentionCards } from "../components/AttentionCards";
@@ -11,6 +11,9 @@ import { RangeToggle } from "../components/RangeToggle";
 import { useDashboardRange } from "../hooks/useDashboardRange";
 import { useForgeInventory } from "../hooks/useShowForgeUI";
 import { useViewMode } from "../hooks/useViewMode";
+import { prefetchDashboardRanges } from "../lib/prefetchDashboard";
+
+const LAYER_STALE_MS = 60_000;
 
 const RUN_SERIES = [
   { key: "success", label: "Success", color: "var(--ok)" },
@@ -53,18 +56,38 @@ function bucketColor(key: string): string {
 }
 
 export function DashboardPage() {
+  const queryClient = useQueryClient();
   const { mode, setMode } = useViewMode();
   const { showForge, forges } = useForgeInventory();
   const { days, setDays } = useDashboardRange();
   const [filter, setFilter] = useState("");
   const isNow = days === 0;
+
   const summary = useQuery({
     queryKey: ["summary", days],
     queryFn: () => api.summary(days),
+    staleTime: LAYER_STALE_MS,
+    placeholderData: keepPreviousData,
   });
-  const stats = useQuery({
-    queryKey: ["stats", days],
-    queryFn: () => api.stats(days),
+  const statsCore = useQuery({
+    queryKey: ["stats", days, "core"],
+    queryFn: () => api.stats(days, "core"),
+    staleTime: LAYER_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
+  const statsTrends = useQuery({
+    queryKey: ["stats", days, "trends"],
+    queryFn: () => api.stats(days, "trends"),
+    enabled: !isNow,
+    staleTime: LAYER_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
+  const statsDuration = useQuery({
+    queryKey: ["stats", days, "duration"],
+    queryFn: () => api.stats(days, "duration"),
+    enabled: !isNow,
+    staleTime: LAYER_STALE_MS,
+    placeholderData: keepPreviousData,
   });
   const attention = useQuery({
     queryKey: ["attention", filter],
@@ -72,14 +95,17 @@ export function DashboardPage() {
     placeholderData: keepPreviousData,
   });
 
-  if (summary.isLoading) return <div className="loading">Loading dashboard…</div>;
-  if (summary.isError) return <div className="error">{(summary.error as Error).message}</div>;
+  useEffect(() => {
+    if (!summary.isSuccess || !statsCore.isSuccess) return;
+    void prefetchDashboardRanges(queryClient, { preferDays: days });
+  }, [summary.isSuccess, statsCore.isSuccess, days, queryClient]);
 
-  const s = summary.data!;
+  const s = summary.data;
   const items = attention.data?.items || [];
   const rangeLabel = days === 1 ? "last day" : `last ${days} days`;
-  const report = stats.data;
-  const duration = report?.run_duration ?? null;
+  const core = statsCore.data;
+  const trends = statsTrends.data;
+  const duration = statsDuration.data?.run_duration ?? null;
 
   return (
     <>
@@ -95,61 +121,75 @@ export function DashboardPage() {
         <RangeToggle days={days} onDays={setDays} />
       </div>
 
-      <div className="metrics">
-        <Link className="metric" to="/repositories">
-          <div className="metric__label">Repositories</div>
-          <div className="metric__value">{s.repositories}</div>
-        </Link>
-        <Link className="metric" to="/pull-requests">
-          <div className="metric__label">Open PRs</div>
-          <div className="metric__value">{s.open_pull_requests}</div>
-        </Link>
-        <Link className="metric" to="/attention">
-          <div className="metric__label">Attention</div>
-          <div className="metric__value">{s.attention_open}</div>
-        </Link>
-        <Link className="metric" to="/pipelines">
-          <div className="metric__label">Failed runs</div>
-          <div className="metric__value">{s.failed_runs}</div>
-        </Link>
-        <Link className="metric" to="/pipelines">
-          <div className="metric__label">Running</div>
-          <div className="metric__value">{s.running_runs}</div>
-        </Link>
-      </div>
+      {summary.isError && !s ? (
+        <div className="error">{(summary.error as Error).message}</div>
+      ) : summary.isLoading && !s ? (
+        <div className="metrics">
+          <div className="loading">Loading metrics…</div>
+        </div>
+      ) : s ? (
+        <div className="metrics">
+          <Link className="metric" to="/repositories">
+            <div className="metric__label">Repositories</div>
+            <div className="metric__value">{s.repositories}</div>
+          </Link>
+          <Link className="metric" to="/pull-requests">
+            <div className="metric__label">Open PRs</div>
+            <div className="metric__value">{s.open_pull_requests}</div>
+          </Link>
+          <Link className="metric" to="/attention">
+            <div className="metric__label">Attention</div>
+            <div className="metric__value">{s.attention_open}</div>
+          </Link>
+          <Link className="metric" to="/pipelines">
+            <div className="metric__label">Failed runs</div>
+            <div className="metric__value">{s.failed_runs}</div>
+          </Link>
+          <Link className="metric" to="/pipelines">
+            <div className="metric__label">Running</div>
+            <div className="metric__value">{s.running_runs}</div>
+          </Link>
+        </div>
+      ) : null}
 
       {!isNow && (
         <section className="report-section">
           <div className="panel__header report-section__header">
             <h2>Trends</h2>
           </div>
-          {stats.isLoading ? (
+          {statsTrends.isLoading && !trends ? (
             <div className="loading">Loading trends…</div>
-          ) : stats.isError ? (
-            <div className="error">{(stats.error as Error).message}</div>
+          ) : statsTrends.isError && !trends ? (
+            <div className="error">{(statsTrends.error as Error).message}</div>
           ) : (
             <div className="charts-grid charts-grid--trends">
               <div className="charts-grid__cell">
                 <StackedAreaChart
                   title="Workflow runs"
                   description={`Daily workflow run outcomes for the ${rangeLabel}.`}
-                  data={report?.runs_by_day || []}
+                  data={trends?.runs_by_day || []}
                   xKey="day"
                   series={[...RUN_SERIES]}
                   empty="No workflow runs in this range."
                 />
-                <StatCallout
-                  title="Run duration"
-                  p50Seconds={duration?.p50_seconds}
-                  p95Seconds={duration?.p95_seconds}
-                  sampleCount={duration?.sample_count ?? 0}
-                />
+                {statsDuration.isLoading && !duration ? (
+                  <div className="loading">Loading run duration…</div>
+                ) : statsDuration.isError && !duration ? (
+                  <div className="error">{(statsDuration.error as Error).message}</div>
+                ) : (
+                  <StatCallout
+                    title="Run duration"
+                    p50Seconds={duration?.p50_seconds}
+                    p95Seconds={duration?.p95_seconds}
+                    sampleCount={duration?.sample_count ?? 0}
+                  />
+                )}
               </div>
               <div className="charts-grid__cell">
                 <StackedAreaChart
                   title="Pull request activity"
                   description={`Daily pull request opened, merged, and closed counts for the ${rangeLabel}.`}
-                  data={report?.prs_by_day || []}
+                  data={trends?.prs_by_day || []}
                   xKey="day"
                   series={[...PR_SERIES]}
                   empty="No pull request activity in this range."
@@ -164,35 +204,38 @@ export function DashboardPage() {
         <div className="panel__header report-section__header">
           <h2>{isNow ? "Current State" : "Breakdowns"}</h2>
         </div>
-        {stats.isLoading ? (
+        {statsCore.isLoading && !core ? (
           <div className="loading">Loading breakdowns…</div>
-        ) : stats.isError ? (
-          <div className="error">{(stats.error as Error).message}</div>
+        ) : statsCore.isError && !core ? (
+          <div className="error">{(statsCore.error as Error).message}</div>
         ) : (
           <div className="charts-grid charts-grid--breakdowns">
-            {!isNow && (
-              <BarList
-                title="Run conclusions"
-                items={report?.run_conclusions || []}
-                colorForKey={bucketColor}
-                empty="No run conclusions in this range."
-              />
-            )}
+            {!isNow &&
+              (statsTrends.isLoading && !trends ? (
+                <div className="loading">Loading conclusions…</div>
+              ) : (
+                <BarList
+                  title="Run conclusions"
+                  items={trends?.run_conclusions || []}
+                  colorForKey={bucketColor}
+                  empty="No run conclusions in this range."
+                />
+              ))}
             <BarList
               title="Open PR CI state"
-              items={report?.pr_ci_states || []}
+              items={core?.pr_ci_states || []}
               colorForKey={bucketColor}
               empty="No open pull requests."
             />
             <BarList
               title="Attention by severity"
-              items={report?.attention_by_severity || []}
+              items={core?.attention_by_severity || []}
               colorForKey={bucketColor}
               empty="No open attention items."
             />
             <BarList
               title="Attention by type"
-              items={report?.attention_by_type || []}
+              items={core?.attention_by_type || []}
               colorForKey={bucketColor}
               empty="No open attention items."
             />

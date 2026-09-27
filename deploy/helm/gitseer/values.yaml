@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 1  # >1 only with sticky SSE + DB leases; never multi-replica SQLite
 image:
   repository: git.ncdlabs.com/ncdlabs/gitseer
   tag: latest

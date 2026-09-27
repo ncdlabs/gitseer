@@ -237,6 +237,20 @@ func (m *Manager) AuthGiteaIntegration(ctx context.Context) Integration {
 	return integ
 }
 
+// AuthGitHubIntegration returns the GitHub connection used for OAuth live-apply:
+// primary GitHub (OAuth configured preferred), else GitHub() snapshot.
+func (m *Manager) AuthGitHubIntegration(ctx context.Context) GitHubIntegration {
+	inst, err := m.st.GetPrimaryGitHubInstance(ctx)
+	if err != nil || inst == nil {
+		return m.GitHub()
+	}
+	gh, err := m.githubFromInstance(inst)
+	if err != nil {
+		return m.GitHub()
+	}
+	return gh
+}
+
 // refreshSnapshotsFromInstances sets Integration/GitHub from the first instance of
 // each forge type (by id) for setup-path compatibility, then live-applies primary
 // Gitea OAuth credentials to the auth callback.
@@ -318,10 +332,20 @@ func (m *Manager) refreshSnapshotsFromInstances(ctx context.Context) error {
 		m.githubInstanceURL = ""
 	}
 	onChange := m.onInteg
+	onGitHub := m.onGitHub
 	m.mu.Unlock()
 
 	if onChange != nil {
 		onChange(authInteg)
+	}
+	if onGitHub != nil {
+		authGH := nextGitHub
+		if prim, perr := m.st.GetPrimaryGitHubInstance(ctx); perr == nil && prim != nil {
+			if ag, aerr := m.githubFromInstance(prim); aerr == nil {
+				authGH = ag
+			}
+		}
+		onGitHub(authGH)
 	}
 	return nil
 }
@@ -362,6 +386,7 @@ func (m *Manager) githubFromInstance(inst *models.Instance) (GitHubIntegration, 
 		URL:                   inst.BaseURL,
 		AllowPrivateNetwork:   inst.AllowPrivateNetwork,
 		AllowUnsignedWebhooks: inst.AllowUnsignedWebhooks,
+		OAuthClientID:         strings.TrimSpace(inst.OAuthClientID),
 	}
 	if inst.SyncTokenCiphertext != "" {
 		tok, err := m.open(inst.SyncTokenCiphertext)
@@ -376,6 +401,13 @@ func (m *Manager) githubFromInstance(inst *models.Instance) (GitHubIntegration, 
 			return GitHubIntegration{}, fmt.Errorf("decrypt github webhook secret: %w", err)
 		}
 		out.WebhookSecret = sec
+	}
+	if inst.OAuthClientSecretCipher != "" {
+		sec, err := m.open(inst.OAuthClientSecretCipher)
+		if err != nil {
+			return GitHubIntegration{}, fmt.Errorf("decrypt github oauth client secret: %w", err)
+		}
+		out.OAuthClientSecret = sec
 	}
 	return out, nil
 }

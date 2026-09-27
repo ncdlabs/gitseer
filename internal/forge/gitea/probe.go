@@ -182,6 +182,8 @@ func (c *Client) ProbeConnection(ctx context.Context, webhookDeliveryURL, oauthR
 		} else {
 			caps.ActionsAPI = true
 			caps.JobLogsAPI = true
+			caps.RerunWorkflowAPI = true
+			caps.CancelWorkflowAPI = true
 			out.Checks = append(out.Checks, ProbeCheck{
 				ID: "actions", Group: GroupPermissions, Label: "Read Actions runs", Status: ProbeOK,
 				Detail: fmt.Sprintf("OK on %s", sample.FullName),

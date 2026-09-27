@@ -13,6 +13,7 @@ import {
 } from "../api/client";
 import { ForgeBadge } from "../components/ForgeBadge";
 import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
+import { HealthBadge } from "../components/HealthBadge";
 import { ListControls } from "../components/ListControls";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 import { useURLQueryFilter } from "../hooks/useURLQueryFilter";
@@ -96,6 +97,7 @@ export function RepositoriesPage() {
                   </Link>
                   <div className="item-card__meta">
                     {showForge && <ForgeBadge {...badge} />}
+                    <HealthBadge health={repo.health} />
                     <span className="badge">{repo.private ? "private" : "public"}</span>
                     {repo.archived && <span className="badge">archived</span>}
                   </div>
@@ -117,6 +119,7 @@ export function RepositoriesPage() {
               <tr>
                 <th>Repository</th>
                 {showForge && <th>Forge</th>}
+                <th>Health</th>
                 <th>Default branch</th>
                 <th>Visibility</th>
               </tr>
@@ -143,6 +146,9 @@ export function RepositoriesPage() {
                         <ForgeBadge {...badgeProps(repo)} />
                       </td>
                     )}
+                    <td>
+                      <HealthBadge health={repo.health} />
+                    </td>
                     <td className="mono">{repo.default_branch || "—"}</td>
                     <td>
                       {repo.private ? "Private" : "Public"}
@@ -153,7 +159,7 @@ export function RepositoriesPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={showForge ? 4 : 3} className="empty">
+                  <td colSpan={showForge ? 5 : 4} className="empty">
                     {empty}
                   </td>
                 </tr>

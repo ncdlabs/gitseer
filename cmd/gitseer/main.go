@@ -11,6 +11,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/config"
 	_ "github.com/ncdlabs/gitseer/internal/forge/all"
 	applog "github.com/ncdlabs/gitseer/internal/log"
+	"github.com/ncdlabs/gitseer/internal/backup"
 	"github.com/ncdlabs/gitseer/internal/server"
 	"github.com/ncdlabs/gitseer/internal/uiinstall"
 )
@@ -30,6 +31,10 @@ func main() {
 		uiinstall.InstallCmd(os.Args[2:])
 	case "uninstall-ui":
 		uiinstall.UninstallCmd(os.Args[2:])
+	case "backup":
+		backupCmd(os.Args[2:])
+	case "restore":
+		restoreCmd(os.Args[2:])
 	case "help", "-h", "--help":
 		printHelp()
 	default:
@@ -40,15 +45,66 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Fprintf(os.Stderr, `GitSeer — CI/CD and PR operations console for Gitea
+	fmt.Fprintf(os.Stderr, `GitSeer — CI/CD and PR operations console for Gitea and GitHub
 
 Usage:
   gitseer serve [flags]
   gitseer version
+  gitseer backup --out DIR [--config path]
+  gitseer restore --from DIR [--config path] [--force]
   gitseer install-ui --custom-path DIR --gitseer-url URL
   gitseer uninstall-ui --custom-path DIR
 
 `)
+}
+
+func backupCmd(args []string) {
+	fs := flag.NewFlagSet("backup", flag.ExitOnError)
+	cfgPath := fs.String("config", envOr("GITSEER_CONFIG", ""), "path to config.yaml")
+	outDir := fs.String("out", "", "backup output directory")
+	_ = fs.Parse(args)
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	man, err := backup.Backup(context.Background(), backup.Options{
+		OutDir:  *outDir,
+		Version: version,
+		Cfg:     cfg,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backup: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("backup written to %s (driver=%s)\n", *outDir, man.Driver)
+	for _, n := range man.Notes {
+		fmt.Printf("note: %s\n", n)
+	}
+}
+
+func restoreCmd(args []string) {
+	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	cfgPath := fs.String("config", envOr("GITSEER_CONFIG", ""), "path to config.yaml")
+	fromDir := fs.String("from", "", "backup directory from gitseer backup")
+	force := fs.Bool("force", false, "overwrite existing database / encryption key")
+	_ = fs.Parse(args)
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	man, err := backup.Restore(context.Background(), backup.Options{
+		FromDir: *fromDir,
+		Force:   *force,
+		Version: version,
+		Cfg:     cfg,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "restore: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("restore complete from %s (driver=%s, backup_version=%s)\n", *fromDir, man.Driver, man.Version)
 }
 
 func serveCmd(args []string) {

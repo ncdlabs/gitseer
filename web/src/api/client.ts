@@ -10,6 +10,22 @@ export type User = {
   /** Mapped from Gitea defaults only; omitted for custom/unknown themes. */
   theme?: GitSeerTheme | null;
   gitea_theme?: string | null;
+  has_gitea?: boolean;
+  has_github?: boolean;
+  github_oauth_enabled?: boolean;
+};
+
+export type ACLUser = {
+  id: number;
+  login: string;
+  display_name: string;
+  email?: string;
+  is_bootstrap_admin: boolean;
+  has_gitea?: boolean;
+  has_github?: boolean;
+  gitea_instance_id?: number;
+  github_instance_id?: number;
+  token_instance_ids?: number[];
 };
 
 export type ForgeType = "gitea" | "github";
@@ -27,6 +43,42 @@ export type Repository = {
   forge_type?: ForgeType | string;
   instance_id?: number;
   instance_name?: string;
+  health?: RepoHealth;
+};
+
+export type RepoHealth = {
+  repo_id: number;
+  score: number;
+  grade: "healthy" | "degraded" | "critical" | string;
+  open_critical_attention: number;
+  failing_default_branch: boolean;
+  failing_default_branch_run_id?: number;
+  stale_open_prs: number;
+  ci_fail_rate: number;
+  ci_runs_in_window: number;
+  ci_failures_in_window: number;
+  window_days: number;
+  stale_pr_days: number;
+};
+
+export type FailureCluster = {
+  repo_id: number;
+  workflow_path: string;
+  job_name: string;
+  failure_count: number;
+  last_failed_at?: string;
+  sample_run_id?: number;
+  sample_job_id?: number;
+};
+
+export type AttentionLogSnippet = {
+  attention_id: number;
+  job_id: number;
+  job_name: string;
+  snippet: string;
+  truncated: boolean;
+  bytes: number;
+  stored: boolean;
 };
 
 export type PullRequest = {
@@ -89,12 +141,54 @@ export type AttentionItem = {
   entity_type?: string;
   entity_id?: number;
   metadata_json?: string;
+  fingerprint?: string;
   opened_at?: string;
   html_url?: string;
   repo_full?: string;
   forge_type?: ForgeType | string;
   instance_id?: number;
   instance_name?: string;
+};
+
+export type AttentionMuteUntil = "24h" | "7d" | "resolved";
+
+export type InboxReason = "author" | "requested_reviewer" | "failing_ci" | "blocked_on_me";
+
+export type InboxItem = {
+  kind: "attention" | "pull_request" | string;
+  reasons: InboxReason[] | string[];
+  attention?: AttentionItem;
+  pull_request?: PullRequest;
+};
+
+export type SavedFilterQuery = {
+  q?: string;
+  severity?: string;
+  type?: string;
+  forge_type?: string;
+  instance_id?: number;
+  reason?: InboxReason | string;
+  page?: "attention" | "inbox" | "pull-requests" | string;
+};
+
+export type SavedFilter = {
+  id: number;
+  user_id: number;
+  name: string;
+  query: SavedFilterQuery;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AttentionRuleOverride = {
+  rule_type: string;
+  severity: string;
+  updated_at?: string;
+};
+
+export type AttentionRuleDefault = {
+  rule_type: string;
+  default_severity: string;
 };
 
 export type Summary = {
@@ -132,6 +226,8 @@ export type DurationStats = {
   p95_seconds: number;
   sample_count: number;
 };
+
+export type StatsSection = "core" | "trends" | "duration" | "all";
 
 export type StatsReport = {
   days: number;
@@ -240,6 +336,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export type UIConfig = {
   base_path?: string;
   oauth_enabled?: boolean;
+  github_oauth_enabled?: boolean;
   bootstrap_enabled?: boolean;
   allow_skip_setup?: boolean;
   /** Present only when allow_skip_setup is true (local npm start). */
@@ -255,6 +352,54 @@ export type GitSeerSettings = {
   retention_webhooks_days: number;
   retention_attention_days: number;
   server_external_url: string;
+};
+
+export type NotificationSettings = {
+  enabled: boolean;
+  min_severity: string;
+  immediate_enabled: boolean;
+  digest_enabled: boolean;
+  digest_hour_utc: number;
+  smtp_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_tls_mode: string;
+  smtp_from: string;
+  smtp_to: string;
+  smtp_username: string;
+  smtp_password_configured: boolean;
+  slack_enabled: boolean;
+  slack_webhook_configured: boolean;
+  discord_enabled: boolean;
+  discord_webhook_configured: boolean;
+  webhook_enabled: boolean;
+  webhook_url_configured: boolean;
+};
+
+export type NotificationSettingsPatch = {
+  enabled?: boolean;
+  min_severity?: string;
+  immediate_enabled?: boolean;
+  digest_enabled?: boolean;
+  digest_hour_utc?: number;
+  smtp_enabled?: boolean;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_tls_mode?: string;
+  smtp_from?: string;
+  smtp_to?: string;
+  smtp_username?: string;
+  smtp_password?: string;
+  clear_smtp_password?: boolean;
+  slack_enabled?: boolean;
+  slack_webhook_url?: string;
+  clear_slack_webhook?: boolean;
+  discord_enabled?: boolean;
+  discord_webhook_url?: string;
+  clear_discord_webhook?: boolean;
+  webhook_enabled?: boolean;
+  webhook_url?: string;
+  clear_webhook_url?: boolean;
 };
 
 export type IntegrationPublic = {
@@ -313,6 +458,38 @@ export type ForgeStatusRow = {
   token_configured?: boolean;
   webhook_secret_configured?: boolean;
   capabilities?: unknown;
+  sync_phase?: string;
+  sync_last_success_at?: string;
+  sync_last_error?: string;
+  lease_holder?: string;
+  lease_expires_at?: string;
+  lease_active?: boolean;
+  webhook_stats_24h?: {
+    ok?: number;
+    failed?: number;
+    pending?: number;
+    processing?: number;
+    total?: number;
+  };
+  webhook_last_at?: string;
+  webhook_last_error?: string;
+  webhook_last_status?: string;
+  webhook_last_event?: string;
+  webhook_verified?: boolean;
+  webhook_verified_at?: string;
+  webhook_ensure_at?: string;
+  webhook_ensure_error?: string;
+  webhook_verify_pending?: boolean;
+  ops_checklist?: OpsChecklistItem[];
+  capability_matrix?: OpsChecklistItem[];
+  active_actions_hint?: string;
+};
+
+export type OpsChecklistItem = {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail" | "unknown" | string;
+  detail?: string;
 };
 
 export type InstancePublic = {
@@ -359,12 +536,45 @@ export type SystemStatus = {
   github_webhook_hmac?: boolean;
   setup_completed?: boolean;
   encryption_configured?: boolean;
+  encryption_source?: string;
+  encryption_healthy?: boolean;
+  encryption_error?: string;
   oauth_redirect_uri?: string;
   server_external_url?: string;
   gitea_version?: string;
   github_version?: string;
   forges?: ForgeStatusRow[];
+  webhook_stats_24h?: ForgeStatusRow["webhook_stats_24h"];
+  active_actions_hint?: string;
+  active_actions_in_flight?: number;
+  storage?: StorageStatus;
   [key: string]: unknown;
+};
+
+export type StorageStatus = {
+  driver?: string;
+  bytes?: number;
+  bytes_human?: string;
+  method?: string;
+  estimate?: boolean;
+  level?: "ok" | "warn" | "critical" | "unknown" | string;
+  warn_bytes?: number;
+  critical_bytes?: number;
+  warn_human?: string;
+  critical_human?: string;
+  path?: string;
+  error?: string;
+};
+
+export type PurgeRetentionResponse = {
+  ok: boolean;
+  stats: Record<string, number>;
+  windows: {
+    runs_days: number;
+    webhooks_days: number;
+    attention_days: number;
+  };
+  storage?: StorageStatus;
 };
 
 export type SettingsResponse = {
@@ -566,9 +776,61 @@ export const api = {
     return out;
   },
   logout: () => request<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
+  users: () => request<{ users: ACLUser[] }>("/api/v1/users"),
+  userAccess: (userId: number, instanceId: number) =>
+    request<{ user_id: number; instance_id: number; repo_ids: number[] }>(
+      `/api/v1/users/${userId}/access?instance_id=${instanceId}`,
+    ),
+  putUserAccess: (userId: number, instanceId: number, repoIds: number[]) =>
+    request<{ user_id: number; instance_id: number; repo_ids: number[]; forge_type?: string }>(
+      `/api/v1/users/${userId}/access`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ instance_id: instanceId, repo_ids: repoIds }),
+      },
+    ),
   summary: (days = 0) => request<Summary>(`/api/v1/summary?days=${days}`),
-  stats: (days = 0) => request<StatsReport>(`/api/v1/stats?days=${days}`),
+  stats: (days = 0, section?: StatsSection) => {
+    let url = `/api/v1/stats?days=${days}`;
+    if (section) url += `&section=${encodeURIComponent(section)}`;
+    return request<StatsReport>(url);
+  },
   systemStatus: () => request<SystemStatus>("/api/v1/system/status"),
+  notificationSettings: () =>
+    request<{ settings: NotificationSettings }>("/api/v1/notifications/settings"),
+  updateNotificationSettings: (body: NotificationSettingsPatch) =>
+    request<{ settings: NotificationSettings }>("/api/v1/notifications/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  sendTestNotification: () =>
+    request<{ queued: number }>("/api/v1/notifications/test", { method: "POST" }),
+  purgeRetention: () =>
+    request<PurgeRetentionResponse>("/api/v1/admin/purge-retention", { method: "POST" }),
+  downloadGiteaUISnippets: async (instanceId: number, format: "zip" | "text" = "zip") => {
+    const base = (typeof window !== "undefined" && window.__GITSEER_BASE__) || "";
+    const res = await fetch(
+      `${base}/api/v1/instances/${instanceId}/gitea-ui-snippets?format=${encodeURIComponent(format)}`,
+      { credentials: "include" },
+    );
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        const body = await res.json();
+        msg = body.error || msg;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg || "download failed");
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const match = /filename="?([^";]+)"?/i.exec(cd);
+    const filename =
+      match?.[1] ||
+      (format === "text" ? `gitseer-gitea-ui-${instanceId}.txt` : `gitseer-gitea-ui-${instanceId}.zip`);
+    return { blob, filename };
+  },
   repositories: (q = "", forgeType: string = "all") =>
     request<{ items: Repository[]; total: number }>(
       `/api/v1/repositories?limit=100&q=${encodeURIComponent(q)}${forgeListParam(forgeType)}`,
@@ -578,6 +840,26 @@ export const api = {
     return request<Repository>(
       `/api/v1/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${q}`,
     );
+  },
+  repositoryHealth: (owner: string, repo: string, instanceId?: number, days = 7) => {
+    const params = new URLSearchParams();
+    params.set("days", String(days));
+    if (instanceId && instanceId > 0) params.set("instance_id", String(instanceId));
+    return request<{ health: RepoHealth }>(
+      `/api/v1/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/health?${params}`,
+    );
+  },
+  repositoryFailureClusters: (owner: string, repo: string, instanceId?: number, days = 7) => {
+    const params = new URLSearchParams();
+    params.set("days", String(days));
+    if (instanceId && instanceId > 0) params.set("instance_id", String(instanceId));
+    return request<{ items: FailureCluster[]; days: number }>(
+      `/api/v1/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/failure-clusters?${params}`,
+    );
+  },
+  attentionLogSnippet: (id: number, maxBytes?: number) => {
+    const q = maxBytes && maxBytes > 0 ? `?max_bytes=${maxBytes}` : "";
+    return request<AttentionLogSnippet>(`/api/v1/attention/${id}/log-snippet${q}`);
   },
   pullRequests: (q = "", forgeType: string = "all") =>
     request<{ items: PullRequest[]; total: number }>(
@@ -591,10 +873,58 @@ export const api = {
     request<{ items: ActiveRunItem[]; total: number }>("/api/v1/workflow-runs/active"),
   workflowRun: (id: number) =>
     request<{ run: WorkflowRun; jobs: Job[]; graph: WorkflowNode[] | null }>(`/api/v1/workflow-runs/${id}`),
+  rerunWorkflowRun: (id: number) =>
+    request<{ ok: boolean; operation: string; run_id: number; used_service_pat?: boolean }>(
+      `/api/v1/workflow-runs/${id}/rerun`,
+      { method: "POST" },
+    ),
+  cancelWorkflowRun: (id: number) =>
+    request<{ ok: boolean; operation: string; run_id: number; used_service_pat?: boolean }>(
+      `/api/v1/workflow-runs/${id}/cancel`,
+      { method: "POST" },
+    ),
   attention: (q = "", forgeType: string = "all") =>
     request<{ items: AttentionItem[]; total: number }>(
       `/api/v1/attention?limit=100&q=${encodeURIComponent(q)}${forgeListParam(forgeType)}`,
     ),
+  inbox: (opts?: { q?: string; reason?: string; forgeType?: string }) => {
+    const q = opts?.q ?? "";
+    const reason = opts?.reason ? `&reason=${encodeURIComponent(opts.reason)}` : "";
+    return request<{ items: InboxItem[]; total: number }>(
+      `/api/v1/inbox?limit=100&q=${encodeURIComponent(q)}${reason}${forgeListParam(opts?.forgeType ?? "all")}`,
+    );
+  },
+  savedFilters: () => request<{ items: SavedFilter[] }>("/api/v1/saved-filters"),
+  createSavedFilter: (name: string, query: SavedFilterQuery) =>
+    request<SavedFilter>("/api/v1/saved-filters", {
+      method: "POST",
+      body: JSON.stringify({ name, query }),
+    }),
+  updateSavedFilter: (id: number, name: string, query: SavedFilterQuery) =>
+    request<SavedFilter>(`/api/v1/saved-filters/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, query }),
+    }),
+  deleteSavedFilter: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/saved-filters/${id}`, { method: "DELETE" }),
+  muteAttention: (id: number, until: AttentionMuteUntil, reason = "") =>
+    request<{ mute: { id: number } }>(`/api/v1/attention/${id}/mute`, {
+      method: "POST",
+      body: JSON.stringify({ until, reason }),
+    }),
+  unmuteAttention: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/attention/${id}/mute`, { method: "DELETE" }),
+  attentionRuleOverrides: () =>
+    request<{
+      overrides: AttentionRuleOverride[];
+      defaults: AttentionRuleDefault[];
+      editable: boolean;
+    }>("/api/v1/attention/rule-overrides"),
+  updateAttentionRuleOverrides: (overrides: AttentionRuleOverride[]) =>
+    request<{ overrides: AttentionRuleOverride[] }>("/api/v1/attention/rule-overrides", {
+      method: "PUT",
+      body: JSON.stringify({ overrides }),
+    }),
   search: (q: string) =>
     request<SearchResult>(`/api/v1/search?q=${encodeURIComponent(q)}`),
   syncRepos: () => request<unknown>("/api/v1/setup/sync-repos", { method: "POST" }),
@@ -623,6 +953,31 @@ export const api = {
     }),
   deleteInstance: (id: number) =>
     request<void>(`/api/v1/instances/${id}`, { method: "DELETE" }),
+  ensureWebhook: (id: number, body?: { org?: string; repo?: string }) =>
+    request<{
+      ok: boolean;
+      created?: boolean;
+      updated?: boolean;
+      manual?: boolean;
+      delivery_url?: string;
+      hint?: string;
+      hook_id?: number;
+    }>(`/api/v1/instances/${id}/ensure-webhook`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
+  verifyWebhook: (id: number, body?: { confirm?: boolean }) =>
+    request<{
+      ok: boolean;
+      verified?: boolean;
+      pending?: boolean;
+      mode?: string;
+      delivery_url?: string;
+      hint?: string;
+    }>(`/api/v1/instances/${id}/verify-webhook`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
   testConnection: (body?: TestConnectionBody) =>
     request<TestConnectionResponse>("/api/v1/setup/test-connection", {
       method: "POST",

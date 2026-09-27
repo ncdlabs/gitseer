@@ -124,7 +124,9 @@ const instanceSelectCols = `
 id, name, forge_type, base_url, version, capabilities_json,
 sync_token_ciphertext, webhook_secret_ciphertext,
 oauth_client_id, oauth_client_secret_ciphertext, external_url,
-allow_private_network, allow_unsigned_webhooks, created_at, updated_at`
+allow_private_network, allow_unsigned_webhooks,
+webhook_verified_at, webhook_ensure_at, webhook_ensure_error, webhook_verify_token,
+created_at, updated_at`
 
 // UpsertInstanceByURL inserts or updates instance metadata keyed by base_url.
 // Existing forge_type and credential columns are preserved on conflict; new rows default to gitea.
@@ -208,19 +210,63 @@ ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitea)
 	return inst, err
 }
 
+// GetPrimaryGitHubInstance returns the GitHub instance preferred for OAuth:
+// OAuth client id+secret configured first, else lowest id.
+func (s *Store) GetPrimaryGitHubInstance(ctx context.Context) (*models.Instance, error) {
+	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
+WHERE forge_type = ?
+  AND TRIM(COALESCE(oauth_client_id, '')) != ''
+  AND TRIM(COALESCE(oauth_client_secret_ciphertext, '')) != ''
+ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitHub)
+	inst, err := scanInstance(row)
+	if err == nil {
+		return inst, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	row = s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
+WHERE forge_type = ?
+ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitHub)
+	inst, err = scanInstance(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return inst, err
+}
+
 func scanInstance(row scanner) (*models.Instance, error) {
 	var inst models.Instance
 	var created, updated string
 	var allowPrivate, allowUnsigned int
+	var verifiedAt, ensureAt, ensureErr, verifyToken sql.NullString
 	if err := row.Scan(
 		&inst.ID, &inst.Name, &inst.ForgeType, &inst.BaseURL, &inst.Version, &inst.CapabilitiesJSON,
 		&inst.SyncTokenCiphertext, &inst.WebhookSecretCiphertext, &inst.OAuthClientID, &inst.OAuthClientSecretCipher,
-		&inst.ExternalURL, &allowPrivate, &allowUnsigned, &created, &updated,
+		&inst.ExternalURL, &allowPrivate, &allowUnsigned,
+		&verifiedAt, &ensureAt, &ensureErr, &verifyToken,
+		&created, &updated,
 	); err != nil {
 		return nil, err
 	}
 	inst.AllowPrivateNetwork = allowPrivate != 0
 	inst.AllowUnsignedWebhooks = allowUnsigned != 0
+	if verifiedAt.Valid && verifiedAt.String != "" {
+		if t, err := parseTime(verifiedAt.String); err == nil {
+			inst.WebhookVerifiedAt = &t
+		}
+	}
+	if ensureAt.Valid && ensureAt.String != "" {
+		if t, err := parseTime(ensureAt.String); err == nil {
+			inst.WebhookEnsureAt = &t
+		}
+	}
+	if ensureErr.Valid {
+		inst.WebhookEnsureError = ensureErr.String
+	}
+	if verifyToken.Valid {
+		inst.WebhookVerifyToken = verifyToken.String
+	}
 	inst.CreatedAt, _ = parseTime(created)
 	inst.UpdatedAt, _ = parseTime(updated)
 	if inst.ForgeType == "" {

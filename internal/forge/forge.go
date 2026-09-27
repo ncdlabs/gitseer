@@ -14,9 +14,18 @@ import (
 // live in-flight workflow runs during orphan reconciliation.
 var ErrNotFound = errors.New("forge resource not found")
 
+// ErrUnsupported indicates the forge does not support the requested write operation
+// (missing endpoint, capability flag off, or HTTP 404/405/501 from the forge).
+var ErrUnsupported = errors.New("forge operation unsupported")
+
 // IsNotFound reports whether err is or wraps ErrNotFound.
 func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound)
+}
+
+// IsUnsupported reports whether err is or wraps ErrUnsupported.
+func IsUnsupported(err error) bool {
+	return errors.Is(err, ErrUnsupported)
 }
 
 type ListReposOpts struct {
@@ -60,6 +69,13 @@ type Forge interface {
 	ListJobs(ctx context.Context, repo models.RepoRef, runExternalID int64) ([]models.Job, error)
 	GetJobLogs(ctx context.Context, repo models.RepoRef, jobExternalID int64) (io.ReadCloser, error)
 	GetWorkflowYAML(ctx context.Context, repo models.RepoRef, path, ref string) ([]byte, error)
+
+	// RerunWorkflowRun re-queues an entire workflow run on the forge.
+	// Returns ErrUnsupported when the forge lacks the endpoint.
+	RerunWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) error
+	// CancelWorkflowRun cancels an in-flight workflow run on the forge.
+	// Returns ErrUnsupported when the forge lacks the endpoint.
+	CancelWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) error
 
 	ListAccessibleReposForUser(ctx context.Context, userToken string, opts ListReposOpts) (Page[models.Repository], error)
 	GetAuthenticatedUser(ctx context.Context, userToken string) (*models.User, error)

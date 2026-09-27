@@ -176,6 +176,9 @@ func (p *Processor) handleForgeWebhook(w http.ResponseWriter, r *http.Request, i
 	}
 	if inserted {
 		gitseermetrics.WebhooksReceivedTotal.WithLabelValues(eventType).Inc()
+		if _, verr := p.store.MarkWebhookVerifiedIfPending(r.Context(), inst.ID); verr != nil {
+			p.log.Warn("webhook verify mark", "instance_id", inst.ID, "err", verr)
+		}
 	}
 	if !inserted {
 		w.WriteHeader(http.StatusOK)

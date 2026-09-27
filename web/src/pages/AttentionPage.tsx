@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { AttentionCards } from "../components/AttentionCards";
 import { ForgeFilterChips, type ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
+import { SavedFiltersBar } from "../components/SavedFiltersBar";
 import { useForgeInventory } from "../hooks/useShowForgeUI";
 import { useURLQueryFilter } from "../hooks/useURLQueryFilter";
 import { useViewMode } from "../hooks/useViewMode";
@@ -45,6 +46,17 @@ export function AttentionPage() {
           )}
         </ListControls>
       </div>
+      <SavedFiltersBar
+        page="attention"
+        currentQuery={{
+          q: filter || undefined,
+          forge_type: effectiveForge !== "all" && !effectiveForge.startsWith("instance:") ? effectiveForge : undefined,
+          page: "attention",
+        }}
+        onApply={(query) => {
+          if (typeof query.q === "string") setFilter(query.q);
+        }}
+      />
       <AttentionCards
         items={q.data?.items}
         empty={empty}

@@ -20,6 +20,7 @@ type Props = {
 
 const navigation: Array<{ to: string; label: string; icon: ShellIconName; end?: boolean }> = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
+  { to: "/inbox", label: "Inbox", icon: "inbox" },
   { to: "/attention", label: "Attention", icon: "attention" },
   { to: "/pull-requests", label: "Pull Requests", icon: "pullRequests" },
   { to: "/pipelines", label: "Pipelines", icon: "pipelines" },
@@ -94,6 +95,17 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
                   <Glyph name="settings" />
                   <span>Settings</span>
                 </NavLink>
+                {!user.is_bootstrap_admin && user.github_oauth_enabled && !user.has_github && (
+                  <a
+                    className="user-menu__item"
+                    href={`${typeof window !== "undefined" ? window.__GITSEER_BASE__ || "" : ""}/api/v1/auth/github/login?link=1&redirect=${encodeURIComponent("/settings#access")}`}
+                    role="menuitem"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Glyph name="settings" />
+                    <span>Link GitHub</span>
+                  </a>
+                )}
                 <button className="user-menu__item user-menu__item--danger" type="button" role="menuitem" onClick={onLogout}>
                   <Glyph name="logout" />
                   <span>Log Out</span>

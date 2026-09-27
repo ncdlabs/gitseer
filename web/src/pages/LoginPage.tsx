@@ -46,7 +46,10 @@ export function LoginPage({ onLoggedIn }: Props) {
 
   const basePath = window.__GITSEER_BASE__ || ui.base_path || "";
   const oauthHref = `${basePath}/api/v1/auth/login`;
+  const githubOAuthHref = `${basePath}/api/v1/auth/github/login`;
   const showOAuth = configState === "ready" && ui.oauth_enabled === true;
+  const showGitHubOAuth = configState === "ready" && ui.github_oauth_enabled === true;
+  const showForgeOAuth = showOAuth || showGitHubOAuth;
   const showBootstrap = configState === "ready" && ui.bootstrap_enabled === true;
 
   return (
@@ -66,10 +69,15 @@ export function LoginPage({ onLoggedIn }: Props) {
               Continue with Gitea
             </a>
           )}
+          {showGitHubOAuth && (
+            <a className={`btn${showOAuth ? "" : " primary"}`} href={githubOAuthHref}>
+              Continue with GitHub
+            </a>
+          )}
 
           {showBootstrap && (
             <>
-              {showOAuth && <div className="login__divider">or bootstrap</div>}
+              {showForgeOAuth && <div className="login__divider">or bootstrap</div>}
               <form className="login__bootstrap" onSubmit={submit}>
                 <input
                   id="password"

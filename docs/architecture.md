@@ -30,6 +30,7 @@
 | `internal/api` | `/api/v1` handlers |
 | `internal/auth` / `internal/authz` | Sessions, OAuth, CSRF, ACL |
 | `internal/attention` | Attention rule engine |
+| `internal/notify` | Outbound SMTP / Slack / Discord / generic webhook outbox worker |
 | `internal/workflows` | Run/job graph helpers |
 | `internal/realtime` | SSE hub (`/api/v1/events`) |
 | `internal/settings` | DB-backed runtime settings, encryption key file, multi-instance forge CRUD |
@@ -46,8 +47,9 @@ Raw forge wire types stay in `internal/forge/gitea` and `internal/forge/github`.
 2. **Sync** iterates enabled instances under per-`instance_id` leases — repositories, open PRs, recent workflow runs/jobs (history window configurable).
 3. **Webhooks** apply near-real-time updates (`POST /api/webhooks/gitea/{id}`, `POST /api/webhooks/github/{id}`; legacy unscoped Gitea uses the primary instance).
 4. **Attention** evaluates discrete rules on sync/webhook paths and a periodic sweep (~10m).
-5. **UI** reads ACL-scoped API; **SSE** pushes events filtered by `authz.CanAccessRepo`.
-6. **Setup wizard** handlers live under `internal/api` (`/api/v1/setup/*`) with encryption helpers in `internal/settings`.
+5. **Repo health / failure intelligence** are computed rollups over indexed attention, runs, jobs, and PRs (no extra tables); optional log tails are on-demand forge fetches.
+6. **UI** reads ACL-scoped API; **SSE** pushes events filtered by `authz.CanAccessRepo`.
+7. **Setup wizard** handlers live under `internal/api` (`/api/v1/setup/*`) with encryption helpers in `internal/settings`.
 
 ## Integrity rules (high level)
 
@@ -73,6 +75,6 @@ Set `server.external_url` to the public URL **including** any path prefix. GitSe
 
 - Dual-forge: **Gitea + GitHub** in scope; **GitLab / Bitbucket** Coming Soon (ask before implementing clients)
 - No Redis
-- Read-first (rerun/cancel deferred)
+- Write ops: **Rerun Workflow** / **Cancel Workflow** via per-instance user tokens (`UserAccessTokenForInstance`); no silent service-PAT fallback for non-admin; bootstrap admin may use service PAT with UI warning when no user token
 - Capability detection for Actions APIs; degrade when missing
-- Login: bootstrap + Gitea OAuth; GitHub service PAT for sync (no GitHub OAuth login yet)
+- Login: bootstrap + Gitea OAuth + GitHub OAuth (PKCE); GitHub service PAT for sync; ACL/grants per forge instance

@@ -27,7 +27,7 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitseer/blob/main
 | `gitea.allow_private_network` | Allow private/lab Gitea IPs (SSRF guard) |
 | `gitea.allow_unsigned_webhooks` | Lab-only unsigned webhook accept |
 | `github.url` | GitHub.com or GitHub Enterprise base URL |
-| `github.token` / files | Service PAT (sync for GitHub inventory; no GitHub OAuth / no OAuth-user ACL grant in this slice) |
+| `github.token` / files | Service PAT for GitHub inventory sync; per-user ACL/write ops use GitHub OAuth tokens on the instance when configured |
 | `github.webhook_secret` | HMAC secret (required when URL set unless unsigned allowed) |
 | `github.allow_private_network` | Allow private/lab GitHub Enterprise IPs |
 | `github.allow_unsigned_webhooks` | Lab-only unsigned webhook accept |
@@ -37,8 +37,10 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitseer/blob/main
 | `auth.*` | Provider, OAuth, bootstrap password, session TTL, ACL refresh, encryption key |
 | `ui.instance_name` | Display name |
 | `log.level` / `format` | Logging |
-| `retention.*` | Days for runs / webhooks / resolved attention |
+| `retention.*` | Days for runs / webhooks / resolved attention. Settings presets: Lab (14/7/30) vs Prod (90/30/180) plus `sync.history_days` 7 vs 30. Status warns at 512 MiB / 2 GiB DB size; **Purge Now** via `POST /api/v1/admin/purge-retention`. |
 | `dev.allow_skip_setup` | Local-only skip for `/setup` (`GITSEER_ALLOW_SKIP_SETUP`); rejected when `external_url` is non-local |
+
+Outbound notification channels (SMTP, Slack/Discord/generic HTTPS webhooks, severity filter, digest hour) are **not** YAML keys — they live in `notification_settings` and are edited under Settings → **Notifications** (`GET/PUT /api/v1/notifications/settings`). Secrets are sealed with `GITSEER_ENCRYPTION_KEY`.
 
 File/env forge blocks seed or default the matching `instances` row by `(forge_type, base_url)`. Runtime multi-instance CRUD is under Settings → Integration / `/api/v1/instances` (bootstrap admin).
 

@@ -44,6 +44,10 @@ type Config struct {
 	GiteaBaseURL      string
 	OAuthClientID     string
 	OAuthClientSecret string
+	GitHubBaseURL     string
+	GitHubOAuthClientID     string
+	GitHubOAuthClientSecret string
+	GitHubAllowPrivateNet   bool
 	ExternalURL       string // public GitSeer URL (used for redirect_uri)
 	AllowPrivateNet   bool
 	EncryptionKey     string
@@ -51,11 +55,12 @@ type Config struct {
 
 // Service manages login and sessions.
 type Service struct {
-	mu     sync.RWMutex
-	store  *store.Store
-	cfg    Config
-	client *http.Client
-	encKey []byte
+	mu           sync.RWMutex
+	store        *store.Store
+	cfg          Config
+	client       *http.Client
+	githubClient *http.Client
+	encKey       []byte
 }
 
 // New creates an auth service.
@@ -77,10 +82,11 @@ func New(st *store.Store, cfg Config) *Service {
 		}
 	}
 	return &Service{
-		store:  st,
-		cfg:    cfg,
-		client: gitea.NewHTTPClient(cfg.AllowPrivateNet, 30*time.Second),
-		encKey: encKey,
+		store:        st,
+		cfg:          cfg,
+		client:       gitea.NewHTTPClient(cfg.AllowPrivateNet, 30*time.Second),
+		githubClient: newGitHubHTTPClient(cfg.GitHubAllowPrivateNet),
+		encKey:       encKey,
 	}
 }
 
@@ -190,7 +196,15 @@ func (s *Service) BeginOAuth(ctx context.Context, w http.ResponseWriter, redirec
 	}
 	challenge := pkceChallengeS256(verifier)
 	expires := time.Now().UTC().Add(10 * time.Minute)
-	if err := s.store.SaveOAuthState(ctx, state, verifier, redirectTo, expires); err != nil {
+	var giteaInstanceID *int64
+	if inst, ierr := s.store.GetPrimaryGiteaInstance(ctx); ierr == nil && inst != nil {
+		id := inst.ID
+		giteaInstanceID = &id
+	}
+	if err := s.store.SaveOAuthState(ctx, state, verifier, redirectTo, expires, store.OAuthStateMeta{
+		Provider:   "gitea",
+		InstanceID: giteaInstanceID,
+	}); err != nil {
 		return "", err
 	}
 	s.setOAuthStateCookie(w, state)
@@ -227,13 +241,17 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.Res
 	if cookieState == "" || subtle.ConstantTimeCompare([]byte(cookieState), []byte(state)) != 1 {
 		return nil, "", "", "", fmt.Errorf("oauth state cookie mismatch")
 	}
-	verifier, redirectTo, err := s.store.TakeOAuthState(ctx, state)
+	verifier, redirectTo, meta, err := s.store.TakeOAuthState(ctx, state)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", "", "", fmt.Errorf("invalid or expired oauth state")
 		}
 		return nil, "", "", "", err
 	}
+	if meta.Provider != "" && meta.Provider != "gitea" {
+		return nil, "", "", "", fmt.Errorf("oauth state provider mismatch")
+	}
+	_ = meta
 	redirectTo = SafeRedirectPath(redirectTo)
 	tok, err := s.exchangeCode(ctx, code, verifier)
 	if err != nil {
@@ -245,7 +263,9 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.Res
 	}
 	inst, err := s.store.GetPrimaryGiteaInstance(ctx)
 	var instanceID *int64
-	if err == nil && inst != nil {
+	if meta.InstanceID != nil {
+		instanceID = meta.InstanceID
+	} else if err == nil && inst != nil {
 		id := inst.ID
 		instanceID = &id
 	}
@@ -259,7 +279,11 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.Res
 		}
 		return nil, "", "", "", err
 	}
-	if err := s.persistUserToken(ctx, user.ID, tok); err != nil {
+	tokenInstanceID := int64(0)
+	if instanceID != nil {
+		tokenInstanceID = *instanceID
+	}
+	if err := s.persistUserToken(ctx, user.ID, tokenInstanceID, tok); err != nil {
 		// Non-fatal for session creation (login still succeeds), but ACL refresh needs the token.
 		slog.Warn("oauth token persist failed", "err", err, "user_id", user.ID, "login", user.Login)
 	}
@@ -270,8 +294,8 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, w http.Res
 	return user, sessionToken, redirectTo, tok.AccessToken, nil
 }
 
-func (s *Service) persistUserToken(ctx context.Context, userID int64, tok *tokenResponse) error {
-	if len(s.encKey) != 32 || tok == nil || tok.AccessToken == "" {
+func (s *Service) persistUserToken(ctx context.Context, userID, instanceID int64, tok *tokenResponse) error {
+	if len(s.encKey) != 32 || tok == nil || tok.AccessToken == "" || instanceID <= 0 {
 		return nil
 	}
 	accessCipher, err := gitseercrypto.Encrypt(s.encKey, tok.AccessToken)
@@ -290,7 +314,7 @@ func (s *Service) persistUserToken(ctx context.Context, userID int64, tok *token
 		t := time.Now().UTC().Add(time.Duration(tok.ExpiresIn) * time.Second)
 		expires = &t
 	}
-	return s.store.SaveUserToken(ctx, userID, accessCipher, refreshCipher, expires)
+	return s.store.SaveUserToken(ctx, userID, instanceID, accessCipher, refreshCipher, expires)
 }
 
 type tokenResponse struct {
@@ -411,14 +435,31 @@ func (s *Service) createSession(ctx context.Context, userID int64, ip, ua string
 	return token, nil
 }
 
-// UserAccessToken decrypts the stored OAuth access token for userID,
-// refreshing via refresh_token when expiry is near and a refresh token is stored.
+// UserAccessToken decrypts a stored OAuth access token for userID.
+// PreferInstanceID, when >0, selects that forge instance's token; otherwise any token is returned
+// (Gitea primary first via the user's instance_id).
 // Returns empty string when encryption is unset or no token is stored.
 func (s *Service) UserAccessToken(ctx context.Context, userID int64) (string, error) {
+	prefer := int64(0)
+	if u, err := s.store.GetUserByID(ctx, userID); err == nil && u != nil && u.InstanceID != nil {
+		prefer = *u.InstanceID
+	}
+	return s.UserAccessTokenForInstance(ctx, userID, prefer)
+}
+
+// UserAccessTokenForInstance decrypts the stored OAuth access token for userID on instanceID.
+// When instanceID is 0, returns any decryptable token for the user.
+func (s *Service) UserAccessTokenForInstance(ctx context.Context, userID, instanceID int64) (string, error) {
 	if len(s.encKey) != 32 {
 		return "", nil
 	}
-	row, err := s.store.GetUserToken(ctx, userID)
+	var row *store.UserTokenRow
+	var err error
+	if instanceID > 0 {
+		row, err = s.store.GetUserToken(ctx, userID, instanceID)
+	} else {
+		row, err = s.store.GetAnyUserToken(ctx, userID, 0)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
@@ -439,12 +480,12 @@ func (s *Service) UserAccessToken(ctx context.Context, userID int64) (string, er
 	if err != nil || refresh == "" {
 		return access, nil
 	}
-	tok, err := s.refreshAccessToken(ctx, refresh)
+	tok, err := s.refreshAccessTokenForInstance(ctx, row.InstanceID, refresh)
 	if err != nil {
 		// Keep serving the existing access token; caller may still succeed until hard expiry.
 		return access, nil
 	}
-	if err := s.persistUserToken(ctx, userID, tok); err != nil {
+	if err := s.persistUserToken(ctx, userID, row.InstanceID, tok); err != nil {
 		slog.Warn("oauth refreshed token persist failed", "err", err, "user_id", userID)
 		return tok.AccessToken, nil
 	}
@@ -456,6 +497,21 @@ func tokenNeedsRefresh(expires *time.Time) bool {
 		return false
 	}
 	return time.Now().UTC().Add(2 * time.Minute).After(expires.UTC())
+}
+
+func (s *Service) refreshAccessTokenForInstance(ctx context.Context, instanceID int64, refreshToken string) (*tokenResponse, error) {
+	if instanceID > 0 {
+		if inst, err := s.store.GetInstanceByID(ctx, instanceID); err == nil && inst != nil {
+			ft := inst.ForgeType
+			if ft == "" {
+				ft = models.ForgeTypeGitea
+			}
+			if ft == models.ForgeTypeGitHub {
+				return s.refreshGitHubAccessToken(ctx, refreshToken)
+			}
+		}
+	}
+	return s.refreshAccessToken(ctx, refreshToken)
 }
 
 func (s *Service) refreshAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {

@@ -5,22 +5,60 @@ import {
   api,
   type ForgeStatusRow,
   type GitSeerSettings,
+  type OpsChecklistItem,
   type SettingsResponse,
+  type StorageStatus,
   type SystemStatus,
 } from "../api/client";
 import { InstanceSettingsPanel } from "../components/InstanceSettingsPanel";
+import { AttentionSeverityOverrides } from "../components/AttentionSeverityOverrides";
+import { AccessGrantPanel } from "../components/AccessGrantPanel";
+import { NotificationsPanel } from "../components/NotificationsPanel";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
-type SettingsTab = "preferences" | "integration" | "status";
+type SettingsTab = "preferences" | "integration" | "access" | "notifications" | "status";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "preferences", label: "Preferences" },
   { id: "integration", label: "Integration" },
+  { id: "access", label: "Access" },
+  { id: "notifications", label: "Notifications" },
   { id: "status", label: "Status" },
 ];
 
+/** Lab: short windows for ephemeral environments. */
+const LAB_PRESET: Pick<
+  GitSeerSettings,
+  "sync_history_days" | "retention_runs_days" | "retention_webhooks_days" | "retention_attention_days"
+> = {
+  sync_history_days: 7,
+  retention_runs_days: 14,
+  retention_webhooks_days: 7,
+  retention_attention_days: 30,
+};
+
+/** Prod: package defaults (history 30d; retention 90/30/180). */
+const PROD_PRESET: Pick<
+  GitSeerSettings,
+  "sync_history_days" | "retention_runs_days" | "retention_webhooks_days" | "retention_attention_days"
+> = {
+  sync_history_days: 30,
+  retention_runs_days: 90,
+  retention_webhooks_days: 30,
+  retention_attention_days: 180,
+};
+
 function tabFromHash(hash: string): SettingsTab {
   const id = hash.replace(/^#/, "");
-  if (id === "integration" || id === "status" || id === "preferences") return id;
+  if (
+    id === "integration" ||
+    id === "status" ||
+    id === "preferences" ||
+    id === "access" ||
+    id === "notifications"
+  ) {
+    return id;
+  }
   return "preferences";
 }
 
@@ -78,6 +116,33 @@ function yesNo(v: unknown): string {
   return v ? "yes" : "no";
 }
 
+function checklistTone(status: string): string {
+  switch (status) {
+    case "pass":
+      return "pass";
+    case "fail":
+      return "fail";
+    case "warn":
+      return "warn";
+    default:
+      return "unknown";
+  }
+}
+
+function storageLabel(storage?: StorageStatus): string {
+  if (!storage) return "—";
+  if (storage.error || storage.level === "unknown") return "unavailable";
+  const size = storage.bytes_human || (storage.bytes != null ? `${storage.bytes} B` : "—");
+  const driver = storage.driver || "db";
+  const est = storage.estimate ? " (estimate)" : "";
+  const level = storage.level && storage.level !== "ok" ? ` · ${storage.level}` : "";
+  const warn =
+    storage.warn_human || storage.critical_human
+      ? ` · warn ${storage.warn_human || "—"} / critical ${storage.critical_human || "—"}`
+      : "";
+  return `${size}${est} (${driver})${level}${warn}`;
+}
+
 function statusRows(status: SystemStatus | undefined): { label: string; value: string }[] {
   if (!status) return [];
   const rows: { label: string; value: string }[] = [
@@ -85,44 +150,20 @@ function statusRows(status: SystemStatus | undefined): { label: string; value: s
     { label: "Instance Name", value: String(status.ui_name ?? "—") },
     { label: "Bootstrap Auth", value: status.bootstrap_auth ? "enabled" : "disabled" },
     { label: "Setup Completed", value: yesNo(status.setup_completed) },
+    {
+      label: "Encryption",
+      value: status.encryption_healthy
+        ? `healthy (${status.encryption_source || "configured"})`
+        : status.encryption_configured
+          ? `unhealthy${status.encryption_error ? `: ${status.encryption_error}` : ""}`
+          : "not configured",
+    },
+    { label: "Database Size", value: storageLabel(status.storage) },
     { label: "OAuth Redirect URI", value: String(status.oauth_redirect_uri ?? "—") },
     { label: "Path Prefix", value: String(status.path_prefix || "/") },
   ];
-
-  const forges = Array.isArray(status.forges) ? (status.forges as ForgeStatusRow[]) : [];
-  if (forges.length > 0) {
-    for (const f of forges) {
-      const name = forgeStatusLabel(f, forges);
-      rows.push(
-        { label: `${name} URL`, value: String(f.url || "—") },
-        { label: `${name} Connected`, value: yesNo(f.connected) },
-        { label: `${name} Credentials`, value: f.configured ? "configured" : "missing" },
-        { label: `${name} Version`, value: String(f.version ?? "—") },
-        { label: `${name} Webhook HMAC`, value: f.webhook_hmac ? "configured" : "missing" },
-      );
-      if ((f.forge_type || "").toLowerCase() === "gitea") {
-        rows.push({
-          label: `${name} OAuth`,
-          value: f.oauth_configured ? "configured" : "missing",
-        });
-      }
-    }
-  } else {
-    rows.push(
-      { label: "Gitea Connected", value: status.instance_connected ? "yes" : "no" },
-      { label: "Gitea Version", value: String(status.gitea_version ?? "—") },
-      { label: "Gitea Credentials", value: status.gitea_configured ? "configured" : "missing" },
-      { label: "OAuth", value: status.oauth_enabled ? "enabled" : "disabled" },
-      { label: "Webhook HMAC", value: status.webhook_hmac ? "configured" : "missing" },
-      {
-        label: "GitHub Credentials",
-        value: status.github_configured ? "configured" : "missing",
-      },
-      {
-        label: "GitHub Webhook HMAC",
-        value: status.github_webhook_hmac ? "configured" : "missing",
-      },
-    );
+  if (status.active_actions_hint) {
+    rows.push({ label: "Active Actions", value: String(status.active_actions_hint) });
   }
   return rows;
 }
@@ -140,6 +181,11 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [opsBusy, setOpsBusy] = useState<string | null>(null);
+  const [opsMessage, setOpsMessage] = useState<string | null>(null);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setTab(tabFromHash(location.hash));
@@ -183,6 +229,31 @@ export function SettingsPage() {
     setSavedFlash(false);
   }
 
+  function applyPreset(preset: typeof LAB_PRESET) {
+    if (!editable || saving) return;
+    setDraft((prev) => ({ ...prev, ...preset }));
+    setSavedFlash(false);
+  }
+
+  async function runPurgeNow() {
+    if (!editable || purgeBusy) return;
+    setPurgeBusy(true);
+    setPurgeMessage(null);
+    try {
+      const res = await api.purgeRetention();
+      const parts = Object.entries(res.stats || {})
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(" · ");
+      setPurgeMessage(parts ? `Purged ${parts}.` : "Purge complete (nothing aged out).");
+      setPurgeOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    } catch (err) {
+      setPurgeMessage(err instanceof Error ? err.message : "Purge failed");
+    } finally {
+      setPurgeBusy(false);
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!editable || !dirty || saving) return;
@@ -199,6 +270,79 @@ export function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function runEnsureWebhook(instanceId: number) {
+    if (!editable || opsBusy) return;
+    setOpsBusy(`ensure-${instanceId}`);
+    setOpsMessage(null);
+    try {
+      const res = await api.ensureWebhook(instanceId);
+      setOpsMessage(res.hint || (res.ok ? "Webhook ensured." : "Webhook ensure finished."));
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    } catch (err) {
+      setOpsMessage(err instanceof Error ? err.message : "Ensure Webhook failed");
+    } finally {
+      setOpsBusy(null);
+    }
+  }
+
+  async function runVerifyWebhook(instanceId: number, confirm: boolean) {
+    if (!editable || opsBusy) return;
+    setOpsBusy(`verify-${instanceId}-${confirm ? "confirm" : "arm"}`);
+    setOpsMessage(null);
+    try {
+      const res = await api.verifyWebhook(instanceId, { confirm });
+      setOpsMessage(
+        res.hint ||
+          (res.verified
+            ? "Webhook delivery verified."
+            : "Verification armed — send a Ping from the forge, then Confirm Delivery."),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    } catch (err) {
+      setOpsMessage(err instanceof Error ? err.message : "Verify Delivery failed");
+    } finally {
+      setOpsBusy(null);
+    }
+  }
+
+  async function runSyncNow() {
+    if (!editable || opsBusy) return;
+    setOpsBusy("sync");
+    setOpsMessage(null);
+    try {
+      await api.syncRepos();
+      setOpsMessage("Sync started.");
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    } catch (err) {
+      setOpsMessage(err instanceof Error ? err.message : "Sync Now failed");
+    } finally {
+      setOpsBusy(null);
+    }
+  }
+
+  const forges = Array.isArray(settingsQuery.data?.status?.forges)
+    ? (settingsQuery.data!.status.forges as ForgeStatusRow[])
+    : [];
+
+  function renderChecklist(items: OpsChecklistItem[] | undefined) {
+    if (!items || items.length === 0) return null;
+    return (
+      <ul className="ops-checklist">
+        {items.map((item) => (
+          <li key={item.id} className={`ops-checklist__item ops-checklist__item--${checklistTone(item.status)}`}>
+            <span className="ops-checklist__status" aria-hidden>
+              {item.status === "pass" ? "✓" : item.status === "fail" ? "✗" : "!"}
+            </span>
+            <div>
+              <div className="ops-checklist__label">{item.label}</div>
+              {item.detail ? <div className="ops-checklist__detail muted">{item.detail}</div> : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
   }
 
   return (
@@ -267,6 +411,7 @@ export function SettingsPage() {
           </div>
 
           {tab === "preferences" && (
+            <>
             <form
               className="panel panel--padded settings-form"
               id="settings-panel-preferences"
@@ -301,7 +446,7 @@ export function SettingsPage() {
                     autoComplete="off"
                   />
                   <p className="settings-form__hint">
-                    Public URL where forges can reach GitSeer for webhooks and Gitea OAuth. Maps to{" "}
+                    Public URL where forges can reach GitSeer for webhooks and OAuth. Maps to{" "}
                     <code className="mono">server.external_url</code>.
                   </p>
                 </div>
@@ -342,6 +487,28 @@ export function SettingsPage() {
 
               <fieldset className="settings-form__section" disabled={!editable || saving}>
                 <legend>Retention</legend>
+                <div className="settings-form__presets">
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={!editable || saving}
+                    onClick={() => applyPreset(LAB_PRESET)}
+                  >
+                    Apply Lab Preset
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={!editable || saving}
+                    onClick={() => applyPreset(PROD_PRESET)}
+                  >
+                    Apply Prod Preset
+                  </button>
+                </div>
+                <p className="settings-form__hint">
+                  Lab: history 7d · runs 14d · webhooks 7d · attention 30d. Prod: history 30d · runs 90d ·
+                  webhooks 30d · attention 180d. Apply updates the form; click Save Changes to persist.
+                </p>
                 <div className="settings-form__grid">
                   <div className="settings-form__field">
                     <label htmlFor="retention_runs_days">Workflow runs (days)</label>
@@ -377,7 +544,26 @@ export function SettingsPage() {
                     />
                   </div>
                 </div>
-                <p className="settings-form__hint">0 disables purge for that category. Next scheduled retention job uses these values.</p>
+                <p className="settings-form__hint">
+                  0 disables purge for that category. Next scheduled retention job (~6h) uses these values.
+                </p>
+                {editable && (
+                  <div className="settings-form__inline">
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={purgeBusy}
+                      onClick={() => setPurgeOpen(true)}
+                    >
+                      Purge Now
+                    </button>
+                  </div>
+                )}
+                {purgeMessage && (
+                  <p className="settings-form__hint" role="status">
+                    {purgeMessage}
+                  </p>
+                )}
               </fieldset>
 
               {error && <p className="error" role="alert">{error}</p>}
@@ -394,9 +580,26 @@ export function SettingsPage() {
                 </div>
               )}
             </form>
+            <div className="panel panel--padded settings-severity-panel">
+              <fieldset className="settings-form__section">
+                <legend>Attention Severity Overrides</legend>
+                <AttentionSeverityOverrides editable={editable} />
+              </fieldset>
+            </div>
+            </>
           )}
 
           {tab === "integration" && <InstanceSettingsPanel editable={editable} />}
+          {tab === "access" && <AccessGrantPanel editable={editable} />}
+          {tab === "notifications" && (
+            <div
+              id="settings-panel-notifications"
+              role="tabpanel"
+              aria-labelledby="settings-tab-notifications"
+            >
+              <NotificationsPanel editable={editable} />
+            </div>
+          )}
 
           {tab === "status" && (
             <div
@@ -414,10 +617,147 @@ export function SettingsPage() {
                   </div>
                 ))}
               </dl>
+
+              {settingsQuery.data?.status?.storage &&
+                (settingsQuery.data.status.storage.level === "warn" ||
+                  settingsQuery.data.status.storage.level === "critical") && (
+                  <p className="error" role="status">
+                    Database size is {settingsQuery.data.status.storage.level}
+                    {settingsQuery.data.status.storage.bytes_human
+                      ? ` (${settingsQuery.data.status.storage.bytes_human})`
+                      : ""}
+                    . Consider shortening retention or running Purge Now under Preferences.
+                  </p>
+                )}
+
+              {opsMessage && (
+                <p className="settings-form__hint" role="status">
+                  {opsMessage}
+                </p>
+              )}
+
+              {forges.length === 0 && (
+                <p className="muted">No forge instances configured yet. Add one under Integration.</p>
+              )}
+
+              {forges.map((f) => {
+                const name = forgeStatusLabel(f, forges);
+                const id = f.instance_id ?? 0;
+                const stats = f.webhook_stats_24h;
+                return (
+                  <section key={`${f.forge_type}-${id}`} className="ops-forge">
+                    <div className="ops-forge__header">
+                      <h3 className="settings-status__title">{name}</h3>
+                      {editable && id > 0 && (
+                        <div className="ops-forge__actions">
+                          <button
+                            className="btn"
+                            type="button"
+                            disabled={opsBusy != null}
+                            onClick={() => runEnsureWebhook(id)}
+                          >
+                            {opsBusy === `ensure-${id}` ? "Ensuring…" : "Ensure Webhook"}
+                          </button>
+                          <button
+                            className="btn"
+                            type="button"
+                            disabled={opsBusy != null}
+                            onClick={() => runVerifyWebhook(id, false)}
+                          >
+                            {opsBusy === `verify-${id}-arm` ? "Arming…" : "Verify Delivery"}
+                          </button>
+                          {f.webhook_verify_pending && (
+                            <button
+                              className="btn primary"
+                              type="button"
+                              disabled={opsBusy != null}
+                              onClick={() => runVerifyWebhook(id, true)}
+                            >
+                              {opsBusy === `verify-${id}-confirm` ? "Confirming…" : "Confirm Delivery"}
+                            </button>
+                          )}
+                          <button
+                            className="btn"
+                            type="button"
+                            disabled={opsBusy != null}
+                            onClick={() => runSyncNow()}
+                          >
+                            {opsBusy === "sync" ? "Syncing…" : "Sync Now"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <dl className="settings-status">
+                      <div className="settings-status__row">
+                        <dt>URL</dt>
+                        <dd className="mono">{f.url || "—"}</dd>
+                      </div>
+                      <div className="settings-status__row">
+                        <dt>Connected</dt>
+                        <dd className="mono">{yesNo(f.connected)}{f.version ? ` (${f.version})` : ""}</dd>
+                      </div>
+                      <div className="settings-status__row">
+                        <dt>Sync Phase</dt>
+                        <dd className="mono">
+                          {f.sync_phase || "—"}
+                          {f.sync_last_error ? ` · ${f.sync_last_error}` : ""}
+                        </dd>
+                      </div>
+                      <div className="settings-status__row">
+                        <dt>Sync Lease</dt>
+                        <dd className="mono">
+                          {f.lease_holder
+                            ? `${f.lease_holder}${f.lease_active ? " (active)" : " (expired)"}`
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div className="settings-status__row">
+                        <dt>Webhooks (24h)</dt>
+                        <dd className="mono">
+                          {stats
+                            ? `ok ${stats.ok ?? 0} · failed ${stats.failed ?? 0} · pending ${stats.pending ?? 0} · total ${stats.total ?? 0}`
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div className="settings-status__row">
+                        <dt>Last Webhook</dt>
+                        <dd className="mono">
+                          {f.webhook_last_at || "—"}
+                          {f.webhook_last_event ? ` · ${f.webhook_last_event}` : ""}
+                          {f.webhook_last_error ? ` · ${f.webhook_last_error}` : ""}
+                        </dd>
+                      </div>
+                      {f.active_actions_hint ? (
+                        <div className="settings-status__row">
+                          <dt>Active Actions</dt>
+                          <dd>{f.active_actions_hint}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                    <h4 className="ops-forge__subtitle">Ops Checklist</h4>
+                    {renderChecklist(f.ops_checklist)}
+                    <h4 className="ops-forge__subtitle">Capability Matrix</h4>
+                    {renderChecklist(f.capability_matrix)}
+                  </section>
+                );
+              })}
             </div>
           )}
         </>
       )}
+
+      <ConfirmDialog
+        open={purgeOpen}
+        title="Purge Retention Now"
+        message="Delete aged workflow runs, webhook events, and resolved attention using the currently saved retention windows (not unsaved draft values). This cannot be undone."
+        confirmLabel="Purge Now"
+        danger
+        busy={purgeBusy}
+        onConfirm={() => void runPurgeNow()}
+        onCancel={() => {
+          if (!purgeBusy) setPurgeOpen(false);
+        }}
+      />
     </>
   );
 }

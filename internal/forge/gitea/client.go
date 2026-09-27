@@ -486,6 +486,10 @@ func (c *Client) DetectCapabilities(ctx context.Context) (*models.Capabilities, 
 	if runsResp.StatusCode >= 200 && runsResp.StatusCode < 300 {
 		caps.ActionsAPI = true
 		caps.JobLogsAPI = true
+		caps.RerunWorkflowAPI = true
+		// Cancel endpoint landed in newer Gitea; still advertise when Actions works and
+		// treat forge 404/405 as ErrUnsupported at call time.
+		caps.CancelWorkflowAPI = true
 	}
 	return caps, nil
 }
@@ -806,6 +810,33 @@ func (c *Client) GetJobLogs(ctx context.Context, repo models.RepoRef, jobExterna
 		return nil, fmt.Errorf("gitea api %s: %s", resp.Status, truncate(string(b), 200))
 	}
 	return resp.Body, nil
+}
+
+func (c *Client) RerunWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), runExternalID)
+	return c.postWorkflowWrite(ctx, path)
+}
+
+func (c *Client) CancelWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/cancel", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), runExternalID)
+	return c.postWorkflowWrite(ctx, path)
+}
+
+func (c *Client) postWorkflowWrite(ctx context.Context, path string) error {
+	resp, err := c.do(ctx, http.MethodPost, path, nil, "")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		return nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return fmt.Errorf("%w: gitea api %s", forge.ErrUnsupported, resp.Status)
+	default:
+		return fmt.Errorf("gitea api %s: %s", resp.Status, truncate(string(body), 200))
+	}
 }
 
 func (c *Client) GetWorkflowYAML(ctx context.Context, repo models.RepoRef, path, ref string) ([]byte, error) {

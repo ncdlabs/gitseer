@@ -18,6 +18,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/config"
 	"github.com/ncdlabs/gitseer/internal/database"
 	_ "github.com/ncdlabs/gitseer/internal/forge/all"
+	"github.com/ncdlabs/gitseer/internal/notify"
 	"github.com/ncdlabs/gitseer/internal/ratelimit"
 	"github.com/ncdlabs/gitseer/internal/realtime"
 	"github.com/ncdlabs/gitseer/internal/retention"
@@ -41,6 +42,7 @@ type Server struct {
 	wh      *webhooks.Processor
 	retain  *retention.Runner
 	att     *attention.Engine
+	notify  *notify.Service
 	api     *api.Handler
 	auth    *auth.Service
 }
@@ -82,19 +84,29 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		wh.SetSecret(integ.WebhookSecret)
 		wh.SetAllowUnsigned(integ.AllowUnsignedWebhooks)
 	}
+	applyGitHub := func(gh settings.GitHubIntegration) {
+		authsvc.UpdateGitHubAuth(gh.URL, gh.OAuthClientID, gh.OAuthClientSecret, gh.AllowPrivateNetwork)
+	}
 	settingsMgr.SetOnIntegrationChange(applyIntegration)
+	settingsMgr.SetOnGitHubChange(applyGitHub)
 	settingsMgr.SetOnExternalURLChange(authsvc.UpdateExternalURL)
 	settingsMgr.SetOnEncryptionChange(authsvc.SetEncryptionKey)
 	if k := settingsMgr.EncryptionKeyBytes(); len(k) == 32 {
 		authsvc.SetEncryptionKey(k)
 	}
 	applyIntegration(settingsMgr.AuthGiteaIntegration(context.Background()))
+	applyGitHub(settingsMgr.AuthGitHubIntegration(context.Background()))
 	authsvc.UpdateExternalURL(settingsMgr.ExternalURL())
 	if integ := settingsMgr.Integration(); integ.WebhookSecret == "" && integ.AllowUnsignedWebhooks {
 		log.Warn("gitea webhook HMAC secret not set; unsigned payloads allowed")
 	}
 	retain := retention.NewWithSource(st, settingsMgr, log)
+	notifier := notify.New(st, settingsMgr, settingsMgr, log)
+	if att != nil {
+		att.SetOnOpened(notifier.OnAttentionOpened)
+	}
 	apiHandler := api.New(cfg, st, authsvc, authzsvc, syncer, wh, att, hub, settingsMgr, log, version)
+	apiHandler.SetNotify(notifier)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -132,11 +144,12 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 			bootstrapEnabled = false
 		}
 		payload := map[string]any{
-			"base_path":         prefix,
-			"oauth_enabled":     authsvc.OAuthEnabled(),
-			"bootstrap_enabled": bootstrapEnabled,
-			"allow_skip_setup":  cfg.Dev.AllowSkipSetup,
-			"csrf_token":        csrf,
+			"base_path":             prefix,
+			"oauth_enabled":         authsvc.OAuthEnabled(),
+			"github_oauth_enabled":  authsvc.GitHubOAuthEnabled(),
+			"bootstrap_enabled":     bootstrapEnabled,
+			"allow_skip_setup":      cfg.Dev.AllowSkipSetup,
+			"csrf_token":            csrf,
 		}
 		// Local npm start only: prefill login with the bootstrap password when the
 		// TCP peer is loopback, skip-setup is on, and external_url is loopback/empty.
@@ -162,6 +175,7 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		wh:      wh,
 		retain:  retain,
 		att:     att,
+		notify:  notifier,
 		api:     apiHandler,
 		auth:    authsvc,
 		http: &http.Server{
@@ -183,6 +197,9 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.syncer.RunReconcile(ctx)
 	go s.retain.Run(ctx)
 	go s.runACLRefresh(ctx)
+	if s.notify != nil {
+		go s.notify.Run(ctx)
+	}
 	if s.att != nil {
 		go s.att.RunPeriodicSweep(ctx, 10*time.Minute, func(c context.Context) ([]int64, error) {
 			instances, err := s.store.ListInstances(c)

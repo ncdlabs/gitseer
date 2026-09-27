@@ -69,11 +69,32 @@ Empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password 
 
 ## Actions APIs missing
 
-GitSeer detects capabilities and degrades when Actions endpoints return 404 (Gitea and GitHub/GHE variance). Job/run JSON shapes vary; the client accepts wrapped or flat arrays where needed.
+GitSeer detects capabilities and degrades when Actions endpoints return 404 (Gitea and GitHub/GHE variance). Job/run JSON shapes vary; the client accepts wrapped or flat arrays where needed. Settings → **Status** shows a per-instance **Capability Matrix** (Actions, logs, runners, workflow webhooks, Checks vs status). The **Runners API** row notes that `runner_unavailable_queued` attention stays stubbed even when listing works — forges do not expose a reliable “queued because runner offline” job signal.
 
-## Postgres
+## Encryption unhealthy / wrong key
 
-Insert paths use `RETURNING id` for some flows; broader Postgres production readiness is still behind SQLite. Prefer SQLite unless you are intentionally validating Postgres. Keep a single replica when using SQLite sync leases.
+Settings → **Status** shows `encryption_healthy: false` with `encryption_error` when a stored secret cannot be decrypted. Fix by restoring the correct `GITSEER_ENCRYPTION_KEY` / `gitseer.encryption_key`, or re-enter forge secrets after installing a new key. Never commit keys.
+
+## Webhooks not arriving
+
+1. Confirm per-instance delivery URL under Integration / Status  
+2. Use **Ensure Webhook** (Gitea system hook; GitHub org hook when PAT allows)  
+3. Use **Verify Delivery** then send a Ping from the forge (or **Confirm Delivery** after a recent delivery)  
+4. Check webhook 24h stats and last error on Status  
+
+## Empty Active Actions
+
+Status surfaces an `active_actions_hint` when there are no in-flight runs and few/no recent `workflow_*` webhooks — usually missing workflow events on the forge hook, or sync not completed yet.
+
+## Postgres / multi-replica
+
+Store paths use `RETURNING id` and `FOR UPDATE SKIP LOCKED` (webhook claim) on Postgres. Optional integration tests: `GITSEER_TEST_POSTGRES_DSN=… go test -tags postgres ./internal/store/ -run Postgres`.
+
+**Multi-replica caveats:**
+
+- Sync leases are per-`instance_id` in the DB — only one reconciler holds a given lease at a time (safe across replicas)
+- SSE remains **in-process** (no Redis) — each replica has its own subscriber set; use sticky sessions or accept that clients only see events from the pod they connected to
+- Prefer `replicaCount: 1` unless you accept those SSE caveats; set `replicaCount > 1` only with documented awareness
 
 ## Metrics 401
 

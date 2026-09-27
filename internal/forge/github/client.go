@@ -259,6 +259,18 @@ func (c *Client) doAccept(ctx context.Context, method, path string, query url.Va
 	return c.doBody(ctx, method, path, query, token, nil, "", accept)
 }
 
+func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, payload any) (*http.Response, error) {
+	var body []byte
+	if payload != nil {
+		var err error
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return c.doBody(ctx, method, path, query, "", body, "application/json", "application/vnd.github+json")
+}
+
 func (c *Client) doBody(ctx context.Context, method, path string, query url.Values, token string, body []byte, contentType, accept string) (*http.Response, error) {
 	reqURL := c.requestURL(path, query)
 	tok := token
@@ -382,7 +394,7 @@ func (c *Client) DetectCapabilities(ctx context.Context) (*models.Capabilities, 
 	}
 	caps := &models.Capabilities{
 		Version:            info.Version,
-		OAuthProvider:      false, // GitHub OAuth login deferred
+		OAuthProvider:      true, // GitHub OAuth Apps supported (login when client configured)
 		SystemHooksAPI:     false, // no Gitea-style system hooks API
 		WorkflowRunWebhook: true,
 		WorkflowJobWebhook: true,
@@ -412,6 +424,8 @@ func (c *Client) DetectCapabilities(ctx context.Context) (*models.Capabilities, 
 	if runsResp.StatusCode >= 200 && runsResp.StatusCode < 300 {
 		caps.ActionsAPI = true
 		caps.JobLogsAPI = true
+		caps.RerunWorkflowAPI = true
+		caps.CancelWorkflowAPI = true
 	}
 	return caps, nil
 }
@@ -784,6 +798,33 @@ func (c *Client) GetJobLogs(ctx context.Context, repo models.RepoRef, jobExterna
 		return nil, fmt.Errorf("github api %s: %s", resp.Status, truncate(string(b), 200))
 	}
 	return resp.Body, nil
+}
+
+func (c *Client) RerunWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), runExternalID)
+	return c.postWorkflowWrite(ctx, path)
+}
+
+func (c *Client) CancelWorkflowRun(ctx context.Context, repo models.RepoRef, runExternalID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/cancel", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), runExternalID)
+	return c.postWorkflowWrite(ctx, path)
+}
+
+func (c *Client) postWorkflowWrite(ctx context.Context, path string) error {
+	resp, err := c.do(ctx, http.MethodPost, path, nil, "")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		return nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return fmt.Errorf("%w: github api %s", forge.ErrUnsupported, resp.Status)
+	default:
+		return fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))
+	}
 }
 
 func (c *Client) GetWorkflowYAML(ctx context.Context, repo models.RepoRef, path, ref string) ([]byte, error) {

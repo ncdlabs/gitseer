@@ -833,6 +833,100 @@ func TestStatsReportAuthzScope(t *testing.T) {
 	}
 }
 
+func TestStatsBySectionIsolation(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "stats-section.db"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+
+	inst, err := st.UpsertInstanceByURL(ctx, "lab", "https://git.example.com", "1.25", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := st.UpsertRepository(ctx, inst.ID, models.Repository{
+		ExternalID: 1, Owner: "org", Name: "repo", FullName: "org/repo", DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	started := now.Add(-2 * time.Minute)
+	completed := now.Add(-time.Minute)
+	_, err = st.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
+		ExternalID: 1, Name: "ci", Status: models.StatusCompleted, Conclusion: models.ConclusionSuccess,
+		StartedAt: &started, CompletedAt: &completed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := now.Add(-time.Hour)
+	_, err = st.UpsertPullRequest(ctx, repo.ID, models.PullRequest{
+		ExternalID: 1, Number: 1, Title: "open", State: "open", CIState: models.CIStatePending,
+		CreatedAt: &opened, UpdatedAt: &opened,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpsertAttention(ctx, models.AttentionItem{
+		InstanceID: inst.ID, RepoID: repo.ID, Type: "stale_pr", Severity: "warning",
+		EntityType: "pull_request", EntityID: 1, Title: "stale", Fingerprint: "fp-section",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	since := now.AddDate(0, 0, -7)
+
+	core, err := st.StatsBySection(ctx, 0, true, since, false, store.StatsSectionCore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if core.Since == "" || len(core.PRCIStates) == 0 || len(core.AttentionBySeverity) == 0 {
+		t.Fatalf("core = %+v", core)
+	}
+	if len(core.RunsByDay) != 0 || core.RunDuration != nil {
+		t.Fatalf("core leaked trends/duration: %+v", core)
+	}
+
+	trends, err := st.StatsBySection(ctx, 0, true, since, false, store.StatsSectionTrends)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trends.Since == "" || len(trends.RunsByDay) == 0 || len(trends.RunConclusions) == 0 {
+		t.Fatalf("trends = %+v", trends)
+	}
+	if len(trends.PRCIStates) != 0 || trends.RunDuration != nil {
+		t.Fatalf("trends leaked core/duration: %+v", trends)
+	}
+
+	duration, err := st.StatsBySection(ctx, 0, true, since, false, store.StatsSectionDuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duration.Since == "" || duration.RunDuration == nil || duration.RunDuration.SampleCount != 1 {
+		t.Fatalf("duration = %+v", duration)
+	}
+	if len(duration.RunsByDay) != 0 || len(duration.PRCIStates) != 0 {
+		t.Fatalf("duration leaked trends/core: %+v", duration)
+	}
+
+	snap, err := st.StatsBySection(ctx, 0, true, since, true, store.StatsSectionCore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Since != "" || len(snap.PRCIStates) == 0 {
+		t.Fatalf("snapshot core = %+v", snap)
+	}
+
+	_, err = st.StatsBySection(ctx, 0, true, since, false, "nope")
+	if err != store.ErrInvalidStatsSection {
+		t.Fatalf("invalid section err=%v", err)
+	}
+}
+
 func TestCompleteOrphanedWorkflowRun(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "orphan-run.db"), "")

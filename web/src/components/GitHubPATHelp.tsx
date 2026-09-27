@@ -141,8 +141,10 @@ export function GitHubPATHelp({ baseURL, nested = false }: Props) {
                 <li>Generate the token, copy it once, and paste it into GitSeer.</li>
               </ol>
               <p className="settings-form__hint pat-help__note">
-                GitHub OAuth login is not used in this release. Prefer an organization webhook so
-                one delivery covers all repos.
+                The service PAT is for sync and bootstrap-admin forge calls. For per-user ACL and
+                write ops, configure a GitHub OAuth App on the instance (callback{" "}
+                <code>/api/v1/auth/github/callback</code>) or grant repos under Settings → Access.
+                Prefer an organization webhook so one delivery covers all repos.
               </p>
             </div>
 

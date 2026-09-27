@@ -29,6 +29,13 @@ const PAGES: SearchCatalogItem[] = [
     keywords: ["attention", "alerts", "queue", "critical"],
   },
   {
+    id: "page-inbox",
+    kind: "page",
+    label: "Inbox",
+    to: "/inbox",
+    keywords: ["inbox", "personal", "mine", "review", "my prs"],
+  },
+  {
     id: "page-pull-requests",
     kind: "page",
     label: "Pull Requests",
@@ -81,6 +88,27 @@ const COMMANDS: SearchCatalogItem[] = [
     keywords: ["actions", "popout", "pop out", "window"],
   },
   {
+    id: "cmd-inbox-failing",
+    kind: "command",
+    label: "Inbox · Failing CI",
+    to: "/inbox?reason=failing_ci",
+    keywords: ["inbox", "ci", "failure", "failing", "my"],
+  },
+  {
+    id: "cmd-inbox-blocked",
+    kind: "command",
+    label: "Inbox · Blocked On Me",
+    to: "/inbox?reason=blocked_on_me",
+    keywords: ["inbox", "blocked", "changes requested", "conflict"],
+  },
+  {
+    id: "cmd-inbox-reviews",
+    kind: "command",
+    label: "Inbox · Review Requests",
+    to: "/inbox?reason=requested_reviewer",
+    keywords: ["inbox", "review", "requested", "reviewer"],
+  },
+  {
     id: "cmd-settings-preferences",
     kind: "command",
     label: "Settings · Preferences",
@@ -93,6 +121,20 @@ const COMMANDS: SearchCatalogItem[] = [
     label: "Settings · Integration",
     to: "/settings#integration",
     keywords: ["settings", "integration", "forge", "gitea", "github", "instances"],
+  },
+  {
+    id: "cmd-settings-access",
+    kind: "command",
+    label: "Settings · Access",
+    to: "/settings#access",
+    keywords: ["settings", "access", "acl", "grant", "users", "github"],
+  },
+  {
+    id: "cmd-settings-notifications",
+    kind: "command",
+    label: "Settings · Notifications",
+    to: "/settings#notifications",
+    keywords: ["settings", "notifications", "smtp", "slack", "discord", "webhook", "digest"],
   },
   {
     id: "cmd-settings-status",

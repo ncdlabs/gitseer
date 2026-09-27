@@ -69,3 +69,23 @@ func TestInstallIncludesInstanceID(t *testing.T) {
 		t.Fatalf("unexpected repo deep link: %s", s)
 	}
 }
+
+func TestSnippetFilesMatchesInstall(t *testing.T) {
+	files, err := SnippetFiles("https://gitseer.example.com/", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files[ExtraLinksRel], beginLinks) {
+		t.Fatal("links missing markers")
+	}
+	if !strings.Contains(files[ExtraTabsRel], "instance_id=7") {
+		t.Fatalf("tabs=%s", files[ExtraTabsRel])
+	}
+	concat, err := ConcatenatedSnippets("https://gitseer.example.com", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(concat, "===== extra_links.tmpl =====") || !strings.Contains(concat, "===== extra_tabs.tmpl =====") {
+		t.Fatalf("concat missing headers: %s", concat)
+	}
+}

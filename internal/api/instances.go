@@ -133,8 +133,7 @@ func forgeStatusEntry(inst *models.Instance, redactSensitive bool) map[string]an
 		ft = models.ForgeTypeGitea
 	}
 	tokenConfigured := strings.TrimSpace(inst.SyncTokenCiphertext) != ""
-	oauthConfigured := ft == models.ForgeTypeGitea &&
-		strings.TrimSpace(inst.OAuthClientID) != "" &&
+	oauthConfigured := strings.TrimSpace(inst.OAuthClientID) != "" &&
 		strings.TrimSpace(inst.OAuthClientSecretCipher) != ""
 	entry := map[string]any{
 		"instance_id":               inst.ID,
