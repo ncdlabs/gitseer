@@ -25,4 +25,4 @@ Thanks for contributing to GitSeer (repository / Go module path `gitseer`).
 
 ## Releases (maintainers)
 
-Public container + GitHub Release publishing is tag-gated. See [docs/upgrade.md](docs/upgrade.md#cutting-a-public-release) and `./scripts/cut-release.sh`.
+Public container + GitHub Release publishing is tag-gated. Cut via **Actions → Cut release**; see [docs/upgrade.md](docs/upgrade.md#cutting-a-public-release).

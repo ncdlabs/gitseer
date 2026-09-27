@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Bump GitSeer semver, refresh CHANGELOG, commit, and create an annotated v* tag.
+# Invoked by .github/workflows/cut-release.yaml (Actions → Cut release).
 # Pushing the tag triggers .github/workflows/release.yaml (GHCR + Docker Hub + GitHub Release).
 #
-# Usage:
-#   ./scripts/cut-release.sh              # patch bump
+# Usage (CI; prefer the workflow_dispatch UI):
+#   ./scripts/cut-release.sh              # patch (default)
 #   ./scripts/cut-release.sh minor
 #   ./scripts/cut-release.sh major
 #   ./scripts/cut-release.sh 1.2.3
@@ -28,6 +29,8 @@ Usage: $0 [patch|minor|major|X.Y.Z] [--push] [--allow-empty]
 
 Bumps version in $MAIN_GO, $CHART, and $CHANGELOG, commits, and tags vX.Y.Z.
 With --push, also runs: git push origin HEAD --tags
+
+Prefer cutting releases via GitHub Actions (Actions → Cut release) rather than locally.
 EOF
 }
 

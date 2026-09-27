@@ -62,7 +62,7 @@ Tagged releases publish linux/amd64 images to:
 podman pull ghcr.io/ncdlabs/gitseer:1.0.1
 ```
 
-Maintainers cut releases with `./scripts/cut-release.sh` — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill).
+Maintainers cut releases via **Actions → Cut release** — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill).
 
 Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
 

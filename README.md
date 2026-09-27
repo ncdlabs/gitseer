@@ -215,7 +215,7 @@ podman pull ghcr.io/ncdlabs/gitseer:<version>
 podman pull docker.io/ncdlabs/gitseer:<version>
 ```
 
-Maintainers cut a release with `./scripts/cut-release.sh` (then push the `v*` tag). Details: [docs/upgrade.md](docs/upgrade.md#cutting-a-public-release).
+Maintainers cut a release via **Actions → Cut release** (on `main`). Details: [docs/upgrade.md](docs/upgrade.md#cutting-a-public-release).
 
 ## How to contribute
 

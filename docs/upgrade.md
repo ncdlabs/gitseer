@@ -75,24 +75,20 @@ Multi-forge OAuth (Gitea, Forgejo, GitHub, GitLab, Bitbucket) is supported in 1.
 
 ## Cutting a public release
 
-Public releases are **tag-gated**. Cut a version with:
+Public releases are **tag-gated** and cut from GitHub Actions (not locally):
 
-```bash
-./scripts/cut-release.sh          # patch (default)
-./scripts/cut-release.sh minor
-./scripts/cut-release.sh major
-./scripts/cut-release.sh 1.2.3    # explicit
-./scripts/cut-release.sh patch --push
-```
+1. Ensure `CHANGELOG.md` `[Unreleased]` has the notes for this release.
+2. Open **Actions → Cut release → Run workflow** on `main`.
+3. Choose **Bump** (`patch` / `minor` / `major`) or set an explicit **Version** (`X.Y.Z`). Use **Allow empty** only when intentionally shipping with no changelog bullets.
 
-The script bumps `cmd/gitseer/main.go`, Helm `Chart.yaml` (`version` / `appVersion`), and moves `CHANGELOG.md` `[Unreleased]` into `## [X.Y.Z] - date`, then commits and creates annotated tag `vX.Y.Z`. Pushing the tag runs CI, then [`.github/workflows/release.yaml`](../.github/workflows/release.yaml), which:
+The [cut-release](../.github/workflows/cut-release.yaml) workflow bumps `cmd/gitseer/main.go`, Helm `Chart.yaml` (`version` / `appVersion`), and moves `CHANGELOG.md` `[Unreleased]` into `## [X.Y.Z] - date`, then commits and pushes annotated tag `vX.Y.Z`. That tag runs CI, then [`.github/workflows/release.yaml`](../.github/workflows/release.yaml), which:
 
 - Publishes linux/amd64 images to `ghcr.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`) and `docker.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`)
 - Creates a GitHub Release with the linux/amd64 binary, checksum, and SBOM
 
-Repo secrets required for Docker Hub: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`. GHCR uses `GITHUB_TOKEN`.
+Repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (publish). If `main` is branch-protected, set `RELEASE_TOKEN` (PAT or fine-grained token with contents write + bypass) so cut-release can push the version commit and tag; otherwise `GITHUB_TOKEN` is used. GHCR publish uses `GITHUB_TOKEN`.
 
-Lab / k3s-home continues to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill — that registry is **not** updated by this workflow. Do not bump `values-k3s-home.yaml` from the cut-release script.
+Lab / k3s-home continues to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill — that registry is **not** updated by this workflow. Do not bump `values-k3s-home.yaml` from cut-release.
 
 Pull a public image:
 
