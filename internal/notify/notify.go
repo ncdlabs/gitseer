@@ -314,12 +314,35 @@ func (s *Service) deliverOne(ctx context.Context, cfg *store.NotificationSetting
 		err = fmt.Errorf("unknown channel %q", row.Channel)
 	}
 	if err != nil {
-		s.log.Warn("notification delivery failed", "id", row.ID, "channel", row.Channel, "err", err)
-		_ = s.store.MarkNotificationFailed(ctx, row.ID, row.Attempts+1, err.Error())
+		// Delivery touches decrypted secrets (SMTP password, webhook URLs). Never log or
+		// persist err.Error() — those values can appear in library/network error text.
+		safe := safeDeliveryError(row.Channel)
+		s.log.Warn("notification delivery failed", "id", row.ID, "channel", row.Channel, "err", safe)
+		_ = s.store.MarkNotificationFailed(ctx, row.ID, row.Attempts+1, safe)
 		return
 	}
 	if err := s.store.MarkNotificationSent(ctx, row.ID); err != nil {
 		s.log.Warn("mark notification sent failed", "id", row.ID, "err", err)
+	}
+}
+
+// safeDeliveryError returns a channel-scoped message with no library/network detail.
+// Delivery handlers decrypt SMTP passwords and webhook URLs; err.Error() must not be
+// logged or stored (clear-text logging of secrets / URLs that embed tokens).
+func safeDeliveryError(channel string) string {
+	switch channel {
+	case store.NotifyChannelSMTP:
+		return "smtp delivery failed"
+	case store.NotifyChannelSlack:
+		return "slack delivery failed"
+	case store.NotifyChannelDiscord:
+		return "discord delivery failed"
+	case store.NotifyChannelWebhook:
+		return "webhook delivery failed"
+	case store.NotifyChannelIncident:
+		return "incident webhook delivery failed"
+	default:
+		return "delivery failed"
 	}
 }
 
@@ -356,7 +379,8 @@ func (s *Service) sendSMTP(cfg *store.NotificationSettings, payload Payload) err
 		var err error
 		password, err = s.openSecret(cfg.SMTPPasswordCiphertext)
 		if err != nil {
-			return fmt.Errorf("smtp password: %w", err)
+			// Do not wrap decrypt errors — ciphertext must not reach logs via %w.
+			return fmt.Errorf("smtp password decrypt failed")
 		}
 	}
 	subject := fmt.Sprintf("[GitSeer][%s] %s", strings.ToUpper(payload.Severity), payload.Title)
@@ -377,41 +401,50 @@ func (s *Service) sendSMTP(cfg *store.NotificationSettings, payload Payload) err
 		tlsCfg := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
 		conn, err := tls.Dial("tcp", addr, tlsCfg)
 		if err != nil {
-			return err
+			return fmt.Errorf("smtp connect failed")
 		}
 		defer conn.Close()
 		c, err := smtp.NewClient(conn, host)
 		if err != nil {
-			return err
+			return fmt.Errorf("smtp client failed")
 		}
 		defer func() { _ = c.Close() }()
 		if username != "" {
 			auth := smtp.PlainAuth("", username, password, host)
 			if err := c.Auth(auth); err != nil {
-				return err
+				return fmt.Errorf("smtp auth failed")
 			}
 		}
-		return smtpSend(c, from, toList, msg)
+		if err := smtpSend(c, from, toList, msg); err != nil {
+			return fmt.Errorf("smtp send failed")
+		}
+		return nil
 	case "none", "off":
-		return smtp.SendMail(addr, nilAuthIfEmpty(username, password, host), from, toList, msg)
+		if err := smtp.SendMail(addr, nilAuthIfEmpty(username, password, host), from, toList, msg); err != nil {
+			return fmt.Errorf("smtp send failed")
+		}
+		return nil
 	default: // starttls
 		c, err := smtp.Dial(addr)
 		if err != nil {
-			return err
+			return fmt.Errorf("smtp connect failed")
 		}
 		defer func() { _ = c.Close() }()
 		if ok, _ := c.Extension("STARTTLS"); ok {
 			if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
-				return err
+				return fmt.Errorf("smtp starttls failed")
 			}
 		}
 		if username != "" {
 			auth := smtp.PlainAuth("", username, password, host)
 			if err := c.Auth(auth); err != nil {
-				return err
+				return fmt.Errorf("smtp auth failed")
 			}
 		}
-		return smtpSend(c, from, toList, msg)
+		if err := smtpSend(c, from, toList, msg); err != nil {
+			return fmt.Errorf("smtp send failed")
+		}
+		return nil
 	}
 }
 

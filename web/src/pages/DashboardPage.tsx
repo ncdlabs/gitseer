@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { api, type DashboardScope } from "../api/client";
 import { AttentionCards } from "../components/AttentionCards";
 import { BarList } from "../components/charts/BarList";
 import { StackedAreaChart } from "../components/charts/StackedAreaChart";
 import { StatCallout } from "../components/charts/StatCallout";
-import { DashboardScopeBar } from "../components/DashboardScopeBar";
+import { DashboardFilter } from "../components/DashboardFilter";
+import type { ForgeFilterValue } from "../components/ForgeFilterChips";
 import { ListControls } from "../components/ListControls";
 import { RangeToggle } from "../components/RangeToggle";
 import { useDashboardRange } from "../hooks/useDashboardRange";
@@ -57,37 +58,57 @@ function bucketColor(key: string): string {
   }
 }
 
+function scopeFromFilters(orgId: number | null, forgeFilter: ForgeFilterValue, showForge: boolean): DashboardScope | undefined {
+  const scope: DashboardScope = {};
+  if (orgId != null && orgId > 0) scope.org_id = orgId;
+  if (showForge && forgeFilter && forgeFilter !== "all") {
+    if (forgeFilter.startsWith("instance:")) {
+      const id = Number(forgeFilter.slice("instance:".length));
+      if (Number.isFinite(id) && id > 0) scope.instance_id = id;
+    } else {
+      scope.forge_type = forgeFilter;
+    }
+  }
+  return scope.org_id || scope.forge_type || scope.instance_id ? scope : undefined;
+}
+
 export function DashboardPage() {
   const queryClient = useQueryClient();
   const { mode, setMode } = useViewMode();
-  const { showForge, forges } = useForgeInventory();
+  const { showForge, forges, chipOptions } = useForgeInventory();
   const { days, setDays } = useDashboardRange();
   const [filter, setFilter] = useState("");
-  const [owner, setOwner] = useState("");
+  const [orgId, setOrgId] = useState<number | null>(null);
+  const [orgLabel, setOrgLabel] = useState("");
+  const [forgeFilter, setForgeFilter] = useState<ForgeFilterValue>("all");
   const isNow = days === 0;
-  const scope = owner.trim() ? { owner: owner.trim() } : undefined;
+  const effectiveForge = showForge ? forgeFilter : "all";
+  const scope = useMemo(
+    () => scopeFromFilters(orgId, effectiveForge, showForge),
+    [orgId, effectiveForge, showForge],
+  );
 
   const summary = useQuery({
-    queryKey: ["summary", days, owner],
+    queryKey: ["summary", days, scope],
     queryFn: () => api.summary(days, scope),
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
   });
   const statsCore = useQuery({
-    queryKey: ["stats", days, "core", owner],
+    queryKey: ["stats", days, "core", scope],
     queryFn: () => api.stats(days, "core", scope),
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
   });
   const statsTrends = useQuery({
-    queryKey: ["stats", days, "trends", owner],
+    queryKey: ["stats", days, "trends", scope],
     queryFn: () => api.stats(days, "trends", scope),
     enabled: !isNow,
     staleTime: LAYER_STALE_MS,
     placeholderData: keepPreviousData,
   });
   const statsDuration = useQuery({
-    queryKey: ["stats", days, "duration", owner],
+    queryKey: ["stats", days, "duration", scope],
     queryFn: () => api.stats(days, "duration", scope),
     enabled: !isNow,
     staleTime: LAYER_STALE_MS,
@@ -111,8 +132,8 @@ export function DashboardPage() {
 
   useEffect(() => {
     if (!summary.isSuccess || !statsCore.isSuccess) return;
-    void prefetchDashboardRanges(queryClient, { preferDays: days });
-  }, [summary.isSuccess, statsCore.isSuccess, days, queryClient]);
+    void prefetchDashboardRanges(queryClient, { preferDays: days, scope });
+  }, [summary.isSuccess, statsCore.isSuccess, days, scope, queryClient]);
 
   const s = summary.data;
   const items = attention.data?.items || [];
@@ -120,7 +141,13 @@ export function DashboardPage() {
   const core = statsCore.data;
   const trends = statsTrends.data;
   const duration = statsDuration.data?.run_duration ?? null;
-  const scopeHint = owner ? ` scoped to ${owner}` : "";
+  const scopeParts: string[] = [];
+  if (orgId != null && orgLabel) scopeParts.push(orgLabel);
+  if (showForge && effectiveForge !== "all") {
+    const forgeOpt = chipOptions.find((o) => o.id === effectiveForge);
+    if (forgeOpt) scopeParts.push(forgeOpt.label);
+  }
+  const scopeHint = scopeParts.length > 0 ? ` scoped to ${scopeParts.join(" · ")}` : "";
 
   return (
     <>
@@ -133,14 +160,7 @@ export function DashboardPage() {
               : `Operational report for the ${rangeLabel} across repositories you can access${scopeHint}.`}
           </p>
         </div>
-        <RangeToggle days={days} onDays={setDays} />
       </div>
-
-      <DashboardScopeBar
-        owner={owner}
-        onOwner={setOwner}
-        currentQuery={{ page: "dashboard", owner: owner || undefined }}
-      />
 
       {summary.isError && !s ? (
         <div className="error">{(summary.error as Error).message}</div>
@@ -176,6 +196,20 @@ export function DashboardPage() {
       <section className="report-section">
         <div className="panel__header report-section__header">
           <h2>Runner Utilization</h2>
+          <div className="report-section__actions">
+            <DashboardFilter
+              orgId={orgId}
+              onOrgId={(next, label) => {
+                setOrgId(next);
+                setOrgLabel(next == null ? "" : label || "");
+              }}
+              forgeFilter={effectiveForge}
+              onForgeFilter={setForgeFilter}
+              showForge={showForge}
+              forgeOptions={chipOptions}
+            />
+            <RangeToggle days={days} onDays={setDays} />
+          </div>
         </div>
         {runners.isLoading ? (
           <div className="loading">Loading runners…</div>

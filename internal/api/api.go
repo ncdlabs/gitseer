@@ -190,6 +190,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/complete", h.setupComplete)
 		r.With(h.requireAuth, h.requireCSRF).Post("/setup/sync-repos", h.syncRepos)
 		r.With(h.requireAuth).Get("/summary", h.summary)
+		r.With(h.requireAuth).Get("/organizations", h.listOrganizations)
 		r.With(h.requireAuth).Get("/stats", h.stats)
 		r.With(h.requireAuth).Get("/runners/utilization", h.runnerUtilization)
 		r.With(h.requireAuth).Get("/flaky-jobs", h.listFlakyJobs)

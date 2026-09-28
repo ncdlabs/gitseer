@@ -17,10 +17,26 @@ import (
 func (h *Handler) dashboardScopeFromQuery(r *http.Request) store.DashboardScope {
 	q := r.URL.Query()
 	return store.DashboardScope{
-		OrgID: parseQueryInt64(q.Get("org_id")),
-		Owner: strings.TrimSpace(q.Get("owner")),
-		Team:  strings.TrimSpace(q.Get("team")),
+		OrgID:      parseQueryInt64(q.Get("org_id")),
+		Owner:      strings.TrimSpace(q.Get("owner")),
+		Team:       strings.TrimSpace(q.Get("team")),
+		ForgeType:  strings.TrimSpace(q.Get("forge_type")),
+		InstanceID: parseQueryInt64(q.Get("instance_id")),
 	}
+}
+
+func (h *Handler) listOrganizations(w http.ResponseWriter, r *http.Request) {
+	user := userFromCtx(r.Context())
+	sc := h.scope(user)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	items, err := h.store.ListOrganizations(r.Context(), store.ListOrganizationsOpts{
+		UserID: sc.UserID, BootstrapAll: sc.BootstrapAll, Query: strings.TrimSpace(r.URL.Query().Get("q")), Limit: limit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func parseLookbackDays(raw string, defaultDays int) (int, error) {

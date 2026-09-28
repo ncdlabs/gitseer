@@ -46,8 +46,12 @@ func (s *Store) StatsBySectionScoped(ctx context.Context, userID int64, bootstra
 	if err := requireListScope(userID, bootstrapAll); err != nil {
 		return nil, err
 	}
+	scope = scope.normalize()
 	join, args := statsAuthzJoin(userID, bootstrapAll)
-	filter, fArgs := scope.normalize().repoFilterSQL()
+	if scope.needsInstanceJoin() {
+		join += " LEFT JOIN instances i ON i.id = r.instance_id"
+	}
+	filter, fArgs := scope.repoFilterSQL()
 	args = append(args, fArgs...)
 
 	out := emptyStatsReport()

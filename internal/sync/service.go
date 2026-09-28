@@ -375,6 +375,9 @@ func (s *Service) fullSync(ctx context.Context, f forge.Forge, forgeType, instan
 	} else {
 		s.log.Warn("repo sync returned zero repositories; skipping soft-delete", "forge", ft, "instance_id", inst.ID)
 	}
+	if _, err := s.store.LinkRepositoriesToOrganizations(ctx, inst.ID); err != nil {
+		s.log.Warn("link repositories to organizations failed", "forge", ft, "instance_id", inst.ID, "err", err)
+	}
 
 	repos, err := s.store.ListAllAliveRepos(ctx, inst.ID)
 	if err != nil {

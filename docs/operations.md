@@ -32,7 +32,8 @@ gitseer rotate-encryption-key --new-key 'your-new-high-entropy-passphrase'
 # Option B: read passphrase from a file
 gitseer rotate-encryption-key --new-key-file /secure/new.key
 
-# Option C: generate one (printed once; store it securely)
+# Option C: generate one (written to the on-disk key file when that is the active
+# source; otherwise written to a 0600 temp file — only the path is printed)
 gitseer rotate-encryption-key --generate
 ```
 
@@ -40,7 +41,7 @@ Behavior:
 
 - Decrypts every sealed field (`instances`, `user_tokens`, `app_settings`, `notification_settings`) with the current key and re-seals under the new key in one transaction (**fail closed** — any decrypt/encrypt error rolls back with no writes).
 - When the active key came from the on-disk `gitseer.encryption_key` file, replaces that file (0600) after a successful DB commit.
-- When the key comes from `GITSEER_ENCRYPTION_KEY` / config, the CLI prints a note to update that secret and restart; the on-disk file is left alone.
+- When the key comes from `GITSEER_ENCRYPTION_KEY` / config, the CLI writes the generated passphrase to a temp file (0600), prints that path (not the passphrase), and notes to update the env/config secret and restart; the on-disk key file is left alone.
 - Confirm Status shows `encryption_healthy` after restart (or live apply when the file source is used).
 
 **Manual fallback:** set the new key in env/Secret, re-enter forge tokens/webhook/OAuth secrets in Settings (or wizard), confirm Status encryption is healthy, then retire the old key.

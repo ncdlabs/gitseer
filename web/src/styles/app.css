@@ -963,6 +963,101 @@ tbody tr:hover td {
   font-weight: 600;
 }
 
+/* —— Dashboard filter (Filter icon flyout) —— */
+.dashboard-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.dashboard-filter__trigger {
+  display: grid;
+  place-items: center;
+  width: 2.375rem;
+  height: 2.375rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+}
+.dashboard-filter__trigger:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.dashboard-filter__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.dashboard-filter.is-open .dashboard-filter__trigger,
+.dashboard-filter.is-active .dashboard-filter__trigger {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.dashboard-filter__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 14rem;
+  max-width: min(20rem, 80vw);
+  max-height: min(24rem, 70vh);
+  overflow: auto;
+  padding: 0.55rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+.dashboard-filter__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.dashboard-filter__heading {
+  padding: 0.15rem 0.65rem 0.3rem;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dashboard-filter__option {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.4rem 0.65rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.dashboard-filter__option:hover,
+.dashboard-filter__option:focus-visible {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  outline: none;
+}
+.dashboard-filter__option.is-active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font-weight: 600;
+}
+.dashboard-filter__hint {
+  padding: 0.35rem 0.65rem;
+  font-size: 12px;
+}
+
 /* —— Dashboard range toggle —— */
 .range-toggle {
   display: inline-flex;
@@ -4005,7 +4100,10 @@ td.empty {
 [data-theme="terminal"] .header-search__submit,
 [data-theme="terminal"] .inbox-reason-filter__trigger,
 [data-theme="terminal"] .inbox-reason-filter__menu,
-[data-theme="terminal"] .inbox-reason-filter__option {
+[data-theme="terminal"] .inbox-reason-filter__option,
+[data-theme="terminal"] .dashboard-filter__trigger,
+[data-theme="terminal"] .dashboard-filter__menu,
+[data-theme="terminal"] .dashboard-filter__option {
   border-radius: 0;
 }
 [data-theme="terminal"] .chart__ascii,
@@ -4095,34 +4193,6 @@ td.empty {
 .brand-img.gitseer-brand--mark .gitseer-brand__emblem { width: 100%; height: 100%; }
 .brand-img.gitseer-brand.login__logo { font-size: clamp(28px, 7vw, 42px); }
 .brand-img.gitseer-brand.setup-wizard__logo { font-size: clamp(23px, 5vw, 30px); }
-
-.dashboard-scope-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1rem;
-  align-items: flex-end;
-  margin: 0 0 1.25rem;
-}
-.dashboard-scope-bar__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 12rem;
-}
-.dashboard-scope-bar__field input {
-  min-width: 14rem;
-}
-.saved-filters--inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
-}
-.saved-filters__chip {
-  display: inline-flex;
-  gap: 0.15rem;
-  align-items: center;
-}
 
 .wallboard {
   max-width: 72rem;

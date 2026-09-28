@@ -28,7 +28,7 @@
 ## Dashboard
 
 - Summary from `GET /api/v1/summary?days=` (allowlist **0 / 1 / 7 / 30 / 90**, default **0** / Now; remembered in `gitseer-dashboard-range-days`)
-- Optional org/owner scope via `?owner=` / `?org_id=` / `?team=` (team matches owner login/slug — forges do not expose durable team→repo membership in inventory); dashboard saved-filter presets
+- Optional org/forge scope via filter-icon flyout (`?org_id=` / `?forge_type=` / `?instance_id=`; API still accepts `?owner=` / `?team=`). Organizations from `GET /api/v1/organizations`.
 - Runner utilization merges indexed job rollups with live forge `ListRunners` where `runners_api` is capable (GitLab / Gitea / Forgejo / GitHub org runners; Bitbucket unsupported)
 - Repo count is inventory (not time-ranged); open PRs, attention, failed, and running respect the window (`Now` = current open/running; failed = attention-linked only)
 - Stats from `GET /api/v1/stats?days=&section=` (`core` | `trends` | `duration` | `all`): breakdowns from `core`, charts from `trends`, run-duration from `duration`. `Now` skips trends/duration

@@ -138,9 +138,42 @@ func rotateEncryptionKeyCmd(args []string) {
 	if result.Note != "" {
 		fmt.Printf("note: %s\n", result.Note)
 	}
-	if *generate {
-		fmt.Printf("generated passphrase (store securely; shown once):\n%s\n", passphrase)
+	// Never print the passphrase (shell history, CI logs, journald). When --generate
+	// did not update the on-disk key file, write it to a 0600 temp file and print only the path.
+	if *generate && !result.KeyFileUpdated {
+		path, err := writeGeneratedPassphraseFile(passphrase)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "rotate-encryption-key: secrets re-sealed but failed to write passphrase file: %v\nrecover the new passphrase from your process environment or re-seal from backup\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("generated passphrase written to %s (mode 0600; copy into GITSEER_ENCRYPTION_KEY / your secret store, then delete the file)\n", path)
 	}
+}
+
+// writeGeneratedPassphraseFile stores a generated encryption passphrase at 0600
+// so operators can recover it without clear-text logging to stdout/stderr.
+func writeGeneratedPassphraseFile(passphrase string) (string, error) {
+	f, err := os.CreateTemp("", "gitseer-encryption-key-*.txt")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", err
+	}
+	if _, err := f.WriteString(passphrase + "\n"); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", err
+	}
+	return path, nil
 }
 
 func backupCmd(args []string) {

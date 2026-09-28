@@ -227,6 +227,8 @@ export type DashboardScope = {
   org_id?: number;
   owner?: string;
   team?: string;
+  forge_type?: string;
+  instance_id?: number;
 };
 
 export type RunnerUtilizationRow = {
@@ -900,6 +902,8 @@ export const api = {
     if (scope?.org_id && scope.org_id > 0) params.set("org_id", String(scope.org_id));
     if (scope?.owner) params.set("owner", scope.owner);
     if (scope?.team) params.set("team", scope.team);
+    if (scope?.instance_id && scope.instance_id > 0) params.set("instance_id", String(scope.instance_id));
+    else if (scope?.forge_type) params.set("forge_type", scope.forge_type);
     return request<Summary>(`/api/v1/summary?${params}`);
   },
   stats: (days = 0, section?: StatsSection, scope?: DashboardScope) => {
@@ -908,8 +912,14 @@ export const api = {
     if (scope?.org_id && scope.org_id > 0) params.set("org_id", String(scope.org_id));
     if (scope?.owner) params.set("owner", scope.owner);
     if (scope?.team) params.set("team", scope.team);
+    if (scope?.instance_id && scope.instance_id > 0) params.set("instance_id", String(scope.instance_id));
+    else if (scope?.forge_type) params.set("forge_type", scope.forge_type);
     return request<StatsReport>(`/api/v1/stats?${params}`);
   },
+  organizations: (q = "") =>
+    request<{ items: Organization[] }>(
+      `/api/v1/organizations?limit=100&q=${encodeURIComponent(q)}`,
+    ),
   runnerUtilization: (days = 7) =>
     request<RunnerUtilizationReport>(`/api/v1/runners/utilization?days=${days}`),
   flakyJobs: (days = 14) => request<{ items: FlakyJob[]; days: number }>(`/api/v1/flaky-jobs?days=${days}`),

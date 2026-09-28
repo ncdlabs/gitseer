@@ -1208,16 +1208,19 @@ type ListOrganizationsOpts struct {
 }
 
 // ListOrganizations returns orgs that own at least one accessible alive repository.
+// Ownership is r.org_id = o.id when linked, otherwise same-instance owner name match
+// (sync historically upserted organizations without setting repositories.org_id).
 func (s *Store) ListOrganizations(ctx context.Context, opts ListOrganizationsOpts) ([]models.Organization, error) {
 	if err := requireListScope(opts.UserID, opts.BootstrapAll); err != nil {
 		return nil, err
 	}
 	opts.Limit = clampLimit(opts.Limit, 20, 200)
-	where := []string{"r.deleted_at IS NULL", "r.org_id IS NOT NULL"}
+	where := []string{"r.deleted_at IS NULL"}
 	args := []any{}
 	join := `
 FROM organizations o
-JOIN repositories r ON r.org_id = o.id
+JOIN repositories r ON r.instance_id = o.instance_id
+  AND (r.org_id = o.id OR LOWER(r.owner) = LOWER(o.name))
 LEFT JOIN instances i ON i.id = o.instance_id`
 	if opts.UserID > 0 && !opts.BootstrapAll {
 		join += " INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
@@ -1262,4 +1265,33 @@ LIMIT ?`, args...)
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+// LinkRepositoriesToOrganizations sets repositories.org_id from same-instance
+// organizations whose name matches the repository owner (case-insensitive).
+func (s *Store) LinkRepositoriesToOrganizations(ctx context.Context, instanceID int64) (int64, error) {
+	if instanceID <= 0 {
+		return 0, fmt.Errorf("instance id required")
+	}
+	res, err := s.exec(ctx, `
+UPDATE repositories
+SET org_id = (
+  SELECT o.id FROM organizations o
+  WHERE o.instance_id = repositories.instance_id
+    AND LOWER(o.name) = LOWER(repositories.owner)
+  LIMIT 1
+)
+WHERE instance_id = ?
+  AND deleted_at IS NULL
+  AND org_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM organizations o
+    WHERE o.instance_id = repositories.instance_id
+      AND LOWER(o.name) = LOWER(repositories.owner)
+  )`, instanceID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

@@ -11,35 +11,61 @@ import (
 	"github.com/ncdlabs/gitseer/internal/models"
 )
 
-// DashboardScope optionally narrows summary/stats to an org/owner/team.
+// DashboardScope optionally narrows summary/stats to an org/owner/team and/or forge.
 // Team filter: when team is set without owner, matches repositories whose owner
 // equals the team slug (GitHub/Gitea org/team login alias). Forges do not expose
 // durable team→repo membership in GitSeer inventory today, so this is the best
 // available approximation — not a full team membership query.
 type DashboardScope struct {
-	OrgID int64
-	Owner string
-	Team  string
+	OrgID      int64
+	Owner      string
+	Team       string
+	ForgeType  string // gitea | github | …; empty = all
+	InstanceID int64  // when set, takes precedence over ForgeType
 }
 
 func (d DashboardScope) normalize() DashboardScope {
 	d.Owner = strings.TrimSpace(d.Owner)
 	d.Team = strings.TrimSpace(d.Team)
+	d.ForgeType = strings.ToLower(strings.TrimSpace(d.ForgeType))
 	if d.Owner == "" && d.Team != "" {
 		d.Owner = d.Team
 	}
 	return d
 }
 
+// needsInstanceJoin reports whether repoFilterSQL requires instances alias i.
+func (d DashboardScope) needsInstanceJoin() bool {
+	d = d.normalize()
+	return d.InstanceID <= 0 && parseListForgeType(d.ForgeType) != ""
+}
+
 func (d DashboardScope) repoFilterSQL() (clause string, args []any) {
 	d = d.normalize()
+	var parts []string
 	if d.OrgID > 0 {
-		return " AND r.org_id = ?", []any{d.OrgID}
+		// Prefer linked org_id; fall back to same-instance owner name match when
+		// repositories.org_id was never populated during sync.
+		parts = append(parts, `(r.org_id = ? OR EXISTS (
+  SELECT 1 FROM organizations o
+  WHERE o.id = ? AND o.instance_id = r.instance_id AND LOWER(o.name) = LOWER(r.owner)
+))`)
+		args = append(args, d.OrgID, d.OrgID)
+	} else if d.Owner != "" {
+		parts = append(parts, "LOWER(r.owner) = LOWER(?)")
+		args = append(args, d.Owner)
 	}
-	if d.Owner != "" {
-		return " AND LOWER(r.owner) = LOWER(?)", []any{d.Owner}
+	if d.InstanceID > 0 {
+		parts = append(parts, "r.instance_id = ?")
+		args = append(args, d.InstanceID)
+	} else if ft := parseListForgeType(d.ForgeType); ft != "" {
+		parts = append(parts, "COALESCE(NULLIF(TRIM(i.forge_type), ''), 'gitea') = ?")
+		args = append(args, ft)
 	}
-	return "", nil
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return " AND " + strings.Join(parts, " AND "), args
 }
 
 // Summary returns authz-scoped dashboard counts (all accessible repos).
@@ -61,6 +87,9 @@ func (s *Store) SummaryScoped(ctx context.Context, userID int64, bootstrapAll bo
 	if userID > 0 && !bootstrapAll {
 		join = "INNER JOIN user_repository_access ura ON ura.repo_id = r.id AND ura.user_id = ?"
 		args = append(args, userID)
+	}
+	if scope.needsInstanceJoin() {
+		join += " LEFT JOIN instances i ON i.id = r.instance_id"
 	}
 	filter, fArgs := scope.repoFilterSQL()
 	args = append(args, fArgs...)

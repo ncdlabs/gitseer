@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,6 +22,12 @@ func TestProductSurfacesAndWallboardAPI(t *testing.T) {
 
 	ctx := t.Context()
 	inst, err := st.UpsertInstanceByURL(ctx, "lab", "https://git.example.com", "1.26", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	org, err := st.UpsertOrganization(ctx, inst.ID, models.Organization{
+		ExternalID: 42, Name: "acme", FullName: "Acme",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +90,30 @@ func TestProductSurfacesAndWallboardAPI(t *testing.T) {
 	}
 	if rec := get("/api/v1/summary?days=0&owner=acme"); rec.Code != http.StatusOK {
 		t.Fatalf("summary status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := get("/api/v1/organizations?limit=100"); rec.Code != http.StatusOK {
+		t.Fatalf("organizations status=%d body=%s", rec.Code, rec.Body.String())
+	} else {
+		var body struct {
+			Items []models.Organization `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("organizations decode: %v body=%s", err, rec.Body.String())
+		}
+		if len(body.Items) != 1 || body.Items[0].ID != org.ID || body.Items[0].Name != "acme" {
+			t.Fatalf("organizations items=%+v want acme id=%d", body.Items, org.ID)
+		}
+	}
+	if rec := get(fmt.Sprintf("/api/v1/summary?days=0&org_id=%d", org.ID)); rec.Code != http.StatusOK {
+		t.Fatalf("summary org_id status=%d body=%s", rec.Code, rec.Body.String())
+	} else {
+		var sum models.Summary
+		if err := json.Unmarshal(rec.Body.Bytes(), &sum); err != nil {
+			t.Fatalf("summary org_id decode: %v", err)
+		}
+		if sum.Repositories != 1 {
+			t.Fatalf("summary org_id repositories=%d want 1", sum.Repositories)
+		}
 	}
 	if rec := get("/api/v1/repositories/acme/widgets/flaky-jobs?days=14"); rec.Code != http.StatusOK {
 		t.Fatalf("repo flaky status=%d body=%s", rec.Code, rec.Body.String())

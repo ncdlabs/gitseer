@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { api, type DashboardScope } from "../api/client";
 import {
   DASHBOARD_RANGE_OPTIONS,
   type DashboardRangeDays,
@@ -9,6 +9,7 @@ const STALE_TIME = 60_000;
 
 export type PrefetchDashboardOptions = {
   preferDays?: number;
+  scope?: DashboardScope;
 };
 
 function isRangeDays(n: number): n is DashboardRangeDays {
@@ -31,17 +32,18 @@ export async function prefetchDashboardRanges(
   options: PrefetchDashboardOptions = {},
 ): Promise<void> {
   const ordered = rangeOrder(options.preferDays);
+  const scope = options.scope;
 
   await Promise.all(
     ordered.flatMap((days) => [
       queryClient.prefetchQuery({
-        queryKey: ["summary", days],
-        queryFn: () => api.summary(days),
+        queryKey: ["summary", days, scope],
+        queryFn: () => api.summary(days, scope),
         staleTime: STALE_TIME,
       }),
       queryClient.prefetchQuery({
-        queryKey: ["stats", days, "core"],
-        queryFn: () => api.stats(days, "core"),
+        queryKey: ["stats", days, "core", scope],
+        queryFn: () => api.stats(days, "core", scope),
         staleTime: STALE_TIME,
       }),
     ]),
@@ -51,8 +53,8 @@ export async function prefetchDashboardRanges(
   await Promise.all(
     trendDays.map((days) =>
       queryClient.prefetchQuery({
-        queryKey: ["stats", days, "trends"],
-        queryFn: () => api.stats(days, "trends"),
+        queryKey: ["stats", days, "trends", scope],
+        queryFn: () => api.stats(days, "trends", scope),
         staleTime: STALE_TIME,
       }),
     ),
@@ -61,8 +63,8 @@ export async function prefetchDashboardRanges(
   // Serial duration so the heavy percentile scan does not stampede the DB.
   for (const days of trendDays) {
     await queryClient.prefetchQuery({
-      queryKey: ["stats", days, "duration"],
-      queryFn: () => api.stats(days, "duration"),
+      queryKey: ["stats", days, "duration", scope],
+      queryFn: () => api.stats(days, "duration", scope),
       staleTime: STALE_TIME,
     });
   }
