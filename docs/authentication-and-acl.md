@@ -10,6 +10,7 @@
 - Redirect URI must be `{external_url}/api/v1/auth/callback`
 - Prefer a **public** Gitea OAuth client; client secret optional for public PKCE
 - Post-login redirect only accepts same-app relative paths (`auth.SafeRedirectPath`); absolute / `//` URLs are dropped
+- Configure client id/secret under Settings → Sign In (or setup wizard Sign In step)
 - OAuth uses the [primary Gitea instance](#primary-gitea-instance) (client id/secret from that instance or legacy auth config)
 
 ### GitHub OAuth
@@ -18,7 +19,7 @@
 - Start: `GET /api/v1/auth/github/login`
 - Callback: `GET /api/v1/auth/github/callback`
 - Redirect URI must be `{external_url}/api/v1/auth/github/callback`
-- Configure OAuth App **client id** (and secret when confidential) on the GitHub forge instance in Settings → Integration
+- Configure OAuth App **client id** (and secret when confidential) under Settings → Sign In for the GitHub forge instance
 - Link while signed in: `GET /api/v1/auth/github/login?link=1` attaches GitHub identity + token to the current user (account menu **Link GitHub**)
 - Users may hold both Gitea and GitHub identities on one GitSeer account; tokens are stored per forge `instance_id` in `user_tokens`
 
@@ -27,6 +28,7 @@
 - Same Authorization Code + PKCE shape as Gitea (`/login/oauth/authorize`)
 - Start: `GET /api/v1/auth/forgejo/login` · Callback: `GET /api/v1/auth/forgejo/callback`
 - Redirect URI: `{external_url}/api/v1/auth/forgejo/callback`
+- Configure client id/secret under Settings → Sign In
 - Primary Forgejo instance (OAuth configured preferred); identity stored in `gitea_user_id` + `instance_id` on that forgejo instance
 
 ### GitLab OAuth
@@ -34,6 +36,7 @@
 - Authorization Code + PKCE (scopes: `read_api read_user read_repository`)
 - Start: `GET /api/v1/auth/gitlab/login` · Callback: `GET /api/v1/auth/gitlab/callback`
 - Redirect URI: `{external_url}/api/v1/auth/gitlab/callback`
+- Configure client id/secret under Settings → Sign In
 - Identity: `(gitlab_instance_id, gitlab_user_id)`; link with `?link=1`
 
 ### Bitbucket OAuth
@@ -41,6 +44,7 @@
 - Authorization Code + PKCE (Cloud; Basic auth token exchange)
 - Start: `GET /api/v1/auth/bitbucket/login` · Callback: `GET /api/v1/auth/bitbucket/callback`
 - Redirect URI: `{external_url}/api/v1/auth/bitbucket/callback`
+- Configure client id/secret under Settings → Sign In
 - Identity: `(bitbucket_instance_id, bitbucket_user_id)` (stable hash of UUID/account_id); link with `?link=1`
 
 ### Bootstrap claim and login

@@ -123,6 +123,13 @@ const COMMANDS: SearchCatalogItem[] = [
     keywords: ["settings", "integration", "forge", "gitea", "github", "instances"],
   },
   {
+    id: "cmd-settings-signin",
+    kind: "command",
+    label: "Settings · Sign In",
+    to: "/settings#signin",
+    keywords: ["settings", "sign in", "signin", "oauth", "login", "client id", "client secret"],
+  },
+  {
     id: "cmd-settings-access",
     kind: "command",
     label: "Settings · Access",

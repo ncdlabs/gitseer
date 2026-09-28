@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { PasswordInput } from "./PasswordInput";
+import { HiddenUsernameField, PasswordInput } from "./PasswordInput";
 
 type Props = {
   open: boolean;
@@ -49,6 +49,7 @@ export function BecomeBootstrapDialog({ open, onClose, onGranted }: Props) {
           Enter the bootstrap password to grant admin access for 5 minutes (like sudo).
         </p>
         <form onSubmit={submit}>
+          <HiddenUsernameField id="elevate-username" />
           <PasswordInput
             id="elevate-password"
             autoComplete="current-password"

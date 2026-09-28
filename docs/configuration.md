@@ -59,7 +59,7 @@ File/env forge blocks seed or default the matching `instances` row by `(forge_ty
 | `GITSEER_DATABASE_PATH` | `database.path` |
 | `GITSEER_DATABASE_DSN` | `database.dsn` |
 | `GITSEER_GITEA_URL` | `gitea.url` |
-| `GITSEER_GITEA_TOKEN` / `_FILE` | Service token |
+| `GITSEER_GITEA_TOKEN` / `_FILE` | Gitea access token |
 | `GITSEER_WEBHOOK_SECRET` / `_FILE` (aliases `GITSEER_GITEA_WEBHOOK_*`) | Gitea webhook HMAC |
 | `GITSEER_WEBHOOK_ALLOW_UNSIGNED` | Gitea unsigned webhooks (lab) |
 | `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK` | Private network allow for Gitea |

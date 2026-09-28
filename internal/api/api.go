@@ -1543,6 +1543,7 @@ func (h *Handler) setupCreateOAuth(w http.ResponseWriter, r *http.Request) {
 		"redirect_uri": redirectURI,
 		"oauth_app":    gitea.NewOAuthAppPreview(redirectURI),
 		"client_id":    clientID,
+		"client_secret": clientSecret,
 		"integration":  pub,
 	})
 }

@@ -77,6 +77,7 @@ export function labelForVisit(entry: VisitEntry): string {
     const tab = hash.replace(/^#/, "");
     if (tab === "preferences") return "Settings · Preferences";
     if (tab === "integration") return "Settings · Integration";
+    if (tab === "signin") return "Settings · Sign In";
     if (tab === "access") return "Settings · Access";
     if (tab === "notifications") return "Settings · Notifications";
     if (tab === "status") return "Settings · Status";

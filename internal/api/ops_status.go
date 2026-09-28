@@ -372,11 +372,12 @@ func (h *Handler) instanceOpsChecklist(inst *models.Instance, entry map[string]a
 		})
 	}
 
+	tokenLabel := models.ForgeTokenLabel(inst.ForgeType)
 	tokenOK, _ := entry["token_configured"].(bool)
 	if tokenOK {
-		add("token", "Sync Token", "pass", "Service token configured")
+		add("token", tokenLabel, "pass", tokenLabel+" configured")
 	} else {
-		add("token", "Sync Token", "fail", "Missing sync token")
+		add("token", tokenLabel, "fail", "Missing "+tokenLabel)
 	}
 
 	whOK, _ := entry["webhook_secret_configured"].(bool)

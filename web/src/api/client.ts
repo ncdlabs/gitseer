@@ -668,6 +668,10 @@ export type SystemStatus = {
   encryption_healthy?: boolean;
   encryption_error?: string;
   oauth_redirect_uri?: string;
+  github_oauth_redirect_uri?: string;
+  gitlab_oauth_redirect_uri?: string;
+  bitbucket_oauth_redirect_uri?: string;
+  forgejo_oauth_redirect_uri?: string;
   server_external_url?: string;
   gitea_version?: string;
   github_version?: string;
@@ -835,6 +839,8 @@ export type CreateOAuthResponse = {
   redirect_uri: string;
   oauth_app: OAuthAppPreview;
   client_id: string;
+  /** Present when create=true (one-time); paste path does not return the secret. */
+  client_secret?: string;
   integration: IntegrationPublic;
 };
 
@@ -1276,6 +1282,22 @@ export function forgeLabel(forgeType?: string | null): string {
       return "Forgejo";
     default:
       return forgeType ? forgeType : "Forge";
+  }
+}
+
+/** User-facing name for the forge sync API credential, matching the provider's language. */
+export function forgeTokenLabel(forgeType?: string | null): string {
+  switch ((forgeType || "").toLowerCase()) {
+    case "github":
+    case "gitlab":
+      return "Personal Access Token";
+    case "bitbucket":
+      return "HTTP Access Token";
+    case "gitea":
+    case "forgejo":
+      return "Access Token";
+    default:
+      return "Access Token";
   }
 }
 

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { PasswordInput } from "./PasswordInput";
+import { HiddenUsernameField, PasswordInput } from "./PasswordInput";
 
 type Props = {
   elevatedUntil: string;
@@ -69,6 +69,7 @@ export function BootstrapPanel({ elevatedUntil }: Props) {
         while this grant is active.
       </p>
       <form className="settings-form__section" onSubmit={onSubmit}>
+        <HiddenUsernameField id="bootstrap-username" />
         <div className="settings-form__field">
           <PasswordInput
             id="bootstrap-current"

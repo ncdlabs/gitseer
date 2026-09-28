@@ -11,6 +11,7 @@ import {
   type SystemStatus,
 } from "../api/client";
 import { InstanceSettingsPanel } from "../components/InstanceSettingsPanel";
+import { OAuthSignInPanel } from "../components/OAuthSignInPanel";
 import { AttentionSeverityOverrides } from "../components/AttentionSeverityOverrides";
 import { AccessGrantPanel } from "../components/AccessGrantPanel";
 import { NotificationsPanel } from "../components/NotificationsPanel";
@@ -21,11 +22,19 @@ import { BecomeBootstrapDialog } from "../components/BecomeBootstrapDialog";
 import { BootstrapAccessRequired } from "../components/BootstrapAccessRequired";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
-type SettingsTab = "preferences" | "integration" | "access" | "notifications" | "status" | "bootstrap";
+type SettingsTab =
+  | "preferences"
+  | "integration"
+  | "signin"
+  | "access"
+  | "notifications"
+  | "status"
+  | "bootstrap";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "preferences", label: "Preferences" },
   { id: "integration", label: "Integration" },
+  { id: "signin", label: "Sign In" },
   { id: "access", label: "Access" },
   { id: "notifications", label: "Notifications" },
   { id: "status", label: "Status" },
@@ -58,6 +67,7 @@ function tabFromHash(hash: string): SettingsTab {
   const id = hash.replace(/^#/, "");
   if (
     id === "integration" ||
+    id === "signin" ||
     id === "status" ||
     id === "preferences" ||
     id === "access" ||
@@ -649,6 +659,13 @@ export function SettingsPage() {
 
           {tab === "integration" && (
             <InstanceSettingsPanel
+              editable={editable}
+              canElevate={canElevate}
+              onBecomeBootstrap={openBecomeBootstrap}
+            />
+          )}
+          {tab === "signin" && (
+            <OAuthSignInPanel
               editable={editable}
               canElevate={canElevate}
               onBecomeBootstrap={openBecomeBootstrap}

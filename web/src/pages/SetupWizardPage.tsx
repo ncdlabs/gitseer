@@ -2,9 +2,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
+  forgeTokenLabel,
   type ForgeType,
   type IntegrationPublic,
-  type OAuthAppPreview,
   type ProbeCheck,
   type TestConnectionResponse,
   type WebhookPreview,
@@ -13,15 +13,14 @@ import { Brand } from "../components/Brand";
 import { GiteaPATHelp } from "../components/GiteaPATHelp";
 import { GitHubPATHelp } from "../components/GitHubPATHelp";
 import { InfoTip } from "../components/InfoTip";
+import { OAuthSignInPanel } from "../components/OAuthSignInPanel";
 import { PasswordInput } from "../components/PasswordInput";
 import {
   ConnectionCheckModal,
-  OAuthConfirmModal,
   WebhookConfirmModal,
-  type OAuthModalPhase,
   type WebhookModalPhase,
 } from "../components/SetupConnectionModals";
-import { DEFAULT_GITHUB_URL, PRODUCT_NAME } from "../lib/product";
+import { DEFAULT_GITHUB_URL } from "../lib/product";
 
 type WizardForge = ForgeType;
 
@@ -61,7 +60,7 @@ function isPrivateNetworkMessage(msg: string): boolean {
   );
 }
 
-type Step = "secure" | "pick" | "connect" | "validate" | "finish";
+type Step = "secure" | "pick" | "connect" | "validate" | "signin" | "finish";
 
 const STEPS: { id: Step; label: string; description: string }[] = [
   {
@@ -78,13 +77,19 @@ const STEPS: { id: Step; label: string; description: string }[] = [
   {
     id: "connect",
     label: "Connect",
-    description: "Enter the forge base URL and a service token so GitSeer can read repos, PRs, and Actions.",
+    description:
+      "Enter the forge base URL and access credentials so GitSeer can read repos, PRs, and Actions.",
   },
   {
     id: "validate",
     label: "Validate",
+    description: "Confirm connectivity and token permissions, then install the webhook.",
+  },
+  {
+    id: "signin",
+    label: "Sign In",
     description:
-      "Confirm connectivity and token permissions, then install the webhook (and Gitea OAuth when available).",
+      "Optionally configure forge OAuth so users can sign in to GitSeer. Skip to use bootstrap admin only.",
   },
   {
     id: "finish",
@@ -113,12 +118,12 @@ const FORGE_OPTIONS: ForgePickerOption[] = [
   {
     id: "gitlab",
     label: "GitLab",
-    description: "GitLab.com and self-hosted. Token sync and webhooks.",
+    description: "GitLab.com and self-hosted. PAT sync and webhooks.",
   },
   {
     id: "bitbucket",
     label: "Bitbucket",
-    description: "Bitbucket Cloud workspaces. Token sync and webhooks.",
+    description: "Bitbucket Cloud workspaces. HTTP access token sync and webhooks.",
   },
   {
     id: "forgejo",
@@ -133,8 +138,6 @@ type Draft = {
   gitea_allow_private_network: boolean;
   gitea_webhook_secret: string;
   gitea_allow_unsigned_webhooks: boolean;
-  oauth_client_id: string;
-  oauth_client_secret: string;
   github_url: string;
   github_token: string;
   github_allow_private_network: boolean;
@@ -148,8 +151,6 @@ function emptyDraft(): Draft {
     gitea_allow_private_network: false,
     gitea_webhook_secret: "",
     gitea_allow_unsigned_webhooks: false,
-    oauth_client_id: "",
-    oauth_client_secret: "",
     github_url: DEFAULT_GITHUB_URL,
     github_token: "",
     github_allow_private_network: false,
@@ -170,8 +171,6 @@ function draftFromIntegration(
     gitea_allow_private_network: integ.gitea_allow_private_network,
     gitea_webhook_secret: "",
     gitea_allow_unsigned_webhooks: integ.gitea_allow_unsigned_webhooks,
-    oauth_client_id: integ.oauth_client_id || "",
-    oauth_client_secret: "",
     github_url: integ.github_url || DEFAULT_GITHUB_URL,
     github_token: "",
     github_allow_private_network: integ.github_allow_private_network,
@@ -194,7 +193,7 @@ function validateConnectFields(
       errors.gitea_url = "Enter a valid http:// or https:// URL.";
     }
     if (!draft.gitea_token.trim() && !integ?.gitea_token_configured) {
-      errors.gitea_token = "Service token is required.";
+      errors.gitea_token = `${forgeTokenLabel(forge)} is required.`;
     }
   } else {
     const url = draft.github_url.trim();
@@ -205,7 +204,7 @@ function validateConnectFields(
       errors.github_url = "Enter a valid http:// or https:// URL.";
     }
     if (!draft.github_token.trim() && !integ?.github_token_configured) {
-      errors.github_token = "Personal access token is required.";
+      errors.github_token = `${forgeTokenLabel(forge)} is required.`;
     }
   }
   const publicURL = draft.server_external_url.trim();
@@ -268,7 +267,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   const [forge, setForge] = useState<WizardForge | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [hydrated, setHydrated] = useState(false);
-  const [busy, setBusy] = useState<"save" | "test" | "webhook" | "oauth" | "encryption" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "webhook" | "encryption" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
@@ -290,13 +289,6 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   const [webhookPreview, setWebhookPreview] = useState<WebhookPreview | null>(null);
   const [webhookError, setWebhookError] = useState<string | null>(null);
   const [canCreateWebhook, setCanCreateWebhook] = useState(false);
-  const [oauthOpen, setOauthOpen] = useState(false);
-  const [oauthPhase, setOauthPhase] = useState<OAuthModalPhase>("confirm");
-  const [oauthPreview, setOauthPreview] = useState<OAuthAppPreview | null>(null);
-  const [oauthError, setOauthError] = useState<string | null>(null);
-  const [canCreateOAuth, setCanCreateOAuth] = useState(false);
-  const [oauthClientId, setOauthClientId] = useState("");
-  const [oauthClientSecret, setOauthClientSecret] = useState("");
   const validateProbeStarted = useRef(false);
 
   useEffect(() => {
@@ -701,7 +693,6 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
       gitea_token: prev.gitea_token,
       gitea_webhook_secret: forge === "gitea" ? secret : prev.gitea_webhook_secret,
       github_token: prev.github_token,
-      oauth_client_secret: prev.oauth_client_secret,
     }));
   }
 
@@ -790,22 +781,11 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per validate entry
   }, [step]);
 
-  function openOAuthModal() {
-    setOauthPreview(
-      testResult?.oauth_app_preview ?? {
-        name: PRODUCT_NAME,
-        redirect_uri: String(settingsQuery.data?.status?.oauth_redirect_uri ?? ""),
-        confidential_client: true,
-        gitea_settings_path: "/user/settings/applications",
-        gitea_admin_apps_path: "/admin/applications",
-      },
-    );
-    setCanCreateOAuth(Boolean(testResult?.can_create_oauth));
-    setOauthError(null);
-    setOauthPhase("confirm");
-    setOauthClientId("");
-    setOauthClientSecret("");
-    setOauthOpen(true);
+  function goToSignInStep() {
+    setWebhookOpen(false);
+    setWebhookPhase("confirm");
+    setCheckOpen(false);
+    setStep("signin");
   }
 
   async function finishWebhook(create: boolean) {
@@ -815,11 +795,11 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     try {
       if (forge === "gitlab" || forge === "bitbucket" || forge === "forgejo") {
         const secret =
-          (typeof crypto !== "undefined" && "getRandomValues" in crypto
+          typeof crypto !== "undefined" && "getRandomValues" in crypto
             ? Array.from(crypto.getRandomValues(new Uint8Array(24)))
                 .map((b) => b.toString(16).padStart(2, "0"))
                 .join("")
-            : `whsec_${Date.now()}`);
+            : `whsec_${Date.now()}`;
         const baseURL =
           forge === "forgejo" ? draft.gitea_url.trim() : draft.github_url.trim();
         const token = forge === "forgejo" ? draft.gitea_token : draft.github_token;
@@ -866,15 +846,14 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
       applyWebhookResult(secret, res.integration);
       if (res.webhook) setWebhookPreview(res.webhook);
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await queryClient.invalidateQueries({ queryKey: ["instances"] });
       setCheckOpen(false);
       if (forge === "github" || res.manual) {
         setCanCreateWebhook(false);
         setWebhookPhase("manual");
         setWebhookOpen(true);
       } else if (create) {
-        setWebhookOpen(false);
-        setWebhookPhase("confirm");
-        openOAuthModal();
+        goToSignInStep();
       } else {
         setWebhookPhase("manual");
         setWebhookOpen(true);
@@ -891,14 +870,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
   }
 
   function continueAfterWebhook() {
-    setWebhookOpen(false);
-    setWebhookPhase("confirm");
-    setCheckOpen(false);
-    if (usesManualWebhook) {
-      setStep("finish");
-      return;
-    }
-    openOAuthModal();
+    goToSignInStep();
   }
 
   function backFromWebhook() {
@@ -906,55 +878,6 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     setWebhookPhase("confirm");
     setWebhookError(null);
     setStep("validate");
-  }
-
-  function applyOAuthResult(clientId: string, integPublic: IntegrationPublic) {
-    setDraft((prev) => ({
-      ...draftFromIntegration(integPublic, prev.server_external_url),
-      gitea_token: prev.gitea_token,
-      gitea_webhook_secret: prev.gitea_webhook_secret,
-      github_token: prev.github_token,
-      oauth_client_id: clientId,
-      oauth_client_secret: "",
-    }));
-  }
-
-  async function finishOAuth(create: boolean) {
-    if (busy === "oauth") return;
-    setBusy("oauth");
-    setOauthError(null);
-    try {
-      const res = await api.createOAuth({
-        ...connectionBody(),
-        create,
-        oauth_client_id: create ? undefined : oauthClientId.trim(),
-        oauth_client_secret: create ? undefined : oauthClientSecret,
-      });
-      applyOAuthResult(res.client_id, res.integration);
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setOauthOpen(false);
-      setOauthPhase("confirm");
-      setStep("finish");
-    } catch (err) {
-      setOauthError(err instanceof Error ? err.message : "oauth setup failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  function skipOAuth() {
-    setOauthOpen(false);
-    setOauthPhase("confirm");
-    setOauthError(null);
-    setStep("finish");
-  }
-
-  function backFromOAuth() {
-    setOauthOpen(false);
-    setOauthPhase("confirm");
-    setOauthError(null);
-    setWebhookPhase("confirm");
-    setWebhookOpen(true);
   }
 
   async function finish() {
@@ -1283,8 +1206,12 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         value={draft.gitea_url}
                         onChange={(e) => setField("gitea_url", e.target.value)}
                         onBlur={() => void onForgeURLBlur("gitea")}
-                        placeholder="Gitea URL (https://git.example.com)"
-                        aria-label="Gitea URL"
+                        placeholder={
+                          forge === "forgejo"
+                            ? "Forgejo URL (https://forgejo.example.com)"
+                            : "Gitea URL (https://git.example.com)"
+                        }
+                        aria-label={`${forgeLabel} URL`}
                         autoComplete="off"
                         required
                         aria-invalid={fieldErrors.gitea_url ? true : undefined}
@@ -1313,9 +1240,9 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         <span className="settings-form__check-text">
                           Allow Private Network Addresses
                           <InfoTip label="About private network addresses">
-                            Lets GitSeer call Gitea on private or lab addresses (10.x, 192.168.x, localhost, and
-                            similar). Off by default to block SSRF. Enable when Gitea is only reachable on a private
-                            network.
+                            Lets GitSeer call {forgeLabel} on private or lab addresses (10.x, 192.168.x, localhost, and
+                            similar). Off by default to block SSRF. Enable when {forgeLabel} is only reachable on a
+                            private network.
                           </InfoTip>
                         </span>
                       </label>
@@ -1334,10 +1261,10 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         onChange={(value) => setField("gitea_token", value)}
                         placeholder={
                           integ?.gitea_token_configured
-                            ? "Service token (leave blank to keep)"
-                            : "Service token (required)"
+                            ? `${forgeTokenLabel(forge)} (leave blank to keep)`
+                            : `${forgeTokenLabel(forge)} (required)`
                         }
-                        aria-label="Service token"
+                        aria-label={forgeTokenLabel(forge)}
                         autoComplete="new-password"
                         required={!integ?.gitea_token_configured}
                         aria-invalid={fieldErrors.gitea_token ? true : undefined}
@@ -1395,8 +1322,14 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         value={draft.github_url}
                         onChange={(e) => setField("github_url", e.target.value)}
                         onBlur={() => void onForgeURLBlur("github")}
-                        placeholder="GitHub URL (https://github.com)"
-                        aria-label="GitHub URL"
+                        placeholder={
+                          forge === "gitlab"
+                            ? "GitLab URL (https://gitlab.com)"
+                            : forge === "bitbucket"
+                              ? "Bitbucket URL (https://bitbucket.org)"
+                              : "GitHub URL (https://github.com)"
+                        }
+                        aria-label={`${forgeLabel} URL`}
                         autoComplete="off"
                         required
                         aria-invalid={fieldErrors.github_url ? true : undefined}
@@ -1410,7 +1343,11 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         </p>
                       ) : (
                         <p id="wiz_github_url_hint" className="settings-form__hint">
-                          Use https://github.com or your GitHub Enterprise host. API roots are normalized automatically.
+                          {forge === "gitlab"
+                            ? "Use https://gitlab.com or your self-hosted GitLab URL."
+                            : forge === "bitbucket"
+                              ? "Use https://bitbucket.org for Bitbucket Cloud."
+                              : "Use https://github.com or your GitHub Enterprise host. API roots are normalized automatically."}
                         </p>
                       )}
                     </div>
@@ -1434,7 +1371,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         <span className="settings-form__check-text">
                           Allow Private Network Addresses
                           <InfoTip label="About private network addresses">
-                            Lets GitSeer call GitHub Enterprise on private or lab addresses. Off by default to block
+                            Lets GitSeer call {forgeLabel} on private or lab addresses. Off by default to block
                             SSRF.
                           </InfoTip>
                         </span>
@@ -1458,10 +1395,10 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                         onChange={(value) => setField("github_token", value)}
                         placeholder={
                           integ?.github_token_configured
-                            ? "Personal access token (leave blank to keep)"
-                            : "Personal access token (required)"
+                            ? `${forgeTokenLabel(forge)} (leave blank to keep)`
+                            : `${forgeTokenLabel(forge)} (required)`
                         }
-                        aria-label="Personal access token"
+                        aria-label={forgeTokenLabel(forge)}
                         autoComplete="new-password"
                         required={!integ?.github_token_configured}
                         aria-invalid={fieldErrors.github_token ? true : undefined}
@@ -1473,7 +1410,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                               : undefined
                         }
                       />
-                      <GitHubPATHelp baseURL={draft.github_url} />
+                      {forge === "github" ? <GitHubPATHelp baseURL={draft.github_url} /> : null}
                       {fieldErrors.github_token ? (
                         <p id="wiz_github_token_error" className="settings-form__error" role="alert">
                           {fieldErrors.github_token}
@@ -1513,7 +1450,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                   : checksPassed
                     ? usesManualWebhook
                       ? "Checks passed. Continue for manual webhook instructions."
-                      : "Checks passed. Continue to install the webhook and set up OAuth."
+                      : "Checks passed. Continue to install the webhook."
                     : "Fix any failed checks, then retry."}
               </p>
               {checksPassed && (
@@ -1553,6 +1490,27 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
                     {busy === "webhook" ? "Preparing…" : "Continue"}
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {step === "signin" && (
+            <div className="settings-form__section">
+              <OAuthSignInPanel
+                editable
+                mode="wizard"
+                onContinue={() => setStep("finish")}
+                onSkip={() => setStep("finish")}
+              />
+              <div className="settings-form__actions">
+                <button
+                  className="btn settings-form__actions-back"
+                  type="button"
+                  onClick={back}
+                  disabled={isBusy}
+                >
+                  Back
+                </button>
               </div>
             </div>
           )}
@@ -1620,28 +1578,6 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
         onManual={() => void finishWebhook(false)}
         onCreate={() => void finishWebhook(true)}
         onContinue={continueAfterWebhook}
-      />
-
-      <OAuthConfirmModal
-        open={oauthOpen}
-        phase={oauthPhase}
-        preview={oauthPreview}
-        giteaURL={draft.gitea_url}
-        busy={busy === "oauth"}
-        error={oauthError}
-        clientId={oauthClientId}
-        clientSecret={oauthClientSecret}
-        onClientIdChange={setOauthClientId}
-        onClientSecretChange={setOauthClientSecret}
-        onBack={backFromOAuth}
-        onManual={() => {
-          setOauthError(null);
-          setOauthPhase("manual");
-        }}
-        onCreate={() => void finishOAuth(true)}
-        onSkip={skipOAuth}
-        onContinue={() => void finishOAuth(false)}
-        canCreate={canCreateOAuth}
       />
     </div>
   );

@@ -32,8 +32,6 @@ type InstanceDraft = {
   base_url: string;
   token: string;
   webhook_secret: string;
-  oauth_client_id: string;
-  oauth_client_secret: string;
   allow_private_network: boolean;
   allow_unsigned_webhooks: boolean;
 };
@@ -45,8 +43,6 @@ function emptyDraft(forgeType: ForgeType = "gitea"): InstanceDraft {
     base_url: forgeType === "github" ? DEFAULT_GITHUB_URL : "",
     token: "",
     webhook_secret: "",
-    oauth_client_id: "",
-    oauth_client_secret: "",
     allow_private_network: false,
     allow_unsigned_webhooks: false,
   };
@@ -63,8 +59,6 @@ function draftFromPublic(inst: InstancePublic): InstanceDraft {
     base_url: inst.base_url || "",
     token: "",
     webhook_secret: "",
-    oauth_client_id: inst.oauth_client_id || "",
-    oauth_client_secret: "",
     allow_private_network: inst.allow_private_network,
     allow_unsigned_webhooks: inst.allow_unsigned_webhooks,
   };
@@ -77,8 +71,6 @@ function sameDraft(a: InstanceDraft, b: InstanceDraft): boolean {
     a.base_url === b.base_url &&
     a.token === b.token &&
     a.webhook_secret === b.webhook_secret &&
-    a.oauth_client_id === b.oauth_client_id &&
-    a.oauth_client_secret === b.oauth_client_secret &&
     a.allow_private_network === b.allow_private_network &&
     a.allow_unsigned_webhooks === b.allow_unsigned_webhooks
   );
@@ -132,7 +124,6 @@ export function InstanceSettingsPanel({ editable, canElevate, onBecomeBootstrap 
   const isGitHub = draft.forge_type === "github";
   const isGitLab = draft.forge_type === "gitlab";
   const isBitbucket = draft.forge_type === "bitbucket";
-  const showsOAuth = isGitea || isGitLab;
   const dialogOpen = mode === "pick" || mode === "create" || mode === "edit";
 
   useEffect(() => {
@@ -195,8 +186,6 @@ export function InstanceSettingsPanel({ editable, canElevate, onBecomeBootstrap 
         base_url: draft.base_url.trim(),
         token: draft.token,
         webhook_secret: draft.webhook_secret,
-        oauth_client_id: draft.oauth_client_id.trim(),
-        oauth_client_secret: draft.oauth_client_secret,
         allow_private_network: draft.allow_private_network,
         allow_unsigned_webhooks: draft.allow_unsigned_webhooks,
       };
@@ -287,7 +276,8 @@ export function InstanceSettingsPanel({ editable, canElevate, onBecomeBootstrap 
         <div>
           <h2 className="settings-status__title">Forge Instances</h2>
           <p className="muted">
-            Add one or more Gitea or GitHub forges. Webhooks use a per-instance path.
+            Add forges for inventory sync (access token and webhooks). Configure OAuth sign-in under
+            Settings → Sign In.
           </p>
         </div>
         {editable && (
@@ -600,45 +590,6 @@ export function InstanceSettingsPanel({ editable, canElevate, onBecomeBootstrap 
                       </p>
                     )}
                   </div>
-                  {showsOAuth && (
-                    <>
-                      <div className="settings-form__field">
-                        <input
-                          id="inst_oauth_client_id"
-                          type="text"
-                          value={draft.oauth_client_id}
-                          onChange={(e) => setField("oauth_client_id", e.target.value)}
-                          placeholder="OAuth client ID"
-                          aria-label="OAuth client ID"
-                          autoComplete="off"
-                        />
-                      </div>
-                      <div className="settings-form__field">
-                        <input
-                          id="inst_oauth_client_secret"
-                          type="password"
-                          value={draft.oauth_client_secret}
-                          onChange={(e) => setField("oauth_client_secret", e.target.value)}
-                          placeholder={
-                            mode === "edit" && editing?.oauth_client_secret_configured
-                              ? "OAuth client secret (leave blank to keep)"
-                              : "OAuth client secret"
-                          }
-                          aria-label="OAuth client secret"
-                          autoComplete="new-password"
-                        />
-                        <p className="settings-form__hint">
-                          {isGitHub
-                            ? mode === "edit" && editing?.oauth_client_secret_configured
-                              ? "Secret is configured. Leave blank to keep it. Callback: /api/v1/auth/github/callback"
-                              : "From the GitHub OAuth App. Register callback {external}/api/v1/auth/github/callback."
-                            : mode === "edit" && editing?.oauth_client_secret_configured
-                              ? "Secret is configured. Leave blank to keep it."
-                              : "From the Gitea OAuth application."}
-                        </p>
-                      </div>
-                    </>
-                  )}
                   <label className="settings-form__check">
                     <input
                       type="checkbox"

@@ -770,6 +770,40 @@ tbody tr:hover td {
   margin-top: 0.5rem;
   flex-wrap: wrap;
 }
+.instance-card--dim {
+  opacity: 0.72;
+}
+.oauth-signin__list {
+  margin-top: var(--space-3);
+}
+.oauth-signin__select {
+  margin: 0;
+}
+.oauth-signin__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.oauth-signin__redirect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.oauth-signin__redirect-uri {
+  flex: 1 1 12rem;
+  word-break: break-all;
+  font-size: var(--font-size-xs);
+}
+.oauth-signin__wizard-actions {
+  margin-top: var(--space-4);
+}
+.oauth-signin--wizard .instance-settings__header {
+  margin-bottom: var(--space-2);
+}
 .forge-pick {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));

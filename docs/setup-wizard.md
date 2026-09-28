@@ -21,25 +21,28 @@ Pick Gitea, GitHub, GitLab, Bitbucket, or Forgejo. Additional forges can be adde
 
 ### 3. Connect
 
-Collects forge URL and service token / PAT. Gitea URL blur triggers `POST /api/v1/setup/check-gitea-url`.
+Collects forge URL and the provider’s API credential (e.g. Personal Access Token). Gitea URL blur triggers `POST /api/v1/setup/check-gitea-url`.
 
 ### 4. Validate
 
 Auto-starts `POST /api/v1/setup/test-connection`:
 
 - Connectivity and permission checks
-- System hooks + OAuth apps reported as **warn-if-missing** (Gitea)
+- System hooks reported as **warn-if-missing** (Gitea)
 
-Then confirmation modals:
+Then a webhook confirmation modal:
 
 | Modal | Actions |
 |-------|---------|
 | Webhook | **Create Webhook** (`POST /api/v1/setup/create-webhook`) or **I'll Add It** with forge-specific manual instructions. After setup, Settings → Status / Integration: **Ensure Webhook** + **Verify Delivery**. |
-| OAuth | **Create OAuth App** (`POST /api/v1/setup/create-oauth`), **I'll Configure It**, or **Skip OAuth** (where auto-create is supported; bootstrap-only otherwise) |
 
-### 5. Finish
+### 5. Sign In
 
-`POST /api/v1/setup/complete` marks setup done (requires encryption key + at least one forge). Unsigned webhook toggle and later secret/OAuth edits also live under **Settings**.
+Optional multi-forge OAuth setup for logging into GitSeer (not forge sync). Lists all connected instances; multi-select which to configure. Paste client ID/secret per forge, or **Create OAuth App** for Gitea/Forgejo (`POST /api/v1/setup/create-oauth`). Skip is always allowed (bootstrap-only login). After setup, manage under Settings → Sign In.
+
+### 6. Finish
+
+`POST /api/v1/setup/complete` marks setup done (requires encryption key + at least one forge). Forge credentials stay under Settings → Integration; OAuth apps under Settings → Sign In.
 
 ## Related APIs
 

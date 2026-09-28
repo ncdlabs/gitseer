@@ -48,7 +48,7 @@ Raw forge wire types stay in the forge implementation packages. Domain models li
 
 ## Data flow
 
-1. **Bootstrap / Settings** configure one or more forge instances (URL, token, webhook secret; Gitea OAuth when used). Additional instances via Settings → Integration or `/api/v1/instances`.
+1. **Bootstrap / Settings** configure one or more forge instances (URL, token, webhook secret). OAuth apps for GitSeer login are configured under Settings → Sign In (or the setup wizard Sign In step). Additional instances via Settings → Integration or `/api/v1/instances`.
 2. **Sync** iterates enabled instances under per-`instance_id` leases — repositories, open PRs, recent workflow runs/jobs (history window configurable).
 3. **Webhooks** apply near-real-time updates (`POST /api/webhooks/{gitea|github|gitlab|bitbucket|forgejo}/{id}`; legacy unscoped Gitea uses the primary instance).
 4. **Attention** evaluates discrete rules on sync/webhook paths and a periodic sweep (~10m). Newly opened/reopened items trigger outbound notify (if configured), SSE `attention` events, and optional Web Push.

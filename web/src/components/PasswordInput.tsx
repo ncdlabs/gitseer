@@ -15,6 +15,29 @@ type Props = {
   "aria-describedby"?: string;
 };
 
+/** Chrome expects a username field beside password inputs (may be visually hidden). */
+export function HiddenUsernameField({
+  id = "password-form-username",
+  value = "bootstrap",
+}: {
+  id?: string;
+  value?: string;
+}) {
+  return (
+    <input
+      id={id}
+      type="text"
+      name="username"
+      autoComplete="username"
+      value={value}
+      readOnly
+      tabIndex={-1}
+      className="visually-hidden"
+      aria-hidden="true"
+    />
+  );
+}
+
 export function PasswordInput({
   id,
   value,

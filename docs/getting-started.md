@@ -45,11 +45,12 @@ On first bootstrap-admin visit (when `setup_completed` is false), GitSeer opens 
 
 1. **Prepare** — public GitSeer URL + generate or paste encryption key (required to store secrets)
 2. **Forge picker** — Gitea, GitHub, GitLab, Bitbucket, or Forgejo
-3. **Connect** — forge URL, service token / PAT
-4. **Validate** — connectivity/permission checks; create or paste webhook (+ Gitea OAuth when applicable)  
-5. **Finish** — mark setup complete when at least one forge is configured  
+3. **Connect** — forge URL and provider credential (e.g. Personal Access Token)
+4. **Validate** — connectivity/permission checks; create or paste webhook
+5. **Sign In** — optional forge OAuth apps for logging into GitSeer (multi-select when multiple forges exist; skip for bootstrap-only)
+6. **Finish** — mark setup complete when at least one forge is configured
 
-A second forge (or more instances of the same type) can be added later under Settings → Integration.
+A second forge (or more instances of the same type) can be added later under Settings → Integration. Manage OAuth under Settings → Sign In.
 
 See [Setup Wizard](setup-wizard.md).
 

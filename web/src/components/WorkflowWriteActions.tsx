@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { api, type User, type WorkflowRun } from "../api/client";
+import { api, forgeTokenLabel, type User, type WorkflowRun } from "../api/client";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconTipButton } from "./IconTipButton";
 
@@ -11,10 +11,11 @@ function isInFlight(status?: string): boolean {
 
 function servicePatWarning(user?: User | null, forgeType?: string): string {
   if (!user?.is_bootstrap_admin) return "";
+  const label = forgeTokenLabel(forgeType);
   if ((forgeType || "").toLowerCase() === "github") {
-    return " This uses the GitHub service PAT (GitHub OAuth login is not available yet).";
+    return ` This uses the instance ${label} (GitHub OAuth login is not available yet).`;
   }
-  return " This uses the instance service token, not a personal OAuth token.";
+  return ` This uses the instance ${label}, not a personal OAuth token.`;
 }
 
 export type WorkflowWriteActionsProps = {

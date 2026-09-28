@@ -100,7 +100,7 @@ Register an OAuth application on each forge you want users to sign in with:
 
 - **Gitea:** `{external_url}/api/v1/auth/callback` (prefer a public OAuth client with PKCE). The setup wizard can create the app or accept pasted credentials.
 - **Forgejo:** `{external_url}/api/v1/auth/forgejo/callback` (Forgejo reuses Gitea identity columns on the user row).
-- **GitHub:** `{external_url}/api/v1/auth/github/callback` on a GitHub OAuth App; client id/secret on the GitHub instance in Settings → Integration. Inventory sync still uses the service PAT; per-user ACL and write ops use the linked OAuth token when present.
+- **GitHub:** `{external_url}/api/v1/auth/github/callback` on a GitHub OAuth App; client id/secret under Settings → Sign In. Inventory sync still uses the service PAT; per-user ACL and write ops use the linked OAuth token when present.
 - **GitLab:** `{external_url}/api/v1/auth/gitlab/callback`
 - **Bitbucket:** `{external_url}/api/v1/auth/bitbucket/callback`
 
