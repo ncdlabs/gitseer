@@ -42,10 +42,20 @@ auth:
   # OAuth app on Gitea (Application type: public client recommended for PKCE)
   # oauth_client_id: ""
   # oauth_client_secret: ""   # optional for public PKCE clients; required for confidential
-  # bootstrap_password via GITSEER_AUTH_BOOTSTRAP_PASSWORD (dev / first-run fallback; leave empty to disable)
+  # bootstrap_username: admin   # suggested on Claim Bootstrap (first UI visit); prefer not "bootstrap"
+  # bootstrap_keep_after_setup: true  # false = disable bootstrap login after /setup (Become Bootstrap only)
+  # bootstrap_password via GITSEER_AUTH_BOOTSTRAP_PASSWORD (deprecated legacy seed; leave empty and claim in UI)
   # encryption_key via GITSEER_ENCRYPTION_KEY (env/config min 16, prefer ≥24; setup wizard Save Key requires ≥24; SHA-256 → AES key; required to store secrets + OAuth tokens in DB)
   session_ttl: 24h
   acl_refresh_interval: 6h
+
+# Optional Web Push (VAPID) for browser/OS alerts. When unset, keys auto-generate beside the DB
+# (data/gitseer.vapid.json). Override via GITSEER_VAPID_* env vars.
+# notifications:
+#   vapid_public_key: ""
+#   vapid_private_key: ""
+#   vapid_subject: "mailto:ops@example.com"
+#   vapid_key_file: ""
 
 ui:
   instance_name: GitSeer

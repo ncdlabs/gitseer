@@ -48,11 +48,11 @@ System or repository webhook → `{external_url}/api/webhooks/forgejo/{instanceI
 - PR CI state from combined commit status (Gitea) / status+Checks API (GitHub), with fallback from indexed runs
 - PR review state from forge review APIs on sync and `pull_request_review` webhooks
 - Soft-delete only for rows older than the sync start; **empty catalog results do not wipe repos**
-- Manual trigger: **Sync now** → `POST /api/v1/setup/sync-repos` (bootstrap admin + CSRF)
+- Manual trigger: **Sync Now** → `POST /api/v1/setup/sync-repos` (bootstrap admin + CSRF)
 
 ### Sync leases
 
-Manual Sync and background reconcile both take a per-`instance_id` lease (`sync_leases`). Lease TTL matches `sync.reconcile_interval`. If another holder already has the lease, that instance’s sync is skipped until it expires. Leases are DB-backed and work across replicas for reconcile exclusivity. SSE remains in-process (see [Deployment](deployment.md#replicas)). Default Helm `replicaCount: 1`.
+Manual Sync and background reconcile both take a per-`instance_id` lease (`sync_leases`). Lease TTL matches `sync.reconcile_interval`. If another holder already has the lease, that instance’s sync is skipped until it expires. Leases are DB-backed and work across replicas for reconcile exclusivity. SSE remains in-process (see [Deployment](deployment.md#replicas)); event types include `workflow_run`, `workflow_job`, `pull_request`, and `attention`. Default Helm `replicaCount: 1`.
 
 ## Consistency
 

@@ -37,7 +37,7 @@ cp install.example.yaml install.yaml
 ./scripts/install.sh --config install.yaml --non-interactive
 ```
 
-The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, then starts GitSeer. It currently requires a Gitea URL/token; for GitHub-only, start with Compose/binary and use `/setup` to connect GitHub.
+The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, then starts GitSeer. It currently requires a Gitea URL/token; for other forges (or GitHub-only), start with Compose/binary and use `/setup` to connect.
 
 ## 3. Complete the setup wizard
 
@@ -55,8 +55,8 @@ See [Setup Wizard](setup-wizard.md).
 
 ## 4. Sync and invite users
 
-1. Sign in (Gitea OAuth, GitHub OAuth, or bootstrap password).
-2. Click **Sync now** so the catalog is populated.
+1. Sign in (forge OAuth — Gitea, Forgejo, GitHub, GitLab, or Bitbucket — or bootstrap password).
+2. Click **Sync Now** so the catalog is populated.
 3. Other users sign in with forge OAuth; ACL refreshes on login and on an interval (default 6h), scoped to instances where the user has a stored token.
 
 ## 5. Point forge webhooks at GitSeer
@@ -65,12 +65,19 @@ Prefer the **per-instance** URL from Settings → Integration:
 
 ```text
 POST {external_url}/api/webhooks/gitea/{instanceID}
+POST {external_url}/api/webhooks/forgejo/{instanceID}
 POST {external_url}/api/webhooks/github/{instanceID}
+POST {external_url}/api/webhooks/gitlab/{instanceID}
+POST {external_url}/api/webhooks/bitbucket/{instanceID}
 ```
 
 Legacy unscoped Gitea: `POST {external_url}/api/webhooks/gitea` (primary Gitea instance secret).
 
 HMAC secret must match the instance (or config) webhook secret. Fail-closed when a forge URL is set in config and that forge’s secret is empty (unless unsigned webhooks are explicitly allowed for lab use).
+
+## 6. Optional: enable browser / OS alerts
+
+Under Settings → **Notifications** → **Browser & OS Alerts**, click **Enable Alerts** (any signed-in user). GitSeer asks for notification permission, registers a service worker, and (when VAPID is ready) a Web Push subscription. Requires **HTTPS** or localhost. Outbound SMTP/Slack channels remain bootstrap-admin under the same tab.
 
 ## Optional: Gitea navigation links
 

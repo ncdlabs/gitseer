@@ -48,6 +48,16 @@ APIs: `POST/DELETE /api/v1/attention/{id}/mute`, `GET/PUT /api/v1/attention/rule
 
 Items are upserted by fingerprint and resolved when the condition clears. Global mutes short-circuit `open()`.
 
+## Alerts on open / reopen
+
+When an item is newly opened or reopened, `OnOpened` fans out:
+
+1. **SSE** `attention` event (ACL-filtered) for connected browsers — Notification API when the tab is backgrounded
+2. **Web Push** to users who opted in under Settings → **Browser & OS Alerts** and can access the repo
+3. **Outbound** SMTP/Slack/Discord/webhooks when admin notification settings are enabled (unchanged)
+
+See [Features](features.md#settings) and [Operations](operations.md).
+
 ## Personal inbox
 
 `GET /api/v1/inbox` surfaces ACL-scoped attention and open PRs for the current user with reason tags: `author`, `requested_reviewer` (when attention `metadata_json` includes `requested_reviewers`), `failing_ci`, `blocked_on_me` (changes requested / merge conflict / approved-blocked on authored PRs, or review request metadata). UI: `/inbox` with saved filter presets (`saved_filters`).

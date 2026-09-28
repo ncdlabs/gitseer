@@ -9,8 +9,7 @@ API_PORT="${GITSEER_API_PORT:-8090}"
 WEB_PORT="${GITSEER_WEB_PORT:-5173}"
 WEB_URL="http://127.0.0.1:${WEB_PORT}"
 API_URL="http://127.0.0.1:${API_PORT}"
-BOOTSTRAP_USER="bootstrap"
-DEFAULT_BOOTSTRAP_PASSWORD="gitseer-local"
+BOOTSTRAP_USER="${GITSEER_AUTH_BOOTSTRAP_USERNAME:-admin}"
 
 load_dotenv() {
   local file="$1"
@@ -39,15 +38,12 @@ export GOPATH="${GOPATH:-$HOME/Library/Caches/go}"
 export GOMODCACHE="${GOMODCACHE:-$HOME/Library/Caches/go/pkg/mod}"
 mkdir -p "$GOPATH" "$GOMODCACHE"
 
-if [[ -z "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
-  if [[ -n "${GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE:-}" && -r "${GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE}" ]]; then
-    GITSEER_AUTH_BOOTSTRAP_PASSWORD="$(tr -d '\r\n' <"${GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE}")"
-  fi
+# Do not set a default bootstrap password — first UI visit claims it.
+# Legacy GITSEER_AUTH_BOOTSTRAP_PASSWORD from .env still works if present.
+if [[ -z "${GITSEER_AUTH_BOOTSTRAP_USERNAME:-}" ]]; then
+  export GITSEER_AUTH_BOOTSTRAP_USERNAME="$BOOTSTRAP_USER"
 fi
-if [[ -z "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
-  export GITSEER_AUTH_BOOTSTRAP_PASSWORD="$DEFAULT_BOOTSTRAP_PASSWORD"
-fi
-export GITSEER_AUTH_BOOTSTRAP_PASSWORD
+BOOTSTRAP_USER="${GITSEER_AUTH_BOOTSTRAP_USERNAME}"
 
 # Local npm start only: let bootstrap admins skip the first-run setup wizard.
 export GITSEER_ALLOW_SKIP_SETUP="${GITSEER_ALLOW_SKIP_SETUP:-true}"
@@ -73,8 +69,12 @@ print_access() {
   echo "  App:      ${WEB_URL}"
   echo "  API:      ${API_URL}"
   echo "  Config:   ${CFG}"
-  echo "  Username: ${BOOTSTRAP_USER}"
-  echo "  Password: ${GITSEER_AUTH_BOOTSTRAP_PASSWORD}"
+  echo "  Bootstrap suggested username: ${BOOTSTRAP_USER}"
+  if [[ -n "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]]; then
+    echo "  Password: (legacy env set — prefer claiming in UI on a fresh DB)"
+  else
+    echo "  Password: set on first visit (Claim Bootstrap)"
+  fi
   if [[ -z "${GITSEER_GITEA_URL:-}" ]]; then
     echo "  OAuth:    disabled (set GITSEER_GITEA_URL + OAuth client to enable)"
   else

@@ -22,7 +22,11 @@ listen: 0.0.0.0:8090
 
 oauth_client_id: ""      # recommended — Gitea OAuth app client ID
 oauth_client_secret: ""  # optional for public PKCE clients
-bootstrap_password: ""   # required — or set GITSEER_AUTH_BOOTSTRAP_PASSWORD
+
+# Bootstrap is claimed in the UI on first visit (no install-time password).
+bootstrap_username: admin
+bootstrap_keep_after_setup: true   # false = remove bootstrap login after /setup (Become Bootstrap only)
+# bootstrap_password: ""           # deprecated — leave empty; claim in the UI
 
 allow_private_network: false
 instance_name: GitSeer

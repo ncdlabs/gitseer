@@ -7,6 +7,12 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { MAIN_WINDOW_NAME, NAV_CHANNEL } from "./components/ActiveActionsPanel";
 import { useTheme } from "./hooks/useTheme";
 import { prefetchDashboardRanges } from "./lib/prefetchDashboard";
+import {
+  browserAlertsLocallyEnabled,
+  setBrowserAlertsEnabledCache,
+  showBrowserNotification,
+  type BrowserAlertEvent,
+} from "./lib/browserAlerts";
 import { AttentionPage } from "./pages/AttentionPage";
 import { ActionsPopoutPage } from "./pages/ActionsPopoutPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -53,11 +59,20 @@ function useRealtimeInvalidation() {
     };
     const onMessage = (event: MessageEvent) => {
       let type = "";
+      let parsed: BrowserAlertEvent & { type?: string } = {};
       try {
-        const parsed = JSON.parse(String(event.data ?? "")) as { type?: string };
+        parsed = JSON.parse(String(event.data ?? "")) as BrowserAlertEvent & { type?: string };
         type = typeof parsed?.type === "string" ? parsed.type : "";
       } catch {
         /* unparseable → default invalidation */
+      }
+      if (type === "attention") {
+        invalidateKeys(queryClient, ["attention", "inbox", "summary", "stats"]);
+        scheduleDashboardRewarm();
+        if (browserAlertsLocallyEnabled()) {
+          showBrowserNotification(parsed);
+        }
+        return;
       }
       if (type === "workflow_run" || type === "workflow_job") {
         invalidateKeys(queryClient, ["workflow-runs", "runs", "run", "summary", "stats", "attention", "inbox"]);
@@ -141,6 +156,17 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
   const [syncError, setSyncError] = useState<string | null>(null);
   useRealtimeInvalidation();
   useActionsPopoutNavigation();
+
+  useEffect(() => {
+    void api
+      .alertPrefs()
+      .then(({ prefs }) => {
+        setBrowserAlertsEnabledCache(Boolean(prefs.browser_enabled || prefs.push_enabled));
+      })
+      .catch(() => {
+        /* ignore — alerts optional */
+      });
+  }, [user.id]);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],

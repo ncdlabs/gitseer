@@ -9,9 +9,9 @@ Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer o
 
 Goals:
 1. Clone the repo if needed, then run the guided installer (./scripts/install.sh or make install). Prefer Compose via Podman (`podman compose`); fall back to Docker Compose or `--method binary` if Compose is unavailable.
-2. Collect or confirm: forge plan (Gitea and/or GitHub), Gitea base URL + API token when using Gitea (repo/PR/Actions read), optional GitHub URL + PAT, GitSeer public URL (server.external_url), bootstrap admin password, and GITSEER_ENCRYPTION_KEY (or plan to generate it in /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
-3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for GitHub-only, use Compose/binary + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
-4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click Sync now.
+2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (`server.external_url`), bootstrap admin password, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
+3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for other forges, use Compose/binary + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
+4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click **Sync Now**.
 5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (per-instance webhooks, OAuth redirect URI, optional `gitseer install-ui`).
 
 Constraints:
@@ -21,7 +21,7 @@ Constraints:
 - Ask before destructive changes or removing existing services.
 
 My values (replace or leave blank to prompt me):
-- Gitea URL: [https://git.example.com or blank for GitHub-only]
+- Gitea URL: [https://git.example.com or blank to connect other forges in /setup]
 - Gitea token: [paste or point to a secret]
 - GitHub URL: [https://github.com or blank]
 - GitHub PAT: [paste or blank]
@@ -62,7 +62,7 @@ The installer writes gitignored `.env` + `config.yaml`, checks dependencies, the
 2. Set `GITSEER_AUTH_BOOTSTRAP_PASSWORD` and optionally `GITSEER_ENCRYPTION_KEY`
 3. Optionally set `GITSEER_GITEA_*` / `GITSEER_GITHUB_*` (or connect forges only in `/setup`)
 4. Run: `./bin/gitseer serve --config config.example.yaml`
-5. Open `:8090`, complete **Prepare → Choose Forge → Connect → Validate → Finish**, sign in, click **Sync now**
+5. Open `:8090`, complete **Prepare → Choose Forge → Connect → Validate → Finish**, sign in, click **Sync Now**
 
 ## Compose (manual)
 
@@ -86,9 +86,9 @@ Set `server.external_url` to the public URL (including subpath). GitSeer strips 
 
 ## Webhooks / CSRF / ACL
 
-- HMAC: set `GITSEER_WEBHOOK_SECRET` when Gitea URL is set; set `GITSEER_GITHUB_WEBHOOK_SECRET` when GitHub URL is set. Prefer per-instance webhook URLs from Settings.
+- HMAC: set `GITSEER_WEBHOOK_SECRET` when Gitea URL is set; set `GITSEER_GITHUB_WEBHOOK_SECRET` when GitHub URL is set. Prefer per-instance webhook URLs from Settings (`/api/webhooks/{gitea|forgejo|github|gitlab|bitbucket}/{id}`).
 - Browser POSTs send `X-CSRF-Token` matching the `gitseer_csrf` cookie (issued by `/api/v1/ui-config` and rotated on login/`/auth/me`).
-- OAuth user ACL refreshes on login and every `auth.acl_refresh_interval` (default 6h), scoped to the user’s Gitea `instance_id`.
+- OAuth user ACL refreshes on login and every `auth.acl_refresh_interval` (default 6h), scoped to forge instances where the user has a decryptable stored OAuth token (does not clear manual grants for other forges).
 
 ## Backup
 
@@ -96,10 +96,15 @@ Copy the SQLite file (`database.path`) or run `pg_dump` for Postgres while write
 
 ## OAuth
 
-See root `README.md` and [Authentication and ACL](authentication-and-acl.md).
+Register an OAuth application on each forge you want users to sign in with:
 
-- **Gitea:** register redirect URI `{external_url}/api/v1/auth/callback` and set client id/secret (prefer a public OAuth client with PKCE). The setup wizard at `/setup` can create the OAuth app or accept pasted credentials.
-- **GitHub:** register redirect URI `{external_url}/api/v1/auth/github/callback` on a GitHub OAuth App; configure client id/secret on the GitHub forge instance in Settings → Integration. Inventory sync still uses the service PAT; per-user ACL and write ops use the linked GitHub OAuth token when present.
+- **Gitea:** `{external_url}/api/v1/auth/callback` (prefer a public OAuth client with PKCE). The setup wizard can create the app or accept pasted credentials.
+- **Forgejo:** `{external_url}/api/v1/auth/forgejo/callback` (Forgejo reuses Gitea identity columns on the user row).
+- **GitHub:** `{external_url}/api/v1/auth/github/callback` on a GitHub OAuth App; client id/secret on the GitHub instance in Settings → Integration. Inventory sync still uses the service PAT; per-user ACL and write ops use the linked OAuth token when present.
+- **GitLab:** `{external_url}/api/v1/auth/gitlab/callback`
+- **Bitbucket:** `{external_url}/api/v1/auth/bitbucket/callback`
+
+See root `README.md` and [Authentication and ACL](authentication-and-acl.md).
 
 ## Setup wizard and Settings
 

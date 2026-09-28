@@ -18,6 +18,8 @@ import { useIsTerminalTheme } from "../hooks/useIsTerminalTheme";
 type Props = {
   graph: WorkflowNode[];
   jobStatusByName?: Record<string, string>;
+  /** Set when workflow YAML could not be loaded (jobs-only flat graph may still render). */
+  graphError?: string | null;
 };
 
 type JobNodeData = {
@@ -269,7 +271,7 @@ const LEGEND: { tone: string; label: string }[] = [
   { tone: "muted", label: "Unknown" },
 ];
 
-export function WorkflowDAG({ graph, jobStatusByName = {} }: Props) {
+export function WorkflowDAG({ graph, jobStatusByName = {}, graphError }: Props) {
   const terminal = useIsTerminalTheme();
   const listId = useId();
   const [focusIdx, setFocusIdx] = useState(0);
@@ -299,6 +301,16 @@ export function WorkflowDAG({ graph, jobStatusByName = {} }: Props) {
   );
 
   if (!graph.length) {
+    if (graphError) {
+      return (
+        <p className="muted">
+          Graph unavailable — could not load workflow YAML
+          {/contents|permission|403|404|not found/i.test(graphError)
+            ? " (check GitHub Contents read access on the token)."
+            : "."}
+        </p>
+      );
+    }
     return <p className="muted">Graph unavailable — could not load workflow YAML for this run.</p>;
   }
 

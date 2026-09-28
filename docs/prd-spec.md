@@ -1,53 +1,56 @@
 # GitSeer
 
 **Product Requirements Document & Technical Specification**  
-**Status:** Draft for Implementation  
+**Status:** Living product requirements (keep current; use git history for point-in-time snapshots)  
+**Last amended:** 2026-09-28 (multi-forge ADR-029; browser/OS alerts ADR-032)  
 **License:** Apache-2.0 recommended  
 **Distribution:** Public open-source project  
 **Working repository:** `github.com/ncdlabs/gitseer`  
-**Product type:** Self-hosted Gitea CI/CD and Pull Request Operations Console
+**Product type:** Self-hosted multi-forge CI/CD and Pull Request Operations Console (Gitea, Forgejo, GitHub, GitLab, Bitbucket Cloud)
+
+Operator guides under [`docs/`](README.md) describe how to run the shipped binary. This PRD states **what the product must be**; when code and this document disagree, update **both** (and [`implementation-plan.md`](implementation-plan.md) / `PROJECT_SHARED_STATE.md`).
 
 ---
 
 # 1. Executive Summary
 
-GitSeer is an open-source companion application for Gitea that provides a single operational view of CI/CD activity, pull requests, repository health, workflow failures, approvals, and related developer activity across an entire Gitea instance.
+GitSeer is an open-source companion application that provides a single operational view of CI/CD activity, pull requests, repository health, workflow failures, approvals, and related developer activity across one or more connected forge instances (**Gitea**, **Forgejo**, **GitHub** / GitHub Enterprise, **GitLab**, and **Bitbucket Cloud**).
 
 The primary problem GitSeer solves is fragmentation.
 
-Gitea provides repository-level views for pull requests and Actions, but users managing multiple repositories must navigate into individual projects to understand overall CI/CD and pull-request health. GitSeer aggregates that information into a unified operational console designed to answer:
+Forges provide repository-level views for pull requests and Actions/CI, but users managing multiple repositories (and often multiple forges) must navigate into individual projects to understand overall health. GitSeer aggregates that information into a unified operational console designed to answer:
 
 > **What requires my attention right now?**
 
-GitSeer will integrate deeply enough with Gitea to appear and behave like a native Gitea capability while remaining architecturally separate from the Gitea codebase.
+GitSeer integrates deeply enough with supported forges to feel native (optional Gitea navigation/tab hooks; OAuth login) while remaining architecturally separate from forge codebases.
 
 The central architectural principle is:
 
 > **Native experience. External architecture.**
 
-GitSeer will run as an independent service, communicate with Gitea through supported APIs and webhooks, integrate into Gitea's navigation and repository UI using supported customization hooks, and authenticate users through Gitea.
+GitSeer runs as an independent service, communicates through supported APIs and webhooks, optionally integrates into Gitea's navigation using supported customization hooks, and authenticates users through forge OAuth (plus an optional bootstrap admin for first-run).
 
-It will not require a custom Gitea fork.
+It will not require a custom forge fork.
 
 It will not require modification of individual repositories.
 
 It will not require users to add workflow steps, configuration files, agents, or badges to each repository.
 
-A new installation should require only a Gitea URL, appropriate credentials, and a GitSeer instance. Once connected, GitSeer should automatically discover accessible repositories, workflows, open pull requests, current CI status, and recent historical activity.
+A new installation should require a public GitSeer URL, encryption key, and at least one forge connection (URL + credentials). Once connected, GitSeer should automatically discover accessible repositories, workflows, open pull requests, current CI status, and recent historical activity.
 
 ---
 
 # 2. Product Vision
 
-GitSeer should become the operational cockpit for teams running CI/CD through Gitea.
+GitSeer should become the operational cockpit for teams running CI/CD through their forges.
 
 Instead of:
 
 `Repository → Actions → Workflow → Run → Job → Logs`
 
-repeated across many repositories, GitSeer should provide:
+repeated across many repositories (and forges), GitSeer should provide:
 
-`Gitea Instance → Everything requiring attention`
+`Connected forges → Everything requiring attention`
 
 The application should make it possible to understand the state of dozens or hundreds of repositories from one screen.
 
@@ -68,7 +71,7 @@ GitSeer should answer questions such as:
 
 GitSeer is primarily an **observability and operations layer**, not a CI engine.
 
-Gitea remains the system of record.
+Each connected forge remains the system of record for its repositories.
 
 ---
 
@@ -654,25 +657,21 @@ Existing administrator customization must never be silently overwritten.
 
 # 19. Authentication
 
-GitSeer should use Gitea as the identity provider.
-
-Gitea can operate as an OAuth2/OIDC provider, and current versions support granular scopes.
+GitSeer authenticates users through **forge OAuth** (Authorization Code + PKCE) for Gitea, Forgejo, GitHub, GitLab, and Bitbucket, plus an optional **bootstrap admin** password for first-run / break-glass (disabled after setup unless local skip-setup is enabled).
 
 Users should experience:
 
 ```
-Login to Gitea
-      ↓
 Open GitSeer
       ↓
-Already authenticated or redirected through Gitea authorization
+Sign in with a configured forge OAuth app
+      ↓
+Session cookie + per-instance user tokens for ACL / write ops
 ```
 
-GitSeer must not store user passwords.
+GitSeer must not store forge user passwords (OAuth tokens only, sealed at rest). The bootstrap password is a GitSeer-local credential, not a forge password.
 
-OAuth Authorization Code flow with PKCE should be preferred.
-
-The service account used for synchronization and the individual user session must be separate concepts.
+The service account / PAT used for synchronization and the individual user session must be separate concepts.
 
 ---
 
@@ -854,7 +853,12 @@ SQLite should be fully supported, not treated as a demo-only database.
 
 ## Realtime
 
-Server-Sent Events are sufficient for most status updates.
+Server-Sent Events are sufficient for most status updates (`workflow_run`, `workflow_job`, `pull_request`, `attention`).
+
+**Browser / OS alerts** (V1.0+): when attention items newly open or reopen, GitSeer must support:
+
+1. In-tab / background-tab OS banners via the Web Notification API driven by SSE `attention` events  
+2. Closed-tab delivery via **self-hosted Web Push** (VAPID keys; no third-party notification relay)
 
 WebSockets may be used if bidirectional realtime functionality becomes necessary.
 
@@ -862,9 +866,9 @@ Do not introduce Redis solely for realtime messaging in V1.
 
 ---
 
-# 25. Gitea Adapter
+# 25. Forge Adapter
 
-All Gitea-specific operations must be encapsulated behind an internal adapter.
+All forge-specific operations must be encapsulated behind an internal adapter (`internal/forge`).
 
 Conceptual interface:
 
@@ -886,9 +890,9 @@ type Forge interface {
 }
 ```
 
-The UI and core product should not directly consume raw Gitea API structures.
+The UI and core product must not directly consume raw forge API structures.
 
-This creates future flexibility for Forgejo or other providers without committing the MVP to supporting them.
+**In-scope implementations (ADR-029):** Gitea, GitHub (github.com and Enterprise), GitLab, Bitbucket Cloud, and Forgejo. Ask before adding further forge types.
 
 ---
 
@@ -1741,23 +1745,24 @@ README introduction:
 
 # 52. MVP
 
-The MVP is complete when a user can install GitSeer, connect it to a stock supported Gitea instance, and obtain a useful cross-repository dashboard without changing any repository.
+The MVP is complete when a user can install GitSeer, connect it to at least one supported forge, and obtain a useful cross-repository dashboard without changing any repository.
 
-MVP features:
+MVP features (shipped):
 
 ```
-Gitea connection
-Gitea OAuth authentication
+Multi-forge connection (Gitea / Forgejo / GitHub / GitLab / Bitbucket)
+Forge OAuth authentication (+ optional bootstrap admin)
 Repository discovery
 Organization discovery
 Pull-request aggregation
-Actions workflow discovery
+Actions / workflow discovery
 Workflow-run synchronization
 Job synchronization
 Webhook processing
 API reconciliation
 Overview dashboard
 Attention dashboard
+Inbox
 Pull Requests view
 Pipelines view
 Repositories view
@@ -1767,11 +1772,11 @@ Workflow graph
 Job logs
 Filtering
 Search
-Dark mode
-Gitea navigation integration
-Repository page tab
+Dark mode (+ themes)
+Gitea navigation integration (optional)
+Repository page tab (optional)
 SQLite
-Docker image
+Docker / container image
 Standalone binary
 Basic metrics
 Health checks
@@ -1782,37 +1787,41 @@ Documentation
 
 # 53. V1.0 Exit Criteria
 
-V1.0 should additionally require:
+V1.0 additionally requires (largely shipped; remaining items called out):
 
-PostgreSQL support,
+PostgreSQL support (shipped),
 
-Helm chart,
+Helm chart (shipped),
 
-migration tooling,
+migration tooling (goose; shipped),
 
-backup/restore documentation,
+backup/restore CLI + documentation (shipped),
 
-permission validation,
+permission validation (ACL; shipped),
 
-large-instance pagination,
+large-instance pagination (shipped),
 
-resynchronization controls,
+resynchronization controls (Sync Now + leases; shipped),
 
-failure-recovery testing,
+outbound notifications + browser/OS Web Push (shipped),
 
-security review,
+wallboard / product surfaces (shipped),
 
-dependency scanning,
+failure-recovery testing (ongoing),
 
-SBOM generation,
+security review (ongoing),
 
-signed releases/container images,
+dependency scanning (CI govulncheck; shipped),
 
-multi-architecture images,
+SBOM generation (CI; shipped),
 
-documented upgrade process,
+signed releases/container images (deferred),
 
-integration tests against supported Gitea versions.
+multi-architecture images (deferred — amd64 only today),
+
+documented upgrade process (shipped),
+
+integration tests against supported forge versions (partial / ongoing).
 
 ---
 
@@ -1820,41 +1829,17 @@ integration tests against supported Gitea versions.
 
 Future capabilities may include:
 
-deployment environments,
+deeper deployment-environment modeling,
 
-runner utilization dashboards,
+richer team membership inventory (beyond owner-slug filters),
 
-workflow duration trends,
+additional forge types beyond ADR-029,
 
-failure clustering,
+signed multi-arch release images,
 
-flaky-job detection,
+WebSocket upgrade only if SSE proves insufficient.
 
-release visibility,
-
-notifications,
-
-Slack/Discord/webhook destinations,
-
-saved dashboard filters,
-
-organization-specific dashboards,
-
-team dashboards,
-
-incident integration,
-
-public/read-only wallboard mode,
-
-Forgejo support,
-
-~~GitHub support,~~ *(superseded: GitHub is in-scope dual-forge — ADR-029 in [implementation-plan.md](implementation-plan.md))*
-
-GitLab support,
-
-Bitbucket support.
-
-These should not contaminate the original MVP architecture.
+**Already shipped (do not treat as future work):** runner utilization, workflow duration trends, failure clustering, flaky-job detection, release visibility, outbound notifications (SMTP/Slack/Discord/webhooks), browser/OS alerts (SSE + Web Push), saved filters, organization/forge-scoped dashboards, incident webhook channel, public/read-only wallboard, Forgejo / GitHub / GitLab / Bitbucket support.
 
 The forge abstraction supports multiple providers. **In scope:** Gitea, GitHub, GitLab, Bitbucket, and Forgejo (ADR-029).
 
@@ -1864,13 +1849,13 @@ The forge abstraction supports multiple providers. **In scope:** Gitea, GitHub, 
 
 **ADR-001:** GitSeer is an external companion application, not a Gitea fork.
 
-**ADR-002:** Gitea remains the source of truth.
+**ADR-002:** Connected forges remain the source of truth for their repositories.
 
 **ADR-003:** Webhooks provide immediacy; reconciliation provides correctness.
 
 **ADR-004:** Repository configuration is optional, never required for basic operation.
 
-**ADR-005:** Gitea OAuth provides user identity.
+**ADR-005:** Forge OAuth (PKCE) provides user identity; optional bootstrap admin for first-run / break-glass only.
 
 **ADR-006:** GitSeer independently enforces repository authorization.
 
@@ -1886,13 +1871,15 @@ The forge abstraction supports multiple providers. **In scope:** Gitea, GitHub, 
 
 **ADR-012:** Workflow topology is derived from the workflow definition when upstream runtime data is insufficient.
 
-**ADR-013:** The frontend consumes GitSeer models, never raw Gitea API models.
+**ADR-013:** The frontend consumes GitSeer models, never raw forge API models.
 
 **ADR-014:** Native Gitea integration uses supported customization files rather than overwritten core templates.
 
-**ADR-015:** All externally visible functionality must remain usable without an ncdLabs-hosted service.
+**ADR-015:** All externally visible functionality must remain usable without an ncdLabs-hosted service (including no shared notification relay).
 
 **ADR-029 (amendment):** Multi-forge Gitea + GitHub + GitLab + Bitbucket + Forgejo is in scope for product GitSeer. See [implementation-plan.md](implementation-plan.md) §4. Product branding is GitSeer; technical IDs are `gitseer` / `GITSEER_*`.
+
+**ADR-032 (amendment):** Outbound notifications are self-hosted (SMTP/webhooks). In-app browser/OS alerts use SSE + self-hosted Web Push (VAPID). See [implementation-plan.md](implementation-plan.md) §4.
 
 ---
 

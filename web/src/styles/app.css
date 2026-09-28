@@ -1188,6 +1188,19 @@ tbody tr:hover td {
   display: grid;
   gap: var(--space-2);
 }
+.login__claim-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.login__claim-hint,
+.login__claim-warn {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+.login__bootstrap .password-input {
+  max-width: none;
+}
 .login__bootstrap input {
   width: 100%;
   padding: 0.55rem 0.7rem;
@@ -1206,6 +1219,19 @@ tbody tr:hover td {
   padding: 0;
   text-align: left;
   font-size: var(--font-size-sm);
+}
+button.linkish {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+button.linkish:hover {
+  color: var(--ink);
 }
 
 /* —— Settings tabs —— */

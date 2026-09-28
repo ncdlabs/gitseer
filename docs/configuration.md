@@ -34,13 +34,15 @@ Example file: [config.example.yaml](https://github.com/ncdlabs/gitseer/blob/main
 | `sync.reconcile_interval` | Periodic sync (default `5m`); also used as per-instance sync lease TTL |
 | `sync.history_days` | History window (default `30`) |
 | `attention.long_running_after` | Long-run threshold (default `2h`) |
-| `auth.*` | Provider, OAuth, bootstrap password, session TTL, ACL refresh, encryption key |
+| `auth.*` | Provider, OAuth, bootstrap username / keep-after-setup / optional legacy password, session TTL, ACL refresh, encryption key |
 | `ui.instance_name` | Display name |
 | `log.level` / `format` | Logging |
 | `retention.*` | Days for runs / webhooks / resolved attention. Settings presets: Lab (14/7/30) vs Prod (90/30/180) plus `sync.history_days` 7 vs 30. Status warns at 512 MiB / 2 GiB DB size; **Purge Now** via `POST /api/v1/admin/purge-retention`. |
 | `dev.allow_skip_setup` | Local-only skip for `/setup` (`GITSEER_ALLOW_SKIP_SETUP`); rejected when `external_url` is non-local |
 
 Outbound notification channels (SMTP, Slack/Discord/generic HTTPS webhooks, severity filter, digest hour) are **not** YAML keys — they live in `notification_settings` and are edited under Settings → **Notifications** (`GET/PUT /api/v1/notifications/settings`). Secrets are sealed with `GITSEER_ENCRYPTION_KEY`.
+
+Browser / OS alerts use self-hosted Web Push VAPID keys. When `notifications.vapid_public_key` / `vapid_private_key` (or `GITSEER_VAPID_*`) are unset, GitSeer generates and stores `gitseer.vapid.json` beside the database. Optional `vapid_subject` should be a `mailto:` or `https:` contact URI.
 
 File/env forge blocks seed or default the matching `instances` row by `(forge_type, base_url)`. Runtime multi-instance CRUD is under Settings → Integration / `/api/v1/instances` (bootstrap admin).
 
@@ -69,8 +71,10 @@ File/env forge blocks seed or default the matching `instances` row by `(forge_ty
 | `GITSEER_SYNC_RECONCILE_INTERVAL` | Sync interval / lease TTL |
 | `GITSEER_SYNC_HISTORY_DAYS` | History days |
 | `GITSEER_ATTENTION_LONG_RUNNING_AFTER` | Long-running threshold |
-| `GITSEER_AUTH_PROVIDER` | Auth provider (`gitea`) |
-| `GITSEER_AUTH_BOOTSTRAP_PASSWORD` / `_FILE` | Bootstrap login |
+| `GITSEER_AUTH_PROVIDER` | Legacy auth provider hint (`gitea` \| `bootstrap`); forge OAuth is enabled per configured instance |
+| `GITSEER_AUTH_BOOTSTRAP_USERNAME` | Suggested username for Claim Bootstrap (default `admin`) |
+| `GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP` | `true` keep break-glass login after setup; `false` remove login (Become Bootstrap only) |
+| `GITSEER_AUTH_BOOTSTRAP_PASSWORD` / `_FILE` | Legacy seed only — prefer empty; claim password in the UI |
 | `GITSEER_AUTH_OAUTH_CLIENT_ID` | OAuth client id |
 | `GITSEER_AUTH_OAUTH_CLIENT_SECRET` / `_FILE` | OAuth secret |
 | `GITSEER_ENCRYPTION_KEY` / `_FILE` | Encrypt secrets + OAuth tokens at rest (see below) |
@@ -83,6 +87,9 @@ File/env forge blocks seed or default the matching `instances` row by `(forge_ty
 | `GITSEER_RETENTION_WEBHOOKS_DAYS` | Webhook retention |
 | `GITSEER_RETENTION_ATTENTION_DAYS` | Attention retention |
 | `GITSEER_ALLOW_SKIP_SETUP` | Skip `/setup` (local/dev only) |
+| `GITSEER_VAPID_PUBLIC_KEY` / `GITSEER_VAPID_PRIVATE_KEY` | Optional Web Push VAPID override (else auto-generate) |
+| `GITSEER_VAPID_SUBJECT` | VAPID contact URI (`mailto:` / `https:`) |
+| `GITSEER_VAPID_KEY_FILE` | Path for persisted auto-generated VAPID JSON |
 
 Unreadable `*_FILE` paths fail config load (no silent clear).
 
@@ -104,10 +111,10 @@ When `gitea.url` is set and the Gitea webhook secret is empty, startup **fails**
 
 When `github.url` is set and the GitHub webhook secret is empty, startup **fails** unless `github.allow_unsigned_webhooks` / `GITSEER_GITHUB_ALLOW_UNSIGNED_WEBHOOKS=true`.
 
-Per-instance webhook secrets stored on `instances` are used for `POST /api/webhooks/{gitea|github}/{instanceID}`. The unscoped `POST /api/webhooks/gitea` route uses the [primary Gitea instance](authentication-and-acl.md#primary-gitea-instance) secret (legacy migration path).
+Per-instance webhook secrets stored on `instances` are used for `POST /api/webhooks/{gitea|forgejo|github|gitlab|bitbucket}/{instanceID}`. The unscoped `POST /api/webhooks/gitea` route uses the [primary Gitea instance](authentication-and-acl.md#primary-gitea-instance) secret (legacy migration path).
 
 ## Installer config
 
 See [install.example.yaml](https://github.com/ncdlabs/gitseer/blob/main/install.example.yaml). Resolution order: defaults → `--config` YAML → `.env` → `GITSEER_*` → prompts (skipped with `--non-interactive`).
 
-The guided installer currently collects **Gitea** URL + token. For GitHub-only or additional GitHub instances, use the binary/Compose start path and complete **Prepare → Choose Forge → Connect** in `/setup`, or add forges under Settings → Integration after bootstrap login.
+The guided installer currently collects **Gitea** URL + token. For GitHub / GitLab / Bitbucket / Forgejo (or additional instances), use the binary/Compose start path and complete **Prepare → Choose Forge → Connect** in `/setup`, or add forges under Settings → Integration after bootstrap login.

@@ -265,12 +265,13 @@ type User struct {
 }
 
 type Session struct {
-	ID        string
-	UserID    int64
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	IP        string
-	UserAgent string
+	ID                      string
+	UserID                  int64
+	ExpiresAt               time.Time
+	CreatedAt               time.Time
+	IP                      string
+	UserAgent               string
+	BootstrapElevatedUntil  *time.Time
 }
 
 type Summary struct {

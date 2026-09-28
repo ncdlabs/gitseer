@@ -4,9 +4,9 @@ Operator and developer guides for GitSeer (multi-forge; technical IDs are `gitse
 
 | Guide | Contents |
 |-------|----------|
-| [Getting started](getting-started.md) | Install paths, wizard, first sync |
-| [Architecture](architecture.md) | Binary shape, packages, data flow |
-| [Features](features.md) | UI routes and capabilities |
+| [Getting started](getting-started.md) | Install paths, wizard, first sync, optional browser alerts |
+| [Architecture](architecture.md) | Binary shape, packages (incl. notify/webpush), data flow |
+| [Features](features.md) | UI routes, inbox, notifications, capabilities |
 | [Configuration](configuration.md) | YAML, env, settings layers |
 | [Authentication and ACL](authentication-and-acl.md) | OAuth, bootstrap, CSRF, ACL |
 | [Setup wizard](setup-wizard.md) | Prepare (encryption) → Choose Forge → Connect → Validate → Finish |
@@ -16,7 +16,7 @@ Operator and developer guides for GitSeer (multi-forge; technical IDs are `gitse
 | [Deployment](deployment.md) | Compose, binary, Helm, proxy |
 | [Upgrade](upgrade.md) | Backup, Helm/binary upgrade, rollback, cutting public releases, schema notes |
 | [Compatibility](compatibility.md) | Forge and runtime matrix for 1.0 |
-| [Operations](operations.md) | Metrics, retention, backup |
+| [Operations](operations.md) | Metrics, retention, backup, outbound + browser/OS alerts |
 | [Development](development.md) | Local toolchain and guidelines |
 | [Troubleshooting](troubleshooting.md) | Common failure modes |
 | [Install (detail)](install.md) | Installer flags, proxy, backup |
@@ -25,8 +25,8 @@ Operator and developer guides for GitSeer (multi-forge; technical IDs are `gitse
 
 | Document | Role |
 |----------|------|
-| [PRD / technical spec](prd-spec.md) | Product requirements |
-| [Implementation plan](implementation-plan.md) | Build direction |
+| [PRD / technical spec](prd-spec.md) | Living product requirements (amend with behavior; use git history for point-in-time snapshots) |
+| [Implementation plan](implementation-plan.md) | Living build direction (same amendment rule) |
 
 ## Wiki
 

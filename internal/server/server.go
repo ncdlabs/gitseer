@@ -19,7 +19,6 @@ import (
 	"github.com/ncdlabs/gitseer/internal/database"
 	_ "github.com/ncdlabs/gitseer/internal/forge/all"
 	"github.com/ncdlabs/gitseer/internal/notify"
-	"github.com/ncdlabs/gitseer/internal/ratelimit"
 	"github.com/ncdlabs/gitseer/internal/realtime"
 	"github.com/ncdlabs/gitseer/internal/retention"
 	"github.com/ncdlabs/gitseer/internal/server/proxyprefix"
@@ -28,6 +27,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/store"
 	"github.com/ncdlabs/gitseer/internal/sync"
 	"github.com/ncdlabs/gitseer/internal/webhooks"
+	"github.com/ncdlabs/gitseer/internal/webpush"
 )
 
 // Server is the GitSeer HTTP process.
@@ -59,17 +59,22 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		return nil, fmt.Errorf("settings: %w", err)
 	}
 	authsvc := auth.New(st, auth.Config{
-		BootstrapPassword: cfg.Auth.BootstrapPassword,
-		SessionTTL:        cfg.Auth.SessionTTL,
-		CookieSecure:      cfg.CookieSecureResolved(),
-		CookiePath:        cfg.CookiePath(),
-		GiteaBaseURL:      cfg.Gitea.URL,
-		OAuthClientID:     cfg.Auth.OAuthClientID,
-		OAuthClientSecret: cfg.Auth.OAuthClientSecret,
-		ExternalURL:       cfg.Server.ExternalURL,
-		AllowPrivateNet:   cfg.Gitea.AllowPrivateNetwork,
-		EncryptionKey:     cfg.Auth.EncryptionKey,
+		BootstrapPassword:       cfg.Auth.BootstrapPassword,
+		BootstrapUsername:       cfg.Auth.BootstrapUsername,
+		BootstrapKeepAfterSetup: cfg.Auth.BootstrapKeepAfterSetup,
+		SessionTTL:              cfg.Auth.SessionTTL,
+		CookieSecure:            cfg.CookieSecureResolved(),
+		CookiePath:              cfg.CookiePath(),
+		GiteaBaseURL:            cfg.Gitea.URL,
+		OAuthClientID:           cfg.Auth.OAuthClientID,
+		OAuthClientSecret:       cfg.Auth.OAuthClientSecret,
+		ExternalURL:             cfg.Server.ExternalURL,
+		AllowPrivateNet:         cfg.Gitea.AllowPrivateNetwork,
+		EncryptionKey:           cfg.Auth.EncryptionKey,
 	})
+	if err := authsvc.SeedBootstrapFromConfig(context.Background()); err != nil {
+		log.Warn("bootstrap seed", "err", err)
+	}
 	authzsvc := authz.New(st)
 	hub := realtime.NewHub()
 	att := attention.NewWithConfig(st, log, settingsMgr.LongRunningAfter())
@@ -113,11 +118,19 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 	}
 	retain := retention.NewWithSource(st, settingsMgr, log)
 	notifier := notify.New(st, settingsMgr, settingsMgr, log)
+	notifier.SetHub(hub)
+	pushSender := webpush.NewSender(st, log, cfg.Notifications.VAPIDSubject)
+	if err := pushSender.EnsureKeys(cfg); err != nil {
+		log.Warn("web push VAPID keys unavailable", "err", err)
+	} else {
+		notifier.SetWebPush(pushSender)
+	}
 	if att != nil {
 		att.SetOnOpened(notifier.OnAttentionOpened)
 	}
 	apiHandler := api.New(cfg, st, authsvc, authzsvc, syncer, wh, att, hub, settingsMgr, log, version)
 	apiHandler.SetNotify(notifier)
+	apiHandler.SetWebPush(pushSender)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -150,10 +163,8 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		} else {
 			csrf, _ = authsvc.IssueCSRFToken(w)
 		}
-		bootstrapEnabled := cfg.Auth.BootstrapPassword != ""
-		if bootstrapEnabled && settingsMgr != nil && settingsMgr.SetupCompleted() && !cfg.Dev.AllowSkipSetup {
-			bootstrapEnabled = false
-		}
+		setupDone := settingsMgr != nil && settingsMgr.SetupCompleted()
+		info, _ := authsvc.BootstrapInfo(req.Context(), setupDone, cfg.Dev.AllowSkipSetup)
 		payload := map[string]any{
 			"base_path":               prefix,
 			"oauth_enabled":           authsvc.OAuthEnabled(),
@@ -161,17 +172,12 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 			"gitlab_oauth_enabled":    authsvc.GitLabOAuthEnabled(),
 			"bitbucket_oauth_enabled": authsvc.BitbucketOAuthEnabled(),
 			"forgejo_oauth_enabled":   authsvc.ForgejoOAuthEnabled(),
-			"bootstrap_enabled":       bootstrapEnabled,
+			"bootstrap_enabled":       info.LoginEnabled,
+			"bootstrap_unclaimed":     info.Unclaimed,
+			"bootstrap_username":      info.Username,
+			"bootstrap_login_enabled": info.LoginEnabled,
 			"allow_skip_setup":        cfg.Dev.AllowSkipSetup,
 			"csrf_token":              csrf,
-		}
-		// Local npm start only: prefill login with the bootstrap password when the
-		// TCP peer is loopback, skip-setup is on, and external_url is loopback/empty.
-		// Never expose the password for LAN peers or when trust is only via headers.
-		if cfg.Dev.AllowSkipSetup && cfg.Auth.BootstrapPassword != "" &&
-			config.IsLoopbackExternalURL(cfg.Server.ExternalURL) &&
-			ratelimit.PeerIsLoopback(req) {
-			payload["dev_bootstrap_password"] = cfg.Auth.BootstrapPassword
 		}
 		_ = json.NewEncoder(w).Encode(payload)
 	})
@@ -296,7 +302,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		csp := "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self'"
+		// Fonts: IBM Plex CSS from Google Fonts; Inter wordmark is self-hosted (font-src 'self').
+		// No 'unsafe-inline' / hashes for script — SPA base path is a <meta name="gitseer-base">.
+		csp := "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; worker-src 'self'; connect-src 'self'; frame-ancestors 'self'"
 		w.Header().Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})

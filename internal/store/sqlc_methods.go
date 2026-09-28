@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/ncdlabs/gitseer/internal/models"
@@ -310,6 +311,7 @@ func (s *Store) getSessionSQLC(ctx context.Context, hash string) (*models.Sessio
 	var (
 		id, expires, created, ip, ua string
 		userID                       int64
+		elevated                     *string
 		err                          error
 	)
 	if s.driver == "postgres" {
@@ -317,12 +319,14 @@ func (s *Store) getSessionSQLC(ctx context.Context, hash string) (*models.Sessio
 		err = e
 		if err == nil {
 			id, userID, expires, created, ip, ua = r.ID, r.UserID, r.ExpiresAt, r.CreatedAt, r.Ip, r.UserAgent
+			elevated = r.BootstrapElevatedUntil
 		}
 	} else {
 		r, e := s.sqlite.GetSessionByTokenHash(ctx, hash)
 		err = e
 		if err == nil {
 			id, userID, expires, created, ip, ua = r.ID, r.UserID, r.ExpiresAt, r.CreatedAt, r.Ip, r.UserAgent
+			elevated = r.BootstrapElevatedUntil
 		}
 	}
 	if err != nil {
@@ -331,6 +335,11 @@ func (s *Store) getSessionSQLC(ctx context.Context, hash string) (*models.Sessio
 	sess := &models.Session{ID: id, UserID: userID, IP: ip, UserAgent: ua}
 	sess.ExpiresAt, _ = parseTime(expires)
 	sess.CreatedAt, _ = parseTime(created)
+	if elevated != nil && strings.TrimSpace(*elevated) != "" {
+		if t, err := parseTime(*elevated); err == nil {
+			sess.BootstrapElevatedUntil = &t
+		}
+	}
 	if time.Now().UTC().After(sess.ExpiresAt) {
 		return nil, sql.ErrNoRows
 	}

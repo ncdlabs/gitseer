@@ -1,46 +1,42 @@
 # GitSeer — Implementation Plan
 
-**Status:** Execution-ready blueprint (amended for dual-forge / GitSeer branding)  
-**Source of truth:** [`./docs/prd-spec.md`](./prd-spec.md)  
-**Repository state at planning:** greenfield (PRD only; no commits; no application code)  
-**Date:** 2026-09-20 (ADR-029 multi-forge amendment 2026-09-27; prior dual-forge 2026-09-24; ADR-031 GitHub OAuth 2026-09-26; ADR-032 notifications 2026-09-26)  
+**Status:** Living implementation blueprint (keep current; use git history for point-in-time snapshots)  
+**Source of truth (product intent):** [`./docs/prd-spec.md`](./prd-spec.md)  
+**As-built context:** `PROJECT_SHARED_STATE.md`, operator guides under `docs/`, `CHANGELOG.md`  
+**Date:** 2026-09-20 (amended 2026-09-27 multi-forge; 2026-09-26 ADR-031/032; 2026-09-28 browser/OS Web Push + as-built refresh)  
 **License target:** Apache-2.0  
 
-This document is the implementation blueprint future Cursor Agent sessions should follow. Do not silently reinterpret major PRD requirements. If repository reality later conflicts with this plan, update both this file and `PROJECT_SHARED_STATE.md`.
+This document is the implementation blueprint agents and contributors should follow. Do not silently reinterpret major PRD requirements. When repository reality conflicts with this plan, update **this file**, [`prd-spec.md`](./prd-spec.md), and `PROJECT_SHARED_STATE.md`.
 
 ---
 
 ## 1. Repository Assessment
 
-### Current state
+### Current state (as of 1.0.3)
 
 | Path | Status |
 | --- | --- |
-| `docs/prd-spec.md` | Present — sole product/technical specification (2223 lines) |
-| `cmd/`, `internal/`, `web/`, `migrations/`, `deploy/`, `integrations/` | **Missing** |
-| `go.mod`, `package.json`, `Dockerfile`, Compose, Helm | **Missing** |
-| `README.md`, `LICENSE`, `SECURITY.md`, CI | **Missing** |
-| `.git` | Initialized on `main`, **no commits**, only untracked `docs/` |
+| `docs/prd-spec.md` | Living product requirements |
+| `cmd/gitseer`, `internal/*`, `web/`, `migrations/` (through `00018`), `deploy/`, `integrations/` | **Present** — shipping multi-forge app |
+| `go.mod`, `package.json`, Containerfile, Compose, Helm | **Present** |
+| `README.md`, `LICENSE`, `SECURITY.md`, CI / release workflows | **Present** |
+| `.git` | Active history on `main` |
 
 ### Findings
 
-1. **Greenfield build.** There is no existing Go service, React app, database layer, Gitea client, auth, sync, or packaging to reuse.
-2. **No conflicts with the PRD.** Nothing in-repo contradicts [`docs/prd-spec.md`](./prd-spec.md). The PRD’s recommended tree (PRD §49) is the target shape.
-3. **No speculative rebuild risk.** Prefer the PRD layout rather than inventing a parallel architecture.
-4. **First implementation work is scaffolding**, not refactoring.
-5. **Planning artifacts** (`docs/implementation-plan.md`, `PROJECT_SHARED_STATE.md`) are the only non-PRD files expected before coding starts.
-
-### What to create (not refactor)
-
-Everything in PRD §49–§57 and the development sequence in PRD §59.
+1. **As-built product.** GitSeer is a Go single-binary + embedded React SPA with SQLite/Postgres, multi-forge sync/webhooks, attention, inbox, outbound notifications, and in-app browser/OS alerts (SSE + Web Push).
+2. **PRD and this plan are living docs** — amend them when behavior changes; do not leave greenfield fiction in place.
+3. **Further forge types** beyond ADR-029 require an explicit ask.
+4. **Deferred:** Redis, WebSockets, multi-arch/signed public images (see PRD §53).
 
 ### What not to do
 
 - Forge adapters: Gitea, GitHub, GitLab, Bitbucket, Forgejo (ADR-029). Ask before adding further forge types.
 - Do not add Redis for V1 (PRD ADR-011).
 - Do not use WebSockets unless SSE is proven insufficient (PRD §24).
-- Do not fork or patch Gitea source.
+- Do not fork or patch forge source.
 - Do not require per-repository GitSeer config files.
+- Do not call external ncdLabs notification relays (ADR-015 / ADR-032).
 
 ---
 
@@ -48,29 +44,29 @@ Everything in PRD §49–§57 and the development sequence in PRD §59.
 
 ### Product
 
-**GitSeer** (historical PRD name: GitSeer) is a **self-hosted CI/CD and pull-request operations console** for configured forge instances. Dual-forge v1 covers **Gitea + GitHub**. It answers: **what requires attention right now?** across accessible repositories without per-repo setup (PRD §1–§5).
+**GitSeer** is a **self-hosted CI/CD and pull-request operations console** for configured forge instances (**Gitea, Forgejo, GitHub, GitLab, Bitbucket Cloud**). It answers: **what requires attention right now?** across accessible repositories without per-repo setup (PRD §1–§5).
 
 ### Non-negotiables (must not be weakened)
 
 | ID | Requirement | PRD ref |
 | --- | --- | --- |
-| N1 | External companion; no Gitea fork / no Gitea source edits | §18, ADR-001 |
+| N1 | External companion; no forge fork / no forge source edits | §18, ADR-001 |
 | N2 | Zero required repository configuration | §5, ADR-004 |
-| N3 | Gitea is system of record; GitSeer caches/indexes | §5, ADR-002 |
+| N3 | Forges are systems of record; GitSeer caches/indexes | §5, ADR-002 |
 | N4 | Webhooks + periodic reconciliation | §26, ADR-003 |
-| N5 | Gitea OAuth/OIDC identity; no GitSeer passwords | §19, ADR-005 |
+| N5 | Forge OAuth/OIDC identity (PKCE); optional bootstrap admin for first-run only (not forge passwords) | §19, ADR-005 |
 | N6 | Server-side per-user repository authorization (not client filter) | §20, ADR-006 |
 | N7 | Aggregate counters/search must not leak hidden repos | §20 |
 | N8 | Go backend + React/TS frontend | §24, ADR-007/008 |
 | N9 | SQLite default; PostgreSQL supported | §24, ADR-009/010 |
 | N10 | No Redis requirement for V1 | ADR-011 |
 | N11 | Workflow topology from YAML when runtime data insufficient | ADR-012 |
-| N12 | API/UI consume GitSeer models, never raw Gitea payloads | §25, ADR-013 |
+| N12 | API/UI consume GitSeer models, never raw forge payloads | §25, ADR-013 |
 | N13 | Gitea UI via `extra_links.tmpl` / `extra_tabs.tmpl` only; preserve admin customizations | §18, ADR-014 |
-| N14 | No ncdLabs-hosted dependency; telemetry off by default | §39, ADR-015 |
+| N14 | No ncdLabs-hosted dependency; telemetry off by default; no shared notification relay | §39, ADR-015 |
 | N15 | Logs fetched on demand; not persisted by default | §43 |
 | N16 | Capability detection + graceful degradation | §5 |
-| N17 | Target Gitea API family ~1.26 (docs cite 1.26.4) | §5 |
+| N17 | Target Gitea API family ~1.26 (docs cite 1.26.4); other forges degrade by capability | §5 |
 | N18 | Subpath reverse-proxy is first-class | §46 |
 | N19 | Write ops (rerun/cancel) allowed with user-token rules; no silent service-PAT fallback for non-admin | §32 (amended) |
 | N20 | Apache-2.0 recommended | §50 |
@@ -88,15 +84,15 @@ Align with PRD §23–§25:
 
 ```text
 Browser (React SPA, embedded in binary)
-        │  REST /api/v1 + SSE /api/v1/events
+        │  REST /api/v1 + SSE /api/v1/events (+ Web Push for closed-tab alerts)
         ▼
 ┌───────────────────────────────────────────┐
-│  GitSeer / gitseer (Go)                      │
+│  GitSeer / gitseer (Go)                   │
 │  HTTP API · Auth · Authz · Realtime SSE   │
-│  Sync · Webhooks · Attention · Workflows  │
-│  Forge adapter boundary                   │
-│       └── forge/gitea + forge/github      │
-│           (GitLab/Bitbucket/Forgejo in scope)  │
+│  Sync · Webhooks · Attention · Notify     │
+│  Web Push (VAPID) · Workflows             │
+│  Forge adapters: gitea/github/gitlab/     │
+│                  bitbucket/forgejo        │
 └───────────────────┬───────────────────────┘
                     │ encrypted secrets, normalized rows
                     ▼
@@ -104,7 +100,7 @@ Browser (React SPA, embedded in binary)
                     ▲
          API + webhooks (per-instance tokens)
                     │
-              Gitea / GitHub
+     Gitea / Forgejo / GitHub / GitLab / Bitbucket
 ```
 
 ### Runtime components
@@ -119,7 +115,8 @@ Browser (React SPA, embedded in binary)
 | Auth | OAuth code+PKCE, sessions, secure cookies |
 | Authz | Per-user allowed repo set; query scoping |
 | Query API | `/api/v1` DTOs, pagination, filters, OpenAPI |
-| Realtime | SSE fan-out of entity change events |
+| Realtime | SSE fan-out of entity change events (`workflow_run`, `workflow_job`, `pull_request`, `attention`) |
+| Notify | Outbound SMTP/webhooks outbox + Web Push fan-out on attention open |
 | Workflow package | YAML fetch at commit SHA, `needs` DAG, cache |
 | Embed FS | Serve built `web/dist` from Go binary |
 
@@ -148,14 +145,14 @@ Adopt PRD §55 ADRs as binding. Additional decisions required **before or at sta
 | ADR-022 | **Credential encryption:** AES-256-GCM sealed envelope (`GSe` + version byte + nonce‖ciphertext); passphrase via `GITSEER_ENCRYPTION_KEY` (min 16 at config load; wizard paste min 24) hashed with SHA-256 to a 32-byte AES key (v1 derivation — not a password KDF); Decrypt accepts legacy unversioned blobs; rotate via `gitseer rotate-encryption-key` (re-seal DB secrets under current envelope, update on-disk key file when used) | Auth/sync |
 | ADR-023 | **User repo ACL cache:** table `user_repository_access` refreshed on login + periodic + webhook-driven invalidation; **every** list/aggregate query joins/filters by it | Authz — critical |
 | ADR-024 | **Webhook processing:** accept → persist raw envelope → `202`/`200` quickly → in-process worker pool (no Redis) | Sync |
-| ADR-025 | **SSE:** one stream per authenticated session; events are opaque entity refs (`type`, `id`, `repo_id`); clients refetch via Query | Realtime |
+| ADR-025 | **SSE:** one stream per authenticated session; events include `type`, `id`, `repo_id`, and for `attention` optional `title` / `severity` / `deep_link`; clients refetch via Query and may show Notification API banners | Realtime |
 | ADR-026 | **Minimum Gitea version:** declare after capability matrix spike (see Open Questions); degrade Actions features when APIs missing | Before M1 exit |
 | ADR-027 | **Module path:** `github.com/ncdlabs/gitseer` (binary `gitseer`, Helm chart/namespace `gitseer`, env `GITSEER_*`) | Foundation |
 | ADR-028 | **Compose filename:** `compose.yaml` (project preference for `.yaml`) while keeping `docker-compose.yaml` symlink or doc alias if useful | Packaging |
-| ADR-029 | **Multi-forge:** Gitea, GitHub, GitLab, Bitbucket, and Forgejo are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). Forgejo is a thin adapter over the Gitea client with distinct `forge_type` and webhook path. Service PAT remains required for sync on forges without user OAuth; per-user GitHub OAuth is ADR-031. Amended 2026-09-27 to implement GitLab/Bitbucket/Forgejo (previously Coming Soon). | Dual-forge → multi-forge |
-| ADR-030 | **Write ops:** `RerunWorkflowRun` / `CancelWorkflowRun` on `forge.Forge` with API + UI. Non-admin users must use their per-instance forge token (`UserAccessTokenForInstance`); never silent service-PAT fallback. Bootstrap admin may use service PAT with explicit UI warning when no user GitHub token exists. | Stream 4 |
-| ADR-031 | **GitHub OAuth identity parity:** GitHub Authorization Code + PKCE login (`/api/v1/auth/github/login` + callback), tokens in `user_tokens` keyed by `(user_id, instance_id)`, optional link of both forge identities on one user, ACL refresh only for instances with a user token (preserves admin manual grants). Amends ADR-029 “no GitHub OAuth login”. | Stream 6 |
-| ADR-032 | **Outbound notifications:** SMTP digests + Slack/Discord/generic HTTPS webhooks via self-hosted `notification_outbox` worker (`internal/notify`). Secrets sealed with encryption key. No ncdLabs-hosted relay (reaffirms ADR-015). Triggers: attention open matching min severity (default critical); optional daily digest at `digest_hour_utc`. | Stream 7 |
+| ADR-029 | **Multi-forge:** Gitea, GitHub, GitLab, Bitbucket, and Forgejo are in-scope `forge.Forge` implementations (shared inventory UI, per-instance sync/webhooks). Forgejo is a thin adapter over the Gitea client with distinct `forge_type` and webhook path. Service PAT remains required for sync on forges without user OAuth; per-user OAuth is ADR-031 (+ GitLab/Bitbucket/Forgejo OAuth). | Multi-forge |
+| ADR-030 | **Write ops:** `RerunWorkflowRun` / `CancelWorkflowRun` on `forge.Forge` with API + UI. Non-admin users must use their per-instance forge token (`UserAccessTokenForInstance`); never silent service-PAT fallback. Bootstrap admin may use service PAT with explicit UI warning when no user token exists. | Stream 4 |
+| ADR-031 | **Multi-forge OAuth identity:** Authorization Code + PKCE for Gitea, Forgejo, GitHub, GitLab, Bitbucket; tokens in `user_tokens` keyed by `(user_id, instance_id)`; optional link of multiple forge identities on one user (Forgejo reuses Gitea identity columns); ACL refresh only for instances with a user token. | Stream 6 |
+| ADR-032 | **Notifications:** Outbound SMTP digests + Slack/Discord/generic/incident HTTPS webhooks via self-hosted `notification_outbox` (`internal/notify`). Secrets sealed with encryption key. No ncdLabs-hosted relay (reaffirms ADR-015). Triggers: attention open matching min severity (default critical); optional daily digest. **In-app browser/OS alerts:** SSE `attention` + Web Notification API; closed-tab Web Push via self-hosted VAPID (`internal/webpush`, migration `00018`); not the shared ncdLabs `notification-api` service. | Stream 7 |
 
 **No ADR needed yet for:** additional forge types beyond ADR-029.
 
@@ -477,22 +474,25 @@ Also:
 
 ### App shell
 
-- Nav: Overview (Attention-first), Pull Requests, Pipelines, Repositories, Runners, Activity, Settings  
-- Default route: Attention / Overview per PRD §7–§8  
-- Global search palette  
-- Link-out buttons to Gitea HTML URLs from models  
+- Nav: Dashboard, Inbox, Attention, Pull Requests, Pipelines, Repositories; Settings; Active Actions flyout  
+- Default route: Dashboard (`/`) with Attention summary  
+- Global command palette (search)  
+- Link-out buttons to forge HTML URLs from models  
 
-### Pages (PRD §9–§17)
+### Pages (as-built)
 
 | Route | Implementation notes |
 | --- | --- |
-| `/` or `/attention` | Attention queue + summary counters |
-| `/pulls`, `/pulls/:owner/:repo/:number` | Table + detail tabs |
-| `/pipelines`, `/pipelines/:owner/:repo/:run` | Runs table + DAG |
-| `/repositories`, `/repositories/:owner/:repo` | Health rows + Repository page |
-| `/runners` | Empty/disabled state if no capability |
-| `/activity` | Event stream + SSE invalidation |
-| `/settings/*` | Instance, integration, auth, retention |
+| `/` | Dashboard summary/stats + attention preview |
+| `/inbox` | Personal ACL-scoped queue |
+| `/attention` | Attention queue + mutes |
+| `/pull-requests` | Open PR table |
+| `/pipelines`, `/pipelines/:id` | Runs by action + run detail/DAG |
+| `/repositories`, `/repositories/:owner/:repo` | Inventory + detail/health |
+| `/actions-popout` | Detached Active Actions window |
+| `/wallboard` | Token-gated read-only wallboard |
+| `/settings` | Preferences / Integration / Access / Notifications / Status |
+| `/setup` | First-run wizard |
 
 ### UX standards
 
@@ -805,64 +805,47 @@ Minor unknowns must not stall M0–M2.
 
 ```text
 /
-├── cmd/gitseer/                    # main + subcommands (serve, install-ui, uninstall-ui, version)
+├── cmd/gitseer/                 # serve, version, install-ui, uninstall-ui, backup, restore, rotate-encryption-key
 ├── internal/
-│   ├── api/                     # /api/v1 HTTP handlers, DTOs, OpenAPI wiring
-│   ├── auth/                    # OAuth PKCE, sessions, cookies
-│   ├── authz/                   # ACL refresh + query scope helpers
-│   ├── attention/               # rules + evaluator
-│   ├── config/                  # YAML + env
-│   ├── database/                # open DB, goose, pragmas, dialector helpers
-│   ├── forge/                   # Forge interface + shared types
-│   │   └── gitea/               # HTTP client, mappers, capabilities
-│   ├── models/                  # domain structs (no DB tags required)
+│   ├── api/                     # /api/v1 HTTP handlers
+│   ├── auth/ / authz/
+│   ├── attention/
+│   ├── backup/
+│   ├── config/
+│   ├── crypto/
+│   ├── database/
+│   ├── forge/{gitea,github,gitlab,bitbucket,forgejo,all}/
+│   ├── models/
+│   ├── notify/                  # outbound outbox worker
+│   ├── webpush/                 # VAPID Web Push
 │   ├── realtime/                # SSE hub
-│   ├── server/                  # router mount, middleware, embed UI
-│   ├── store/                   # sqlc-backed persistence
-│   ├── sync/                    # initial, incremental, reconcile, lease
-│   ├── webhooks/                # verify, dedupe, dispatch
-│   ├── workflows/               # YAML parse, DAG, cache
-│   ├── setup/                   # first-run wizard API
-│   ├── crypto/                  # envelope encryption helpers
-│   ├── log/                     # slog JSON setup
-│   └── metrics/                 # prometheus collectors
-├── migrations/                  # SQL migrations
-├── web/                         # Vite React app
-│   ├── package.json
-│   └── src/
-│       ├── pages/
-│       ├── components/
-│       ├── api/                 # fetch client + types
-│       ├── hooks/               # SSE, theme
-│       └── styles/
-├── integrations/gitea/          # tmpl snippets, css, installer assets
-├── deploy/
-│   ├── docker/
-│   ├── compose/
-│   └── helm/
-├── docs/                        # prd-spec, this plan, install, architecture
-├── test/
-│   ├── fixtures/
-│   ├── integration/
-│   └── e2e/                     # Playwright
+│   ├── server/                  # router, embed UI
+│   ├── settings/
+│   ├── store/                   # sqlc + hand-written dynamic SQL
+│   ├── sync/
+│   ├── webhooks/
+│   ├── workflows/
+│   ├── retention/
+│   ├── uiinstall/
+│   ├── metrics/ / ratelimit/ / log/ / theme/
+├── migrations/ (+ postgres/)
+├── web/                         # Vite React app (+ public/sw.js)
+├── integrations/gitea/
+├── deploy/{docker,helm}/
+├── docs/
 ├── .github/workflows/
-├── Dockerfile
 ├── compose.yaml
 ├── go.mod
-├── LICENSE
-├── README.md
-├── SECURITY.md
-├── CONTRIBUTING.md
-├── CHANGELOG.md
 └── PROJECT_SHARED_STATE.md
 ```
 
 ### Package responsibilities (keep boundaries boring)
 
-- **forge:** only place that speaks Gitea protocol  
+- **forge:** only place that speaks forge protocols  
 - **store:** only place that speaks SQL  
 - **api:** HTTP + authz checks + DTO mapping from models  
-- **sync/webhooks:** mutate via store; trigger attention + realtime  
+- **sync/webhooks:** mutate via store; trigger attention + realtime + notify  
+- **notify / webpush:** outbound channels and browser/OS push  
 - **web:** consumes `/api/v1` only  
 
 Avoid micro-packages like `internal/pr` / `internal/job` unless a file grows unwieldy.

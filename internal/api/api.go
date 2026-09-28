@@ -36,6 +36,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/sync"
 	"github.com/ncdlabs/gitseer/internal/theme"
 	"github.com/ncdlabs/gitseer/internal/webhooks"
+	"github.com/ncdlabs/gitseer/internal/webpush"
 	"github.com/ncdlabs/gitseer/internal/workflows"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -58,6 +59,7 @@ type Handler struct {
 	hub      *realtime.Hub
 	settings *settings.Manager
 	notify   *notify.Service
+	push     *webpush.Sender
 	log      *slog.Logger
 	version  string
 }
@@ -65,6 +67,11 @@ type Handler struct {
 // SetNotify wires the outbound notification service (optional).
 func (h *Handler) SetNotify(n *notify.Service) {
 	h.notify = n
+}
+
+// SetWebPush wires the self-hosted Web Push sender (optional).
+func (h *Handler) SetWebPush(p *webpush.Sender) {
+	h.push = p
 }
 
 func New(
@@ -126,16 +133,22 @@ func (h *Handler) metricsBearerOK(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-// bootstrapAuthAvailable is true when the bootstrap password is set and either
-// setup is incomplete or local skip-setup recovery is enabled.
+// bootstrapAuthAvailable is true when bootstrap username/password login is allowed.
 func (h *Handler) bootstrapAuthAvailable() bool {
-	if !h.auth.BootstrapEnabled() {
+	setupDone := h.settings != nil && h.settings.SetupCompleted()
+	info, err := h.auth.BootstrapInfo(context.Background(), setupDone, h.cfg.Dev.AllowSkipSetup)
+	if err != nil {
 		return false
 	}
-	if h.settings != nil && h.settings.SetupCompleted() && !h.cfg.Dev.AllowSkipSetup {
+	return info.LoginEnabled
+}
+
+func (h *Handler) bootstrapUnclaimed() bool {
+	info, err := h.auth.BootstrapInfo(context.Background(), false, true)
+	if err != nil {
 		return false
 	}
-	return true
+	return info.Unclaimed
 }
 
 func (h *Handler) Routes(r chi.Router) {
@@ -151,6 +164,11 @@ func (h *Handler) Routes(r chi.Router) {
 		r.With(h.requireAuth).Get("/notifications/settings", h.getNotificationSettings)
 		r.With(h.requireAuth, h.requireCSRF).Put("/notifications/settings", h.putNotificationSettings)
 		r.With(h.requireAuth, h.requireCSRF).Post("/notifications/test", h.sendTestNotification)
+		r.With(h.requireAuth).Get("/alerts/prefs", h.getAlertPrefs)
+		r.With(h.requireAuth, h.requireCSRF).Put("/alerts/prefs", h.putAlertPrefs)
+		r.With(h.requireAuth, h.requireCSRF).Post("/alerts/push/subscribe", h.pushSubscribe)
+		r.With(h.requireAuth, h.requireCSRF).Post("/alerts/push/unsubscribe", h.pushUnsubscribe)
+		r.With(h.requireAuth, h.requireCSRF).Post("/alerts/push/test", h.sendTestBrowserAlert)
 
 		r.With(h.requireAuth).Get("/instances", h.listInstances)
 		r.With(h.requireAuth, h.requireCSRF).Post("/instances", h.createInstance)
@@ -172,7 +190,10 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/bitbucket/callback", h.forgeOAuthCallback("bitbucket"))
 			r.With(authLimit.Middleware).Get("/forgejo/login", h.forgeOAuthLogin("forgejo"))
 			r.Get("/forgejo/callback", h.forgeOAuthCallback("forgejo"))
+			r.With(authLimit.Middleware, h.requireCSRF).Post("/bootstrap/claim", h.bootstrapClaim)
 			r.With(authLimit.Middleware, h.requireCSRF).Post("/bootstrap/login", h.bootstrapLogin)
+			r.With(authLimit.Middleware, h.requireAuth, h.requireCSRF).Post("/bootstrap/elevate", h.bootstrapElevate)
+			r.With(authLimit.Middleware, h.requireAuth, h.requireCSRF).Post("/bootstrap/password", h.bootstrapPassword)
 			r.With(h.requireCSRF).Post("/logout", h.logout)
 			r.Get("/me", h.me)
 		})
@@ -292,11 +313,12 @@ func (h *Handler) requireCSRF(next http.Handler) http.Handler {
 
 func (h *Handler) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, _, err := h.auth.UserFromRequest(r.Context(), r)
+		user, sess, err := h.auth.UserFromRequest(r.Context(), r)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		user = auth.ApplyEffectiveBootstrap(user, sess)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey, user)))
 	})
 }
@@ -320,23 +342,73 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
-	if !h.bootstrapAuthAvailable() {
-		if h.auth.BootstrapEnabled() {
-			writeError(w, http.StatusServiceUnavailable, "bootstrap auth is disabled after setup; use OAuth or set GITSEER_ALLOW_SKIP_SETUP for local recovery")
-			return
-		}
-		writeError(w, http.StatusServiceUnavailable, "bootstrap auth is not configured; set GITSEER_AUTH_BOOTSTRAP_PASSWORD")
+func (h *Handler) bootstrapClaim(w http.ResponseWriter, r *http.Request) {
+	if !h.bootstrapUnclaimed() {
+		writeError(w, http.StatusConflict, "bootstrap already claimed")
 		return
 	}
 	var body struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	user, token, err := h.auth.LoginBootstrap(r.Context(), body.Password, r.RemoteAddr, r.UserAgent())
+	user, token, err := h.auth.ClaimBootstrap(r.Context(), body.Username, body.Password, r.RemoteAddr, r.UserAgent())
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrBootstrapAlreadyClaimed):
+			writeError(w, http.StatusConflict, "bootstrap already claimed")
+		case errors.Is(err, auth.ErrInvalidUsername):
+			writeError(w, http.StatusBadRequest, "invalid username")
+		case errors.Is(err, auth.ErrWeakPassword):
+			writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		case errors.Is(err, store.ErrLoginConflict):
+			writeError(w, http.StatusConflict, "username already in use")
+		default:
+			h.log.Error("bootstrap claim", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
+		return
+	}
+	if inst, _ := h.store.GetPrimaryInstance(r.Context()); inst != nil {
+		_ = h.store.GrantBootstrapAllAccessAllInstances(r.Context(), user.ID)
+	}
+	h.auth.SetSessionCookie(w, token)
+	csrf, _ := h.auth.IssueCSRFToken(w)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user": map[string]any{
+			"id": user.ID, "login": user.Login, "display_name": user.DisplayName,
+			"is_bootstrap_admin": true,
+		},
+		"csrf_token": csrf,
+	})
+}
+
+func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.bootstrapAuthAvailable() {
+		if h.auth.BootstrapEnabled() {
+			writeError(w, http.StatusServiceUnavailable, "bootstrap login is disabled after setup; use OAuth or Become Bootstrap in Settings")
+			return
+		}
+		writeError(w, http.StatusServiceUnavailable, "bootstrap is not claimed yet; open the app to set the bootstrap password")
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if body.Username == "" {
+		// Backward compatible: password-only body uses stored username.
+		info, _ := h.auth.BootstrapInfo(r.Context(), false, true)
+		body.Username = info.Username
+	}
+	user, token, err := h.auth.LoginBootstrap(r.Context(), body.Username, body.Password, r.RemoteAddr, r.UserAgent())
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
@@ -357,6 +429,72 @@ func (h *Handler) bootstrapLogin(w http.ResponseWriter, r *http.Request) {
 		},
 		"csrf_token": csrf,
 	})
+}
+
+func (h *Handler) bootstrapElevate(w http.ResponseWriter, r *http.Request) {
+	user, sess, err := h.auth.UserFromRequest(r.Context(), r)
+	if err != nil || user == nil || sess == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !h.auth.BootstrapEnabled() {
+		writeError(w, http.StatusServiceUnavailable, "bootstrap password is not configured")
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	until, err := h.auth.ElevateBootstrap(r.Context(), sess, body.Password)
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			writeError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                       true,
+		"bootstrap_elevated_until": until.UTC().Format(time.RFC3339),
+		"message":                  "Bootstrap access granted for 5 minutes",
+	})
+}
+
+func (h *Handler) bootstrapPassword(w http.ResponseWriter, r *http.Request) {
+	user, sess, err := h.auth.UserFromRequest(r.Context(), r)
+	if err != nil || user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	elevated := sess != nil && sess.BootstrapElevatedUntil != nil && time.Now().UTC().Before(sess.BootstrapElevatedUntil.UTC())
+	if !elevated {
+		writeError(w, http.StatusForbidden, "bootstrap elevation required")
+		return
+	}
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := h.auth.SetBootstrapPassword(r.Context(), body.CurrentPassword, body.NewPassword); err != nil {
+		switch {
+		case errors.Is(err, auth.ErrInvalidCredentials):
+			writeError(w, http.StatusUnauthorized, "invalid credentials")
+		case errors.Is(err, auth.ErrWeakPassword):
+			writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *Handler) oauthLogin(w http.ResponseWriter, r *http.Request) {
@@ -712,7 +850,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
-	user, _, err := h.auth.UserFromRequest(r.Context(), r)
+	user, sess, err := h.auth.UserFromRequest(r.Context(), r)
 	csrf := ""
 	if c, err := r.Cookie(auth.CSRFCookieName); err == nil {
 		csrf = c.Value
@@ -727,28 +865,45 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	effective := auth.ApplyEffectiveBootstrap(user, sess)
 	authzMode := "acl"
-	if user.IsBootstrapAdmin {
+	if effective.IsBootstrapAdmin {
 		authzMode = "bootstrap_allow_all"
 	}
+	setupDone := h.settings != nil && h.settings.SetupCompleted()
+	info, _ := h.auth.BootstrapInfo(r.Context(), setupDone, h.cfg.Dev.AllowSkipSetup)
 	out := map[string]any{
-		"authenticated":         true,
-		"id":                    user.ID,
-		"login":                 user.Login,
-		"display_name":          user.DisplayName,
-		"is_bootstrap_admin":    user.IsBootstrapAdmin,
-		"authz":                 authzMode,
-		"csrf_token":            csrf,
-		"has_gitea":             user.GiteaUserID != nil,
-		"has_github":            user.GitHubUserID != nil,
-		"has_gitlab":            user.GitLabUserID != nil,
-		"has_bitbucket":         user.BitbucketUserID != nil,
-		"github_oauth_enabled":  h.auth.GitHubOAuthEnabled(),
-		"gitlab_oauth_enabled":  h.auth.GitLabOAuthEnabled(),
+		"authenticated":           true,
+		"id":                      user.ID,
+		"login":                   user.Login,
+		"display_name":            user.DisplayName,
+		"is_bootstrap_admin":      effective.IsBootstrapAdmin,
+		"is_bootstrap_permanent":  user.IsBootstrapAdmin,
+		"bootstrap_login_enabled": info.LoginEnabled,
+		"can_elevate_bootstrap":   info.HasPassword && !user.IsBootstrapAdmin,
+		"authz":                   authzMode,
+		"csrf_token":              csrf,
+		"has_gitea":               user.GiteaUserID != nil,
+		"has_github":              user.GitHubUserID != nil,
+		"has_gitlab":              user.GitLabUserID != nil,
+		"has_bitbucket":           user.BitbucketUserID != nil,
+		"github_oauth_enabled":    h.auth.GitHubOAuthEnabled(),
+		"gitlab_oauth_enabled":    h.auth.GitLabOAuthEnabled(),
 		"bitbucket_oauth_enabled": h.auth.BitbucketOAuthEnabled(),
-		"forgejo_oauth_enabled": h.auth.ForgejoOAuthEnabled(),
+		"forgejo_oauth_enabled":   h.auth.ForgejoOAuthEnabled(),
 	}
-	if themeID, giteaName, ok := h.giteaThemeForUser(r.Context(), user); ok {
+	if sess != nil && sess.BootstrapElevatedUntil != nil && time.Now().UTC().Before(sess.BootstrapElevatedUntil.UTC()) {
+		out["bootstrap_elevated_until"] = sess.BootstrapElevatedUntil.UTC().Format(time.RFC3339)
+		out["can_elevate_bootstrap"] = false
+	}
+	// Permanent bootstrap can also re-elevate to open the Bootstrap password tab.
+	if user.IsBootstrapAdmin && info.HasPassword {
+		out["can_elevate_bootstrap"] = true
+		if until, ok := out["bootstrap_elevated_until"]; ok && until != nil {
+			out["can_elevate_bootstrap"] = false
+		}
+	}
+	if themeID, giteaName, ok := h.giteaThemeForUser(r.Context(), effective); ok {
 		out["theme"] = string(themeID)
 		out["gitea_theme"] = giteaName
 	}
@@ -1935,29 +2090,85 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []models.Job{}
 	}
-	var graph any
+	var graph []models.WorkflowNode
+	var graphError string
 	workflowPath := workflows.NormalizeWorkflowPath(run.WorkflowPath)
 	if workflowPath == "" {
 		workflowPath = run.WorkflowPath
 	}
 	if workflowPath != "" && run.CommitSHA != "" {
+		cachedHit := false
 		if nodesJSON, err := h.store.GetWorkflowGraph(r.Context(), run.RepoID, workflowPath, run.CommitSHA); err == nil {
-			_ = json.Unmarshal([]byte(nodesJSON), &graph)
-		} else if repo, rerr := h.store.GetRepositoryByID(r.Context(), run.RepoID); rerr == nil {
-			if client, err := h.forgeClientForRepo(r.Context(), user, repo); err == nil {
-				yamlBytes, err := client.GetWorkflowYAML(r.Context(), models.RepoRef{Owner: run.RepoOwner, Name: run.RepoName}, workflowPath, run.CommitSHA)
-				if err == nil {
-					nodes, err := workflows.ParseNeedsDAG(yamlBytes)
-					if err == nil {
-						b, _ := json.Marshal(nodes)
-						_ = h.store.UpsertWorkflowGraph(r.Context(), run.RepoID, workflowPath, run.CommitSHA, string(b))
-						graph = nodes
+			var cached []models.WorkflowNode
+			if json.Unmarshal([]byte(nodesJSON), &cached) == nil && len(cached) > 0 {
+				graph = cached
+				cachedHit = true
+			}
+			// Empty cached graphs are treated as a miss (legacy poison from JSON Contents bodies).
+		}
+		if !cachedHit {
+			repo, rerr := h.store.GetRepositoryByID(r.Context(), run.RepoID)
+			if rerr != nil {
+				graphError = "repository not found for workflow YAML"
+			} else {
+				client, cerr := h.forgeClientForRepo(r.Context(), user, repo)
+				if cerr != nil {
+					graphError = cerr.Error()
+				} else {
+					yamlBytes, yerr := client.GetWorkflowYAML(r.Context(), models.RepoRef{Owner: run.RepoOwner, Name: run.RepoName}, workflowPath, run.CommitSHA)
+					if yerr != nil {
+						graphError = yerr.Error()
+					} else {
+						nodes, perr := workflows.ParseNeedsDAG(yamlBytes)
+						if perr != nil {
+							graphError = perr.Error()
+						} else if len(nodes) == 0 {
+							graphError = "workflow YAML has no jobs"
+						} else {
+							b, _ := json.Marshal(nodes)
+							_ = h.store.UpsertWorkflowGraph(r.Context(), run.RepoID, workflowPath, run.CommitSHA, string(b))
+							graph = nodes
+						}
 					}
 				}
 			}
 		}
+	} else if workflowPath == "" {
+		graphError = "workflow path missing"
+	} else if run.CommitSHA == "" {
+		graphError = "commit SHA missing"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": run, "jobs": jobs, "graph": graph})
+
+	if len(graph) == 0 && len(jobs) > 0 {
+		graph = flatGraphFromJobs(jobs)
+	}
+
+	out := map[string]any{"run": run, "jobs": jobs, "graph": graph}
+	if graphError != "" {
+		out["graph_error"] = graphError
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func flatGraphFromJobs(jobs []models.Job) []models.WorkflowNode {
+	nodes := make([]models.WorkflowNode, 0, len(jobs))
+	seen := map[string]struct{}{}
+	for _, j := range jobs {
+		key := strings.TrimSpace(j.Name)
+		if key == "" {
+			key = strconv.FormatInt(j.ExternalID, 10)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		nodes = append(nodes, models.WorkflowNode{
+			JobKey: key,
+			Name:   key,
+			Needs:  nil,
+		})
+	}
+	return nodes
 }
 
 func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {

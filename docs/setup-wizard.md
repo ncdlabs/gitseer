@@ -8,7 +8,7 @@ Shown at `/setup` for bootstrap admins when `setup_completed` is false (gated in
 
 ### 1. Prepare
 
-- **GitSeer public URL** (`server_external_url`) — where forges reach GitSeer for webhooks and Gitea OAuth
+- **GitSeer public URL** (`server_external_url`) — where forges reach GitSeer for webhooks and OAuth callbacks
 - **Encryption key** — seals forge tokens, webhook secrets, and OAuth client secrets in the database
   - **Generate Key** — server creates a random passphrase, persists it next to the SQLite DB (or under `data/` for Postgres), and shows it once for backup
   - **Save Key** — paste an existing passphrase (**minimum 24 characters** for the wizard API; env/config accept ≥16 — prefer a generated key)
@@ -34,8 +34,8 @@ Then confirmation modals:
 
 | Modal | Actions |
 |-------|---------|
-| Webhook | **Create Webhook** (`POST /api/v1/setup/create-webhook`) or **I'll Add It in Gitea** / GitHub manual instructions. After setup, Settings → Status / Integration: **Ensure Webhook** + **Verify Delivery**. |
-| OAuth | **Create OAuth App** (`POST /api/v1/setup/create-oauth`), **I'll Configure It**, or **Skip OAuth** (Gitea; bootstrap-only) |
+| Webhook | **Create Webhook** (`POST /api/v1/setup/create-webhook`) or **I'll Add It** with forge-specific manual instructions. After setup, Settings → Status / Integration: **Ensure Webhook** + **Verify Delivery**. |
+| OAuth | **Create OAuth App** (`POST /api/v1/setup/create-oauth`), **I'll Configure It**, or **Skip OAuth** (where auto-create is supported; bootstrap-only otherwise) |
 
 ### 5. Finish
 

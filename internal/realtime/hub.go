@@ -12,9 +12,13 @@ import (
 )
 
 type Event struct {
-	Type   string `json:"type"`
-	ID     int64  `json:"id"`
-	RepoID int64  `json:"repo_id"`
+	Type     string `json:"type"`
+	ID       int64  `json:"id"`
+	RepoID   int64  `json:"repo_id"`
+	Title    string `json:"title,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	RepoFull string `json:"repo_full,omitempty"`
+	DeepLink string `json:"deep_link,omitempty"`
 }
 
 // AllowFunc decides whether a subscriber may receive an event.

@@ -32,20 +32,24 @@ Env/config accept keys ≥**16** characters. The setup wizard **Save Key** path 
 
 ## OAuth redirect mismatch
 
-`server.external_url` must match the URL in the browser and the Gitea OAuth app redirect:
+`server.external_url` must match the URL in the browser and the OAuth app redirect for that forge:
 
 ```text
-{external_url}/api/v1/auth/callback
+{external_url}/api/v1/auth/callback                 # Gitea
+{external_url}/api/v1/auth/forgejo/callback
+{external_url}/api/v1/auth/github/callback
+{external_url}/api/v1/auth/gitlab/callback
+{external_url}/api/v1/auth/bitbucket/callback
 ```
 
-Subpath deploys must include the path in `external_url`. Client `X-Forwarded-Prefix` is ignored. With multiple Gitea instances, OAuth uses the [primary Gitea instance](authentication-and-acl.md#primary-gitea-instance).
+Subpath deploys must include the path in `external_url`. Client `X-Forwarded-Prefix` is ignored. With multiple Gitea instances, Gitea OAuth uses the [primary Gitea instance](authentication-and-acl.md#primary-gitea-instance).
 
 ## Empty UI / no repositories
 
 1. Confirm each instance’s service token can list repos  
-2. Click **Sync now** after first admin login (bootstrap admin)  
+2. Click **Sync Now** after first admin login (bootstrap admin)  
 3. If sync appears to no-op, another holder may hold the per-instance sync lease — wait one reconcile interval  
-4. Non-bootstrap users need ACL rows (Gitea login + ACL refresh; sync does not grant ACL)
+4. Non-bootstrap users need ACL rows (forge OAuth login + ACL refresh for instances with a stored user token; sync does not grant ACL)
 
 ## CSRF failures on Save / Sync
 
@@ -53,7 +57,7 @@ Ensure the SPA received a CSRF token (`/api/v1/ui-config` or `/auth/me`) and sen
 
 ## Bootstrap login unavailable
 
-Empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password or use Gitea OAuth.
+Empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password or use forge OAuth.
 
 ## Integration list empty / 403
 
@@ -78,7 +82,7 @@ Settings → **Status** shows `encryption_healthy: false` with `encryption_error
 ## Webhooks not arriving
 
 1. Confirm per-instance delivery URL under Integration / Status  
-2. Use **Ensure Webhook** (Gitea system hook; GitHub org hook when PAT allows)  
+2. Use **Ensure Webhook** (Gitea/Forgejo system hook; GitHub org/repo when PAT allows; GitLab/Bitbucket often return a manual preview)  
 3. Use **Verify Delivery** then send a Ping from the forge (or **Confirm Delivery** after a recent delivery)  
 4. Check webhook 24h stats and last error on Status  
 
@@ -95,6 +99,14 @@ Store paths use `RETURNING id` and `FOR UPDATE SKIP LOCKED` (webhook claim) on P
 - Sync leases are per-`instance_id` in the DB — only one reconciler holds a given lease at a time (safe across replicas)
 - SSE remains **in-process** (no Redis) — each replica has its own subscriber set; use sticky sessions or accept that clients only see events from the pod they connected to
 - Prefer `replicaCount: 1` unless you accept those SSE caveats; set `replicaCount > 1` only with documented awareness
+
+## Browser / OS alerts not appearing
+
+1. Confirm Settings → **Notifications** → **Browser & OS Alerts** shows enabled and permission is **granted** (browser site settings).
+2. Web Push needs a **secure context** (HTTPS or localhost). Plain HTTP on a LAN hostname will not register push.
+3. Check logs for `generated web push VAPID keys` or `web push VAPID keys unavailable` on startup; file lives beside the DB (`gitseer.vapid.json`) unless `GITSEER_VAPID_*` overrides.
+4. Open-tab banners use SSE (`attention` events) and only show when the document is **hidden**; focused tabs skip the OS banner to avoid duplicates. Closed-tab delivery needs an active push subscription (**Send Test Push**).
+5. Severity filter on the prefs panel must be ≤ the attention item’s severity (default critical-only).
 
 ## Metrics 401
 

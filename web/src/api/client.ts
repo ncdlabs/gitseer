@@ -5,6 +5,10 @@ export type User = {
   login: string;
   display_name: string;
   is_bootstrap_admin: boolean;
+  is_bootstrap_permanent?: boolean;
+  bootstrap_elevated_until?: string | null;
+  bootstrap_login_enabled?: boolean;
+  can_elevate_bootstrap?: boolean;
   authz?: string;
   csrf_token?: string;
   /** Mapped from Gitea defaults only; omitted for custom/unknown themes. */
@@ -441,9 +445,10 @@ export type UIConfig = {
   bitbucket_oauth_enabled?: boolean;
   forgejo_oauth_enabled?: boolean;
   bootstrap_enabled?: boolean;
+  bootstrap_unclaimed?: boolean;
+  bootstrap_username?: string;
+  bootstrap_login_enabled?: boolean;
   allow_skip_setup?: boolean;
-  /** Present only when allow_skip_setup is true (local npm start). */
-  dev_bootstrap_password?: string;
   csrf_token?: string;
 };
 
@@ -508,6 +513,21 @@ export type NotificationSettingsPatch = {
   incident_enabled?: boolean;
   incident_webhook_url?: string;
   clear_incident_webhook?: boolean;
+};
+
+export type AlertPrefs = {
+  browser_enabled: boolean;
+  push_enabled: boolean;
+  min_severity: string;
+  push_configured: boolean;
+  vapid_public_key?: string;
+  subscription_count: number;
+};
+
+export type AlertPrefsPatch = {
+  browser_enabled?: boolean;
+  push_enabled?: boolean;
+  min_severity?: string;
 };
 
 export type IntegrationPublic = {
@@ -875,13 +895,36 @@ export const api = {
     }
     return body;
   },
-  login: async (password: string) => {
+  login: async (username: string, password: string) => {
     const out = await request<{ user: User; csrf_token?: string }>("/api/v1/auth/bootstrap/login", {
       method: "POST",
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     });
     if (out.csrf_token) setCsrfToken(out.csrf_token);
     return out;
+  },
+  claimBootstrap: async (username: string, password: string) => {
+    const out = await request<{ user: User; csrf_token?: string }>("/api/v1/auth/bootstrap/claim", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    if (out.csrf_token) setCsrfToken(out.csrf_token);
+    return out;
+  },
+  elevateBootstrap: async (password: string) => {
+    return request<{ ok: boolean; bootstrap_elevated_until: string; message: string }>(
+      "/api/v1/auth/bootstrap/elevate",
+      {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      },
+    );
+  },
+  setBootstrapPassword: async (currentPassword: string, newPassword: string) => {
+    return request<{ status: string }>("/api/v1/auth/bootstrap/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
   },
   logout: () => request<{ status: string }>("/api/v1/auth/logout", { method: "POST" }),
   users: () => request<{ users: ACLUser[] }>("/api/v1/users"),
@@ -961,6 +1004,24 @@ export const api = {
     }),
   sendTestNotification: () =>
     request<{ queued: number }>("/api/v1/notifications/test", { method: "POST" }),
+  alertPrefs: () => request<{ prefs: AlertPrefs }>("/api/v1/alerts/prefs"),
+  updateAlertPrefs: (body: AlertPrefsPatch) =>
+    request<{ prefs: AlertPrefs }>("/api/v1/alerts/prefs", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  pushSubscribe: (body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    request<{ id: number }>("/api/v1/alerts/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  pushUnsubscribe: (body: { endpoint: string }) =>
+    request<{ ok: boolean }>("/api/v1/alerts/push/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  sendTestBrowserAlert: () =>
+    request<{ sent: number }>("/api/v1/alerts/push/test", { method: "POST" }),
   purgeRetention: () =>
     request<PurgeRetentionResponse>("/api/v1/admin/purge-retention", { method: "POST" }),
   downloadGiteaUISnippets: async (instanceId: number, format: "zip" | "text" = "zip") => {
@@ -1036,7 +1097,9 @@ export const api = {
   activeWorkflowRuns: () =>
     request<{ items: ActiveRunItem[]; total: number }>("/api/v1/workflow-runs/active"),
   workflowRun: (id: number) =>
-    request<{ run: WorkflowRun; jobs: Job[]; graph: WorkflowNode[] | null }>(`/api/v1/workflow-runs/${id}`),
+    request<{ run: WorkflowRun; jobs: Job[]; graph: WorkflowNode[] | null; graph_error?: string }>(
+      `/api/v1/workflow-runs/${id}`,
+    ),
   rerunWorkflowRun: (id: number) =>
     request<{ ok: boolean; operation: string; run_id: number; used_service_pat?: boolean }>(
       `/api/v1/workflow-runs/${id}/rerun`,

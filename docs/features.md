@@ -43,6 +43,11 @@
 - Reason chips + forge filter; saved filter presets via `saved_filters` CRUD
 - Command palette: **Inbox**, **Inbox · Failing CI**, **Inbox · Blocked On Me**, **Inbox · Review Requests**
 
+## Notifications
+
+- **Browser & OS Alerts** — per-user; Web Notification API (SSE `attention`) + self-hosted Web Push (`/sw.js`, VAPID). Settings → Notifications.
+- **Outbound** — bootstrap admin SMTP / Slack / Discord / HTTPS / incident webhooks via `notification_outbox`. Same Settings tab.
+
 ## Attention
 
 Rule engine with severities `critical` / `warning` / `waiting`. See [Attention Engine](attention-engine.md). Attention and Inbox share **Save Filter** presets (`GET/POST/PUT/DELETE /api/v1/saved-filters`).
@@ -65,9 +70,13 @@ Optional on-demand **Log Tail** on attention items linked to a job/run (forge fe
 
 - Workflow runs grouped by action (`repo` + `workflow_path`, fallback name)
 - Expand an action to list individual runs; open a run for jobs/graph/logs
-- Job logs fetched on demand (`GET /api/v1/jobs/{id}/logs`) via the repo’s forge instance client: Gitea OAuth users use their stored token; GitHub (and bootstrap) use the instance service PAT
-- **Rerun Workflow** / **Cancel Workflow** on pipeline detail and Active Actions (confirm dialogs). Gitea OAuth users call the forge with their user token; never silent service-PAT fallback for non-admin. Bootstrap admin may use the service PAT with an explicit UI warning (required for GitHub until OAuth login). Cancel only for `queued` / `waiting` / `running`.
+- Job logs fetched on demand (`GET /api/v1/jobs/{id}/logs`) via the repo’s forge instance client: non-admin uses their per-instance OAuth token when present (403 if missing for forges that require it); bootstrap admin may use the instance service PAT
+- **Rerun Workflow** / **Cancel Workflow** on pipeline detail and Active Actions (confirm dialogs). Non-admin calls the forge with `UserAccessTokenForInstance` only — never silent service-PAT fallback. Bootstrap admin may use the service PAT with an explicit UI warning when no user token exists. Cancel only for `queued` / `waiting` / `running`.
+
+## Active Actions
+
 - Shell **Active Actions** flyout (left rail, near Sync / account): live `queued` / `waiting` / `running` runs with job-level and step-level progress bars; fed by `workflow_run` / `workflow_job` webhooks via SSE; **Pop Out** opens a dedicated browser window at `/actions-popout` (OS-draggable; run links prefer the opener)
+- Attention open/reopen also emits SSE `attention` (browser/OS alerts; see Notifications)
 
 ## Search
 
@@ -81,7 +90,9 @@ Header search (⌘/Ctrl+K) is a command palette over:
 
 - Tabbed `/settings` UI: **Preferences**, **Integration**, **Access**, **Notifications**, **Status** (hash deep-links `#preferences` / `#integration` / `#access` / `#notifications` / `#status`)
 - Preferences: instance name, sync history days, long-running threshold, **Attention Severity Overrides**, retention windows, **Apply Lab Preset** / **Apply Prod Preset**, **Purge Now**, public URL
-- **Notifications** (bootstrap admin): SMTP + Slack/Discord/generic HTTPS webhooks + **incident** webhook (structured Opsgenie/PagerDuty-style payload); severity filter (default critical); immediate + optional daily digest; secrets write-only; **Send Test Notification**. Self-hosted only (no ncdLabs relay).
+- **Notifications** tab:
+  - **Browser & OS Alerts** (any signed-in user): Web Notification API while a tab is open (OS banner when backgrounded) plus self-hosted Web Push / service worker for closed tabs. Per-user severity filter; **Enable Alerts** / **Disable Alerts** / **Send Test Push**. VAPID keys auto-generate beside the DB (`gitseer.vapid.json`) or via `notifications.vapid_*` / `GITSEER_VAPID_*`.
+  - **Outbound** (bootstrap admin): SMTP + Slack/Discord/generic HTTPS webhooks + **incident** webhook (structured Opsgenie/PagerDuty-style payload); severity filter (default critical); immediate + optional daily digest; secrets write-only; **Send Test Notification**. Self-hosted only (no ncdLabs relay).
 - **Wallboard** (`/wallboard`): token-scoped read-only summary + attention (`GET /api/v1/wallboard/snapshot` with Bearer or `?token=`). Bootstrap admin creates/revokes tokens on Settings → Status. Threat model: token holders can read ops snapshot only — no writes, settings, or forge secrets.
 - Attention queue: **Mute** / **Snooze 24h** / **Snooze 7d** / **Mute Until Resolved** per item
 - Integration: multi-instance list (forge badge, URL, configured flags, webhook path `/api/webhooks/{gitea|github|gitlab|bitbucket|forgejo}/{id}`) with **Add Forge** / Edit / Remove; Gitea cards include **Download Gitea UI Snippets** (zip of marker-safe templates); supported forges: Gitea, GitHub, GitLab, Bitbucket, Forgejo. Instance list/API is **bootstrap-admin only**; other users see forge summary on Status / `GET /settings`

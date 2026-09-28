@@ -6,6 +6,7 @@
 - Authenticated: `GET /api/v1/system/status` (`forges[]` per instance with ops checklist, sync phase, lease holder, webhook 24h stats, capability matrix, encryption health)
 - Attention mutes/snoozes and severity overrides: see [Attention Engine](attention-engine.md) (`POST /api/v1/attention/{id}/mute`, Settings → Preferences → **Attention Severity Overrides**)
 - Outbound notifications: Settings → **Notifications** (SMTP / Slack / Discord / generic HTTPS). Immediate alerts on attention open (min severity, default critical) and optional daily digest at `digest_hour_utc`. Delivered via `notification_outbox` worker; secrets sealed with encryption key. Self-hosted only — no ncdLabs relay. **Send Test Notification** queues one message per enabled channel.
+- Browser / OS alerts (in-app): Settings → **Notifications** → **Browser & OS Alerts**. Attention newly opened/reopened publishes SSE `attention` events (ACL-filtered) for in-tab Notification API banners, and fans out Web Push to opted-in users with ACL on the repo. VAPID keys auto-persist at `data/gitseer.vapid.json` (override with `GITSEER_VAPID_*`). Endpoints: `GET/PUT /api/v1/alerts/prefs`, `POST /api/v1/alerts/push/{subscribe,unsubscribe,test}`.
 - Settings → **Status**: pass/warn/fail checklist, **Ensure Webhook**, **Verify Delivery**, **Sync Now**
 - UI header **Sync Now** for on-demand reconcile (bootstrap admin; per-instance sync leases — skips if another holder holds the lease)
 
@@ -13,7 +14,7 @@
 
 | Method | Path | Notes |
 |--------|------|-------|
-| POST | `/api/v1/instances/{id}/ensure-webhook` | Bootstrap admin + CSRF. Gitea: system hook. GitHub: org hook when PAT has `admin:org_hook` (optional body `{ "org", "repo" }`); otherwise returns manual preview. |
+| POST | `/api/v1/instances/{id}/ensure-webhook` | Bootstrap admin + CSRF. Gitea/Forgejo: system hook when the PAT allows. GitHub: org/repo hook when PAT has hook admin (optional body `{ "org", "repo" }`). GitLab/Bitbucket: often return a manual preview. |
 | POST | `/api/v1/instances/{id}/verify-webhook` | Arms pending verification; next accepted delivery marks `webhook_verified_at`. Body `{ "confirm": true }` after a forge Ping if deliveries landed in the last 15 minutes. |
 
 ### Encryption health
@@ -53,7 +54,7 @@ Scrape `GET /metrics`:
 - When `server.metrics_token` / `GITSEER_METRICS_TOKEN` is **unset**: session cookie (same auth as the API)
 - When the scrape token **is** set: **Bearer-only** (`Authorization: Bearer <token>`) — session cookies are rejected (preferred for Prometheus)
 
-Includes gauges for repos/PRs/runs, webhook counters, sync duration/errors, and Gitea API request/error counters (`gitseer_gitea_api_*`). Labels avoid repository names.
+Includes gauges for repos/PRs/runs, webhook counters, sync duration/errors, Gitea/GitHub API counters (`gitseer_gitea_api_*`, `gitseer_github_api_*`), and `gitseer_sse_events_dropped_total`. Labels avoid repository names.
 
 ## Retention
 
@@ -80,7 +81,7 @@ gitseer backup --out /path/to/backup [--config config.yaml]
 gitseer restore --from /path/to/backup [--config config.yaml] [--force]
 ```
 
-- **SQLite:** `VACUUM INTO` snapshot of `database.path`, plus `gitseer.encryption_key` when present, and `manifest.json`
+- **SQLite:** `VACUUM INTO` snapshot of `database.path`, plus `gitseer.encryption_key` when present, and `manifest.json`. Copy `gitseer.vapid.json` from the data directory separately if you use browser/OS Web Push (not yet included in the backup manifest); a missing file regenerates new VAPID keys and invalidates existing push subscriptions until users re-enable alerts.
 - **Postgres:** writes a `pg_dump` command file; runs `pg_dump --format=custom` when `pg_dump` is on `PATH`. Restore uses `pg_restore` with `--force`
 - Restore refuses to overwrite an existing DB or key file without `--force`
 - Always back up `config.yaml` / Kubernetes Secret / `.env` separately — never commit secrets
@@ -104,7 +105,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              image: git.ncdlabs.com/ncdlabs/gitseer:0.1.27
+              image: git.ncdlabs.com/ncdlabs/gitseer:1.0.3
               command: ["gitseer", "backup", "--out", "/backup/$(date +%Y%m%d)"]
               envFrom:
                 - secretRef:
@@ -128,14 +129,13 @@ Adapt image tag, PVC name, and offload the `/backup` tree (e.g. `rclone` sidecar
 
 Application logs: JSON or text per `log.format` / `GITSEER_LOG_FORMAT`.
 
-Job logs: fetched from the forge on demand through GitSeer (`/api/v1/jobs/{id}/logs`), not stored long-term as the primary log archive. Gitea OAuth users use their stored token; GitHub repos (and bootstrap) use the instance service PAT.
+Job logs: fetched from the forge on demand through GitSeer (`/api/v1/jobs/{id}/logs`), not stored long-term as the primary log archive. Non-admin users use their per-instance OAuth token when present; bootstrap admin may use the instance service PAT.
 
 ## Write ops (rerun / cancel)
 
 - `POST /api/v1/workflow-runs/{id}/rerun` and `.../cancel` (CSRF + session + `CanAccessRepo`)
 - Non-admin: forge call uses `UserAccessTokenForInstance` for that repo’s instance (403 if missing) — never silent service-PAT fallback; never cross-forge token reuse (legacy Gitea-only fallback when instance-scoped row is missing)
 - Bootstrap admin: may use the instance service PAT; UI warns before confirm
-- GitHub non-admin: uses per-user GitHub OAuth token when linked; otherwise 403
 - Capability matrix rows: **Rerun Workflow** / **Cancel Workflow**; forge 404/405 → 501 unsupported
 - Success publishes an SSE `workflow_run` event so Active Actions / detail refetch
 

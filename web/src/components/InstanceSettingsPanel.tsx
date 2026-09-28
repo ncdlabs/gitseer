@@ -109,6 +109,7 @@ export function InstanceSettingsPanel({ editable }: Props) {
   const instancesQuery = useQuery({
     queryKey: ["instances"],
     queryFn: api.instances,
+    enabled: editable,
   });
 
   const [mode, setMode] = useState<DialogMode>("closed");
@@ -258,6 +259,23 @@ export function InstanceSettingsPanel({ editable }: Props) {
   const pendingRemoveLabel = pendingRemove
     ? pendingRemove.name || forgeLabel(pendingRemove.forge_type)
     : "";
+
+  if (!editable) {
+    return (
+      <div
+        className="panel panel--padded"
+        id="settings-panel-integration"
+        role="tabpanel"
+        aria-labelledby="settings-tab-integration"
+      >
+        <p className="muted">
+          Forge instance management is available to the bootstrap admin only. Use{" "}
+          <strong>Become Bootstrap</strong> at the top of Settings for a 5-minute grant, or see Status
+          for a read-only forge summary.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -7,7 +7,7 @@ Thanks for contributing to GitSeer (repository / Go module path `gitseer`).
 1. Install Go 1.26+ (see `go.mod`) and Node 22+.
 2. `make deps` (or `npm install` at the repo root, plus `cd web && npm install`).
 3. `make test`
-4. Local app: `npm run start` — prints App/API URLs and bootstrap credentials (`bootstrap` / password), opens the browser to `:5173`, Go API on `:8090`. Uses `config.yaml` when present, otherwise `config.example.yaml` (override with `GITSEER_CONFIG`). Default local password is `gitseer-local` when unset. Stop with `npm run stop`; restart with `npm run restart` (same banner + browser open).
+4. Local app: `npm run start` — prints App/API URLs and claim-bootstrap hint (suggested username), opens the browser to `:5173`, Go API on `:8090`. Uses `config.yaml` when present, otherwise `config.example.yaml` (override with `GITSEER_CONFIG`). No default password — first visit **Claim Bootstrap**. Stop with `npm run stop`; restart with `npm run restart` (same banner + browser open).
 5. Production-shaped binary: `make frontend && make build-go` then `./bin/gitseer serve`.
 
 ## Guidelines

@@ -14,12 +14,15 @@ import { InstanceSettingsPanel } from "../components/InstanceSettingsPanel";
 import { AttentionSeverityOverrides } from "../components/AttentionSeverityOverrides";
 import { AccessGrantPanel } from "../components/AccessGrantPanel";
 import { NotificationsPanel } from "../components/NotificationsPanel";
+import { BrowserAlertsPanel } from "../components/BrowserAlertsPanel";
 import { WallboardTokensPanel } from "../components/WallboardTokensPanel";
+import { BootstrapPanel } from "../components/BootstrapPanel";
+import { BecomeBootstrapDialog } from "../components/BecomeBootstrapDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
-type SettingsTab = "preferences" | "integration" | "access" | "notifications" | "status";
+type SettingsTab = "preferences" | "integration" | "access" | "notifications" | "status" | "bootstrap";
 
-const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+const BASE_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "preferences", label: "Preferences" },
   { id: "integration", label: "Integration" },
   { id: "access", label: "Access" },
@@ -56,7 +59,8 @@ function tabFromHash(hash: string): SettingsTab {
     id === "status" ||
     id === "preferences" ||
     id === "access" ||
-    id === "notifications"
+    id === "notifications" ||
+    id === "bootstrap"
   ) {
     return id;
   }
@@ -173,6 +177,15 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const location = useLocation();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const meQuery = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
+
+  const elevatedUntil = meQuery.data?.bootstrap_elevated_until || null;
+  const elevationActive =
+    !!elevatedUntil && !Number.isNaN(Date.parse(elevatedUntil)) && Date.parse(elevatedUntil) > Date.now();
+  const SETTINGS_TABS = useMemo(() => {
+    if (!elevationActive) return BASE_SETTINGS_TABS;
+    return [...BASE_SETTINGS_TABS, { id: "bootstrap" as const, label: "Bootstrap" }];
+  }, [elevationActive]);
 
   const [tab, setTab] = useState<SettingsTab>(() =>
     typeof window !== "undefined" ? tabFromHash(window.location.hash) : "preferences",
@@ -187,6 +200,32 @@ export function SettingsPage() {
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
+  const [elevateOpen, setElevateOpen] = useState(false);
+  const [grantMessage, setGrantMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tab === "bootstrap" && !elevationActive) {
+      setTab("preferences");
+      if (window.location.hash === "#bootstrap") {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#preferences`);
+      }
+    }
+  }, [elevationActive, tab]);
+
+  useEffect(() => {
+    if (!elevationActive || !elevatedUntil) return;
+    const ms = Date.parse(elevatedUntil) - Date.now();
+    if (ms <= 0) {
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      return;
+    }
+    const id = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    }, ms + 250);
+    return () => window.clearTimeout(id);
+  }, [elevationActive, elevatedUntil, queryClient]);
 
   useEffect(() => {
     setTab(tabFromHash(location.hash));
@@ -214,6 +253,14 @@ export function SettingsPage() {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
     }
   }
+
+  useEffect(() => {
+    function onBecome() {
+      setElevateOpen(true);
+    }
+    window.addEventListener("gitseer:become-bootstrap", onBecome);
+    return () => window.removeEventListener("gitseer:become-bootstrap", onBecome);
+  }, []);
 
   const editable = settingsQuery.data?.editable === true;
   const dirty = useMemo(() => !sameSettings(draft, baseline), [draft, baseline]);
@@ -354,8 +401,38 @@ export function SettingsPage() {
           <p className="muted">
             {editable
               ? "Configure instance behavior. Changes apply immediately."
-              : "Instance configuration (read-only). Bootstrap admins can edit and save."}
+              : "Instance configuration (read-only). "}
+            {!editable && meQuery.data?.can_elevate_bootstrap && (
+              <>
+                <button type="button" className="linkish" onClick={() => setElevateOpen(true)}>
+                  Become Bootstrap
+                </button>{" "}
+                for a 5-minute admin grant.
+              </>
+            )}
+            {!editable && !meQuery.data?.can_elevate_bootstrap && (
+              <>Bootstrap admins can edit and save.</>
+            )}
+            {editable && meQuery.data?.can_elevate_bootstrap && !elevationActive && (
+              <>
+                {" "}
+                <button type="button" className="linkish" onClick={() => setElevateOpen(true)}>
+                  Become Bootstrap
+                </button>{" "}
+                to open the password reset tab (5-minute grant).
+              </>
+            )}
           </p>
+          {grantMessage && (
+            <p className="settings-form__saved" role="status">
+              {grantMessage}
+            </p>
+          )}
+          {elevationActive && elevatedUntil && (
+            <p className="muted" role="status">
+              Bootstrap access active until {new Date(elevatedUntil).toLocaleTimeString()}.
+            </p>
+          )}
         </div>
       </div>
 
@@ -592,12 +669,16 @@ export function SettingsPage() {
 
           {tab === "integration" && <InstanceSettingsPanel editable={editable} />}
           {tab === "access" && <AccessGrantPanel editable={editable} />}
+          {tab === "bootstrap" && elevationActive && elevatedUntil && (
+            <BootstrapPanel elevatedUntil={elevatedUntil} />
+          )}
           {tab === "notifications" && (
             <div
               id="settings-panel-notifications"
               role="tabpanel"
               aria-labelledby="settings-tab-notifications"
             >
+              <BrowserAlertsPanel />
               <NotificationsPanel editable={editable} />
             </div>
           )}
@@ -758,6 +839,14 @@ export function SettingsPage() {
         onConfirm={() => void runPurgeNow()}
         onCancel={() => {
           if (!purgeBusy) setPurgeOpen(false);
+        }}
+      />
+      <BecomeBootstrapDialog
+        open={elevateOpen}
+        onClose={() => setElevateOpen(false)}
+        onGranted={(_until, message) => {
+          setGrantMessage(message);
+          selectTab("bootstrap");
         }}
       />
     </>

@@ -374,7 +374,7 @@ export function PipelineDetailPage() {
   if (q.isLoading || q.isPending) return <div className="loading">Loading run…</div>;
   if (q.isError) return <div className="error">{(q.error as Error).message}</div>;
   if (!q.data) return <div className="error">Run not found.</div>;
-  const { run, graph } = q.data;
+  const { run, graph, graph_error: graphError } = q.data;
   const forgeHref = safeExternalHref(run.html_url);
   const user = (me.data as User | undefined) ?? null;
   return (
@@ -415,7 +415,11 @@ export function PipelineDetailPage() {
       </div>
       <div className="panel panel--padded dag-panel">
         <h2>Workflow Graph</h2>
-        <WorkflowDAG graph={(graph || []) as WorkflowNode[]} jobStatusByName={jobStatus} />
+        <WorkflowDAG
+          graph={(graph || []) as WorkflowNode[]}
+          jobStatusByName={jobStatus}
+          graphError={graphError}
+        />
       </div>
       <div className="panel">
         <table>

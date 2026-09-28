@@ -49,6 +49,7 @@ Default `replicaCount: 1`. Raising replicas is supported only with caveats:
 
 - **Sync:** DB-backed per-`instance_id` leases ensure a single active reconciler per forge instance
 - **SSE:** fan-out is in-process (no Redis) — use sticky sessions or accept split event streams
+- **Web Push:** delivery is from whichever pod runs the notify fan-out; subscription storage is shared in the DB (Postgres-friendly). Keep `replicaCount: 1` on SQLite.
 - **SQLite:** keep `replicaCount: 1` (shared SQLite across pods is unsafe)
 
 ## Public container images
@@ -59,10 +60,10 @@ Tagged releases publish linux/amd64 images to:
 - `docker.io/ncdlabs/gitseer:<version>` (also `:latest`)
 
 ```bash
-podman pull ghcr.io/ncdlabs/gitseer:1.0.1
+podman pull ghcr.io/ncdlabs/gitseer:1.0.2
 ```
 
-Maintainers cut releases via **Actions → Cut release** — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill).
+Maintainers cut releases via **Actions → Cut release** — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill) and may run ahead of the latest public GHCR cut (for example browser/OS alerts in `1.0.3` before that tag is published).
 
 Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
 

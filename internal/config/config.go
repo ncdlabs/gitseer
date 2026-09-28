@@ -15,17 +15,27 @@ import (
 
 // Config is the root configuration for GitSeer.
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Gitea     GiteaConfig     `yaml:"gitea"`
-	GitHub    GitHubConfig    `yaml:"github"`
-	Sync      SyncConfig      `yaml:"sync"`
-	Attention AttentionConfig `yaml:"attention"`
-	Auth      AuthConfig      `yaml:"auth"`
-	UI        UIConfig        `yaml:"ui"`
-	Log       LogConfig       `yaml:"log"`
-	Retention RetentionConfig `yaml:"retention"`
-	Dev       DevConfig       `yaml:"dev"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Gitea         GiteaConfig         `yaml:"gitea"`
+	GitHub        GitHubConfig        `yaml:"github"`
+	Sync          SyncConfig          `yaml:"sync"`
+	Attention     AttentionConfig     `yaml:"attention"`
+	Auth          AuthConfig          `yaml:"auth"`
+	UI            UIConfig            `yaml:"ui"`
+	Log           LogConfig           `yaml:"log"`
+	Retention     RetentionConfig     `yaml:"retention"`
+	Notifications NotificationsConfig `yaml:"notifications"`
+	Dev           DevConfig           `yaml:"dev"`
+}
+
+// NotificationsConfig holds optional Web Push (VAPID) overrides for browser/OS alerts.
+// When keys are unset, GitSeer auto-generates and persists them beside the database.
+type NotificationsConfig struct {
+	VAPIDPublicKey  string `yaml:"vapid_public_key"`
+	VAPIDPrivateKey string `yaml:"vapid_private_key"`
+	VAPIDSubject    string `yaml:"vapid_subject"` // mailto: or https: contact URI
+	VAPIDKeyFile    string `yaml:"vapid_key_file"`
 }
 
 // DevConfig holds local-development-only toggles. Never enable in production.
@@ -79,17 +89,19 @@ type AttentionConfig struct {
 }
 
 type AuthConfig struct {
-	Provider              string        `yaml:"provider"` // gitea | bootstrap
-	BootstrapPassword     string        `yaml:"bootstrap_password"`
-	BootstrapPasswordFile string        `yaml:"bootstrap_password_file"`
-	SessionTTL            time.Duration `yaml:"session_ttl"`
-	CookieSecure          *bool         `yaml:"cookie_secure"`
-	OAuthClientID         string        `yaml:"oauth_client_id"`
-	OAuthClientSecret     string        `yaml:"oauth_client_secret"`
-	OAuthClientSecretFile string        `yaml:"oauth_client_secret_file"`
-	EncryptionKey         string        `yaml:"encryption_key"` // 32+ char secret; used to derive AES key
-	EncryptionKeyFile     string        `yaml:"encryption_key_file"`
-	ACLRefreshInterval    time.Duration `yaml:"acl_refresh_interval"`
+	Provider                 string        `yaml:"provider"` // gitea | bootstrap
+	BootstrapPassword        string        `yaml:"bootstrap_password"` // deprecated for new installs; legacy seed
+	BootstrapPasswordFile    string        `yaml:"bootstrap_password_file"`
+	BootstrapUsername        string        `yaml:"bootstrap_username"` // install seed for claim form
+	BootstrapKeepAfterSetup  *bool         `yaml:"bootstrap_keep_after_setup"`
+	SessionTTL               time.Duration `yaml:"session_ttl"`
+	CookieSecure             *bool         `yaml:"cookie_secure"`
+	OAuthClientID            string        `yaml:"oauth_client_id"`
+	OAuthClientSecret        string        `yaml:"oauth_client_secret"`
+	OAuthClientSecretFile    string        `yaml:"oauth_client_secret_file"`
+	EncryptionKey            string        `yaml:"encryption_key"` // 32+ char secret; used to derive AES key
+	EncryptionKeyFile        string        `yaml:"encryption_key_file"`
+	ACLRefreshInterval       time.Duration `yaml:"acl_refresh_interval"`
 }
 
 type UIConfig struct {
@@ -415,6 +427,21 @@ func applyEnv(cfg *Config) error {
 		*dst = b
 		return nil
 	}
+	setBoolPtr := func(dst **bool, key string) error {
+		v, ok, err := lookupEnv(key)
+		if err != nil {
+			return err
+		}
+		if !ok || v == "" {
+			return nil
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		*dst = &b
+		return nil
+	}
 	setInt := func(dst *int, key string) error {
 		v, ok, err := lookupEnv(key)
 		if err != nil {
@@ -545,6 +572,12 @@ func applyEnv(cfg *Config) error {
 	if err := setStr(&cfg.Auth.BootstrapPasswordFile, "GITSEER_AUTH_BOOTSTRAP_PASSWORD_FILE"); err != nil {
 		return err
 	}
+	if err := setStr(&cfg.Auth.BootstrapUsername, "GITSEER_AUTH_BOOTSTRAP_USERNAME"); err != nil {
+		return err
+	}
+	if err := setBoolPtr(&cfg.Auth.BootstrapKeepAfterSetup, "GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP"); err != nil {
+		return err
+	}
 	if err := setStr(&cfg.Auth.OAuthClientID, "GITSEER_AUTH_OAUTH_CLIENT_ID"); err != nil {
 		return err
 	}
@@ -594,6 +627,18 @@ func applyEnv(cfg *Config) error {
 		return err
 	}
 	if err := setBool(&cfg.Dev.AllowSkipSetup, "GITSEER_ALLOW_SKIP_SETUP"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Notifications.VAPIDPublicKey, "GITSEER_VAPID_PUBLIC_KEY"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Notifications.VAPIDPrivateKey, "GITSEER_VAPID_PRIVATE_KEY"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Notifications.VAPIDSubject, "GITSEER_VAPID_SUBJECT"); err != nil {
+		return err
+	}
+	if err := setStr(&cfg.Notifications.VAPIDKeyFile, "GITSEER_VAPID_KEY_FILE"); err != nil {
 		return err
 	}
 	return nil

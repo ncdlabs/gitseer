@@ -19,6 +19,8 @@ Capability detection is authoritative at runtime (Settings → Status). This pag
 | SQLite | Default | `replicaCount: 1` only |
 | PostgreSQL | Yes | Preferred for multi-replica sync leases |
 | SSE realtime | Yes | In-process; sticky sessions or accept split streams if replicas > 1 |
+| Browser Notification API | Yes | While a signed-in tab is connected; OS banner when tab backgrounded |
+| Web Push (closed tab) | Yes | Self-hosted VAPID; requires HTTPS or localhost; per-user opt-in |
 | Image arch | linux/amd64 | Multi-arch deferred (see [Upgrade](upgrade.md)) |
 | Subpath proxy | Yes | Set `server.external_url` including path |
 

@@ -43,12 +43,14 @@
 - Redirect URI: `{external_url}/api/v1/auth/bitbucket/callback`
 - Identity: `(bitbucket_instance_id, bitbucket_user_id)` (stable hash of UUID/account_id); link with `?link=1`
 
-### Bootstrap password (lab / first admin)
+### Bootstrap claim and login
 
-- Enabled only when `GITSEER_AUTH_BOOTSTRAP_PASSWORD` (or file) is set
-- `POST /api/v1/auth/bootstrap/login` with CSRF
-- Creates/uses bootstrap admin with allow-all repository access
-- Leave empty in Compose by default to disable
+- **First visit:** when no bootstrap password hash (and no legacy env password) exists, the UI shows **Claim Bootstrap** — set username + password (`POST /api/v1/auth/bootstrap/claim` with CSRF). Prefer a username other than `bootstrap`.
+- **Login:** `POST /api/v1/auth/bootstrap/login` with CSRF (`username` + `password`) when login is enabled.
+- **After setup:** `auth.bootstrap_keep_after_setup` / `GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP` controls whether break-glass login remains (`true`) or is removed (`false`). Elevation still works either way.
+- **Become Bootstrap (sudo):** signed-in users call `POST /api/v1/auth/bootstrap/elevate` with the bootstrap password for a **5-minute** session grant (`bootstrap_elevated_until`). Effective bootstrap admin unlocks Settings writes. While elevated, Settings shows a **Bootstrap** tab to reset the password (`POST /api/v1/auth/bootstrap/password`).
+- Password is stored as a bcrypt hash in `app_settings`. Legacy `GITSEER_AUTH_BOOTSTRAP_PASSWORD` remains a seed until claim/override.
+- Creates/uses the bootstrap admin user with allow-all repository access
 
 GitHub inventory still syncs with a **service PAT** on the instance. Per-user GitHub ACL and user-scoped forge calls (logs, write ops) use the user’s stored GitHub OAuth token when present.
 
@@ -71,7 +73,7 @@ GitHub OAuth login prefers the lowest-id GitHub instance with OAuth client id+se
 
 - HTTP session cookie after successful login
 - TTL from `auth.session_ttl` (default 24h)
-- `GET /api/v1/auth/me` returns current user (and may include mapped Gitea theme when OAuth token is stored; also `has_gitea` / `has_github` / `has_gitlab` / `has_bitbucket` and per-forge `*_oauth_enabled`)
+- `GET /api/v1/auth/me` returns current user (and may include mapped Gitea theme when OAuth token is stored; also `has_gitea` / `has_github` / `has_gitlab` / `has_bitbucket`, per-forge `*_oauth_enabled`, `is_bootstrap_admin` (effective), `is_bootstrap_permanent`, `bootstrap_elevated_until`, `can_elevate_bootstrap`, `bootstrap_login_enabled`)
 - `POST /api/v1/auth/logout` (CSRF)
 
 ## CSRF
@@ -79,10 +81,13 @@ GitHub OAuth login prefers the lowest-id GitHub instance with OAuth client id+se
 Double-submit cookie `gitseer_csrf` (non-HttpOnly) + header `X-CSRF-Token` on state-changing `/api/v1` writes:
 
 - Bootstrap login, logout
-- Settings PUT
-- Instance POST / PUT / DELETE
-- User ACL grant PUT
+- Settings PUT; notification settings PUT / test; alert prefs + push subscribe/unsubscribe/test
+- Instance POST / PUT / DELETE; ensure-webhook / verify-webhook
+- User ACL grant PUT; wallboard token create/revoke
+- Attention mute / unmute; rule-overrides PUT; saved-filters write
+- Workflow rerun / cancel
 - Setup POSTs (encryption, test-connection, create-webhook, create-oauth, complete, sync-repos)
+- Admin purge-retention
 
 Issued via `/api/v1/ui-config` and rotated on session create / `/auth/me`.
 

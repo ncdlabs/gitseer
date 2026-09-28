@@ -31,7 +31,7 @@ helm upgrade --install gitseer deploy/helm/gitseer \
 kubectl -n gitseer rollout status deploy/gitseer --timeout=180s
 ```
 
-Goose migrations run on process start. Migrations `00014`–`00017` (node IDs, wallboard, runner signals, multi-forge OAuth columns) are additive; expect a short lock during apply on SQLite.
+Goose migrations run on process start. Migrations `00014`–`00018` (node IDs, wallboard, runner signals, multi-forge OAuth columns, Web Push prefs/subscriptions) are additive; expect a short lock during apply on SQLite.
 
 ### Rollback
 
@@ -62,6 +62,7 @@ podman compose -f compose.yaml up --build -d
 - Re-verify OAuth login for each forge you use (callback URLs unchanged unless you changed `server.external_url`).
 - **Bitbucket OAuth (1.0.1 → next):** OAuth login once hashed `bitbucket_user_id` differently from sync. After upgrade, the next Bitbucket sign-in remaps the existing user row in place (same login + instance). No manual SQL needed unless login conflict persists — then clear that user’s `bitbucket_user_id` / `bitbucket_instance_id` and sign in again.
 - Wallboard tokens and notification settings persist across upgrades; rotate tokens only if you suspect leakage.
+- **Browser / OS alerts (1.0.3):** migration `00018` adds `user_alert_prefs` and `web_push_subscriptions`. On first start after upgrade, GitSeer generates `gitseer.vapid.json` beside the database (unless `GITSEER_VAPID_*` is set). Users must opt in under Settings → Notifications → **Browser & OS Alerts** (HTTPS or localhost required for Web Push). Preserve `gitseer.vapid.json` across restores (copy with the data directory); `gitseer backup` currently includes the DB and encryption key file but not the VAPID file — regenerating keys forces users to re-enable alerts.
 
 ## Schema and feature notes (1.0)
 
@@ -71,6 +72,7 @@ podman compose -f compose.yaml up --build -d
 | `00015` | Incident wallboard tokens + public snapshot |
 | `00016` | Job runner signal fields for attention |
 | `00017` | GitLab / Bitbucket OAuth identity columns on users |
+| `00018` | Browser/OS alert prefs (`user_alert_prefs`) + Web Push subscriptions (`web_push_subscriptions`) |
 
 Multi-forge OAuth (Gitea, Forgejo, GitHub, GitLab, Bitbucket) is supported in 1.0. Forgejo reuses Gitea identity columns — a single user row cannot hold distinct Gitea and Forgejo forge identities simultaneously.
 
@@ -103,15 +105,15 @@ Lab / k3s-home continues to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy
 Pull a public image:
 
 ```bash
-podman pull ghcr.io/ncdlabs/gitseer:1.0.1
+podman pull ghcr.io/ncdlabs/gitseer:1.0.2
 # Docker Hub only if DOCKERHUB_* secrets were set for that release:
-# podman pull docker.io/ncdlabs/gitseer:1.0.1
+# podman pull docker.io/ncdlabs/gitseer:1.0.2
 ```
 
 Re-publish an existing tag (rebuild images, refresh release notes, re-assert public visibility):
 
 ```bash
-gh workflow run release.yaml --repo ncdlabs/gitseer -f tag=v1.0.1
+gh workflow run release.yaml --repo ncdlabs/gitseer -f tag=v1.0.2
 ```
 
 ## Deferred release hardening

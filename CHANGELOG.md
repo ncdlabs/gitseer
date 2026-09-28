@@ -4,11 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Bootstrap claim:** first UI visit sets username + password (`POST /auth/bootstrap/claim`); no install-time password. Install chooses suggested username and keep/remove break-glass after setup.
+- **Become Bootstrap:** `POST /auth/bootstrap/elevate` grants 5-minute admin elevation; Settings **Bootstrap** tab resets password during the grant (`POST /auth/bootstrap/password`).
+- Migration `00019_bootstrap_claim` (password hash / username / keep-after-setup + `sessions.bootstrap_elevated_until`).
+
+### Changed
+
+- Bootstrap password stored as bcrypt in `app_settings`; `GITSEER_AUTH_BOOTSTRAP_PASSWORD` is legacy seed only.
+- `ui-config` no longer returns `dev_bootstrap_password`; exposes `bootstrap_unclaimed` / `bootstrap_username` / `bootstrap_login_enabled`.
+
+## [1.0.3] - 2026-09-28
+
+### Added
+
+- **Browser & OS alerts** (self-hosted): SSE `attention` events drive the Web Notification API while a tab is connected; Web Push + service worker (`sw.js`) cover closed tabs. Per-user prefs and subscriptions (`GET/PUT /api/v1/alerts/prefs`, `POST /api/v1/alerts/push/{subscribe,unsubscribe,test}`). VAPID keys auto-persist beside the DB (`gitseer.vapid.json`) or via `notifications.vapid_*` / `GITSEER_VAPID_*`. No ncdLabs notification relay (ADR-032 amended).
+- Migration `00018_web_push` (`user_alert_prefs`, `web_push_subscriptions`).
+
+### Changed
+
+- Attention newly opened/reopened always publishes SSE (and optional Web Push) even when outbound SMTP/webhook channels are disabled.
+
 ## [1.0.2] - 2026-09-27
 
 ### Fixed
 
 - Bitbucket OAuth now hashes user IDs with `bitbucket.StableID` (FNV-64a), matching sync/webhooks. Next login remaps any stale 1.0.1 OAuth identity hash in place.
+
 ## [1.0.1] - 2026-09-27
 
 ### Added

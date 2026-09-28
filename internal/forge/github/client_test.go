@@ -1,7 +1,9 @@
 package github
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -198,7 +200,7 @@ func TestClientHTTptest(t *testing.T) {
 		_, _ = w.Write([]byte("log line\n"))
 	})
 	mux.HandleFunc("/api/v3/repos/acme/gitseer/contents/.github/workflows/ci.yaml", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") != "application/vnd.github.raw" {
+		if r.Header.Get("Accept") != "application/vnd.github.raw+json" {
 			t.Fatalf("accept=%q", r.Header.Get("Accept"))
 		}
 		w.Header().Set("Content-Type", "application/yaml")
@@ -299,6 +301,56 @@ func TestClientHTTptest(t *testing.T) {
 	upage, err := client.ListAccessibleReposForUser(ctx, "user-tok", forge.ListReposOpts{})
 	if err != nil || len(upage.Items) != 1 {
 		t.Fatalf("user repos=%v err=%v", upage, err)
+	}
+}
+
+func TestGetWorkflowYAMLContentsJSONFallback(t *testing.T) {
+	yamlBody := "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps: []\n"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/acme/gitseer/contents/.github/workflows/ci.yaml", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/vnd.github.raw+json" {
+			t.Fatalf("accept=%q", r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"type":     "file",
+			"encoding": "base64",
+			"content":  base64.StdEncoding.EncodeToString([]byte(yamlBody)),
+			"path":     ".github/workflows/ci.yaml",
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client, err := New(srv.URL, "test-token", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.GetWorkflowYAML(context.Background(), models.RepoRef{Owner: "acme", Name: "gitseer"}, ".github/workflows/ci.yaml", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != yamlBody {
+		t.Fatalf("got %q want %q", got, yamlBody)
+	}
+}
+
+func TestDecodeContentsBody(t *testing.T) {
+	raw := []byte("name: CI\n")
+	got, err := decodeContentsBody(raw)
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("raw passthrough: %q err=%v", got, err)
+	}
+
+	payload := map[string]any{
+		"type":     "file",
+		"encoding": "base64",
+		"content":  base64.StdEncoding.EncodeToString([]byte("hello")),
+	}
+	body, _ := json.Marshal(payload)
+	got, err = decodeContentsBody(body)
+	if err != nil || string(got) != "hello" {
+		t.Fatalf("base64 decode: %q err=%v", got, err)
 	}
 }
 

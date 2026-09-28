@@ -6,7 +6,7 @@ FROM users
 WHERE id = sqlc.arg(id);
 
 -- name: GetSessionByTokenHash :one
-SELECT id, user_id, expires_at, created_at, ip, user_agent
+SELECT id, user_id, expires_at, created_at, ip, user_agent, bootstrap_elevated_until
 FROM sessions
 WHERE token_hash = sqlc.arg(token_hash);
 
@@ -19,3 +19,7 @@ VALUES (
   sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(token_hash), sqlc.arg(expires_at),
   sqlc.arg(created_at), sqlc.arg(ip), sqlc.arg(user_agent)
 );
+
+-- name: SetSessionBootstrapElevatedUntil :exec
+UPDATE sessions SET bootstrap_elevated_until = sqlc.arg(bootstrap_elevated_until)
+WHERE id = sqlc.arg(id);

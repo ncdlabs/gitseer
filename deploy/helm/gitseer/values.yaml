@@ -20,7 +20,9 @@ secret:
   create: false
   existingSecret: ""
   giteaToken: ""
-  bootstrapPassword: ""
+  bootstrapUsername: "admin"
+  bootstrapKeepAfterSetup: "true"
+  bootstrapPassword: ""  # deprecated — leave empty; claim in UI on first visit
   oauthClientId: ""
   oauthClientSecret: ""
   webhookSecret: ""

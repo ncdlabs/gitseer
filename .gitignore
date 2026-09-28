@@ -13,4 +13,6 @@ install.yaml
 .env
 *.encryption_key
 gitseer.encryption_key
+*.vapid.json
+gitseer.vapid.json
 coverage/

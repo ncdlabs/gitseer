@@ -7,7 +7,8 @@ CREATE TABLE app_settings (
     retention_webhooks_days INTEGER NOT NULL DEFAULT 0,
     retention_attention_days INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    gitea_url TEXT NOT NULL DEFAULT '', gitea_token_cipher TEXT NOT NULL DEFAULT '', gitea_webhook_secret_cipher TEXT NOT NULL DEFAULT '', gitea_allow_private_network INTEGER, gitea_allow_unsigned_webhooks INTEGER, oauth_client_id TEXT NOT NULL DEFAULT '', oauth_client_secret_cipher TEXT NOT NULL DEFAULT '', setup_completed INTEGER NOT NULL DEFAULT 0, server_external_url TEXT NOT NULL DEFAULT '');
+    gitea_url TEXT NOT NULL DEFAULT '', gitea_token_cipher TEXT NOT NULL DEFAULT '', gitea_webhook_secret_cipher TEXT NOT NULL DEFAULT '', gitea_allow_private_network INTEGER, gitea_allow_unsigned_webhooks INTEGER, oauth_client_id TEXT NOT NULL DEFAULT '', oauth_client_secret_cipher TEXT NOT NULL DEFAULT '', setup_completed INTEGER NOT NULL DEFAULT 0, server_external_url TEXT NOT NULL DEFAULT '',
+    bootstrap_username TEXT NOT NULL DEFAULT '', bootstrap_password_hash TEXT NOT NULL DEFAULT '', bootstrap_keep_after_setup INTEGER NOT NULL DEFAULT 1);
 
 CREATE TABLE attention_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,7 +208,8 @@ CREATE TABLE sessions (
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     ip TEXT NOT NULL DEFAULT '',
-    user_agent TEXT NOT NULL DEFAULT ''
+    user_agent TEXT NOT NULL DEFAULT '',
+    bootstrap_elevated_until TEXT
 );
 
 CREATE TABLE "sync_leases" (

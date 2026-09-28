@@ -2,6 +2,7 @@ package ui
 
 import (
 	"embed"
+	"html"
 	"io"
 	"io/fs"
 	"net/http"
@@ -14,7 +15,8 @@ import (
 var Dist embed.FS
 
 // Handler serves the SPA with history-fallback to index.html.
-// basePath is the public path prefix (e.g. "/gitseer") used to inject window.__GITSEER_BASE__.
+// basePath is the public path prefix (e.g. "/gitseer") injected as <meta name="gitseer-base">
+// so the SPA can resolve API routes without an inline script (CSP script-src 'self').
 func Handler(basePath string) http.Handler {
 	sub, err := fs.Sub(Dist, "dist")
 	if err != nil {
@@ -48,24 +50,18 @@ func serveIndex(w http.ResponseWriter, sub fs.FS, basePath string) {
 		http.Error(w, "ui read error", http.StatusInternalServerError)
 		return
 	}
-	html := string(b)
-	inject := `<script>window.__GITSEER_BASE__=` + jsString(basePath) + `;</script>`
-	if strings.Contains(html, "</head>") {
-		html = strings.Replace(html, "</head>", inject+"</head>", 1)
+	htmlDoc := string(b)
+	inject := `<meta name="gitseer-base" content="` + html.EscapeString(basePath) + `">`
+	if strings.Contains(htmlDoc, "</head>") {
+		htmlDoc = strings.Replace(htmlDoc, "</head>", inject+"</head>", 1)
 	} else {
-		html = inject + html
+		htmlDoc = inject + htmlDoc
 	}
 	// Fix absolute asset paths for subpath deploys.
 	if basePath != "" {
-		html = strings.ReplaceAll(html, `href="/assets/`, `href="`+basePath+`/assets/`)
-		html = strings.ReplaceAll(html, `src="/assets/`, `src="`+basePath+`/assets/`)
+		htmlDoc = strings.ReplaceAll(htmlDoc, `href="/assets/`, `href="`+basePath+`/assets/`)
+		htmlDoc = strings.ReplaceAll(htmlDoc, `src="/assets/`, `src="`+basePath+`/assets/`)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(html))
-}
-
-func jsString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
+	_, _ = w.Write([]byte(htmlDoc))
 }

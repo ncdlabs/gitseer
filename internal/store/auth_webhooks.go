@@ -28,25 +28,65 @@ var (
 const userSelectCols = ` id, instance_id, gitea_user_id, github_user_id, github_instance_id, gitlab_user_id, gitlab_instance_id, bitbucket_user_id, bitbucket_instance_id, login, email, display_name, avatar_url, is_bootstrap_admin, created_at, updated_at`
 
 func (s *Store) EnsureBootstrapUser(ctx context.Context) (*models.User, error) {
-	const login = "bootstrap"
-	row := s.queryRow(ctx, `SELECT`+userSelectCols+` FROM users WHERE login = ?`, login)
-	u, err := scanUser(row)
-	if err == nil {
-		return u, nil
-	}
-	if err != sql.ErrNoRows {
-		return nil, err
+	return s.EnsureBootstrapUserWithLogin(ctx, "bootstrap")
+}
+
+// EnsureBootstrapUserWithLogin ensures exactly one bootstrap admin with the given login.
+func (s *Store) EnsureBootstrapUserWithLogin(ctx context.Context, login string) (*models.User, error) {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return nil, fmt.Errorf("bootstrap login is required")
 	}
 	now := formatTime(time.Now().UTC())
+
+	row := s.queryRow(ctx, `SELECT`+userSelectCols+` FROM users WHERE is_bootstrap_admin = 1 LIMIT 1`)
+	u, err := scanUser(row)
+	if err == nil {
+		if u.Login != login {
+			if other, oerr := s.getUserByLogin(ctx, login); oerr == nil && other.ID != u.ID {
+				return nil, ErrLoginConflict
+			} else if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+				return nil, oerr
+			}
+			if _, err := s.exec(ctx, `UPDATE users SET login=?, display_name=?, updated_at=? WHERE id=?`,
+				login, displayNameForBootstrap(login), now, u.ID); err != nil {
+				return nil, err
+			}
+			return s.GetUserByID(ctx, u.ID)
+		}
+		return u, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if existing, err := s.getUserByLogin(ctx, login); err == nil {
+		if _, err := s.exec(ctx, `
+UPDATE users SET is_bootstrap_admin=1, display_name=?, updated_at=? WHERE id=?`,
+			displayNameForBootstrap(login), now, existing.ID); err != nil {
+			return nil, err
+		}
+		return s.GetUserByID(ctx, existing.ID)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
 	var id int64
 	err = s.queryRow(ctx, `
 INSERT INTO users (login, display_name, is_bootstrap_admin, created_at, updated_at)
-VALUES (?, 'Bootstrap Admin', 1, ?, ?)
-RETURNING id`, login, now, now).Scan(&id)
+VALUES (?, ?, 1, ?, ?)
+RETURNING id`, login, displayNameForBootstrap(login), now, now).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
 	return s.GetUserByID(ctx, id)
+}
+
+func displayNameForBootstrap(login string) string {
+	if login == "" || strings.EqualFold(login, "bootstrap") {
+		return "Bootstrap Admin"
+	}
+	return login
 }
 
 func scanUser(row scanner) (*models.User, error) {

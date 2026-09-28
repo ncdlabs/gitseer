@@ -4,6 +4,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -877,7 +878,8 @@ func (c *Client) getRawFile(ctx context.Context, repo models.RepoRef, path, ref 
 	}
 	encoded := encodeContentPath(path)
 	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), encoded)
-	resp, err := c.doAccept(ctx, http.MethodGet, apiPath, q, "", "application/vnd.github.raw")
+	// Docs require application/vnd.github.raw+json; legacy .raw can fall back to JSON Contents.
+	resp, err := c.doAccept(ctx, http.MethodGet, apiPath, q, "", "application/vnd.github.raw+json")
 	if err != nil {
 		return nil, err
 	}
@@ -888,6 +890,38 @@ func (c *Client) getRawFile(ctx context.Context, repo models.RepoRef, path, ref 
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("github api %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	return decodeContentsBody(body)
+}
+
+// decodeContentsBody returns raw file bytes. If GitHub ignored the raw Accept and
+// returned a Contents JSON object, base64-decode the content field.
+func decodeContentsBody(body []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return body, nil
+	}
+	var obj struct {
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+		Type     string `json:"type"`
+	}
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return body, nil
+	}
+	if obj.Content == "" || (obj.Encoding == "" && obj.Type == "") {
+		return body, nil
+	}
+	enc := strings.ToLower(strings.TrimSpace(obj.Encoding))
+	if enc == "" || enc == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(obj.Content, "\n", ""))
+		if err != nil {
+			return nil, fmt.Errorf("decode contents content: %w", err)
+		}
+		return decoded, nil
+	}
+	if enc == "none" {
+		return []byte(obj.Content), nil
 	}
 	return body, nil
 }

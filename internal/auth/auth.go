@@ -39,13 +39,15 @@ var ErrOAuthNotConfigured = errors.New("oauth is not configured")
 
 // Config holds auth runtime settings.
 type Config struct {
-	BootstrapPassword string
-	SessionTTL        time.Duration
-	CookieSecure      bool
-	CookiePath        string
-	GiteaBaseURL      string
-	OAuthClientID     string
-	OAuthClientSecret string
+	BootstrapPassword       string
+	BootstrapUsername       string
+	BootstrapKeepAfterSetup *bool
+	SessionTTL              time.Duration
+	CookieSecure            bool
+	CookiePath              string
+	GiteaBaseURL            string
+	OAuthClientID           string
+	OAuthClientSecret       string
 	GitHubBaseURL           string
 	GitHubOAuthClientID     string
 	GitHubOAuthClientSecret string
@@ -111,6 +113,11 @@ func New(st *store.Store, cfg Config) *Service {
 }
 
 func (s *Service) BootstrapEnabled() bool {
+	// Prefer DB hash; fall back to legacy env/config password.
+	ctx := context.Background()
+	if st, err := s.store.GetBootstrapAuthState(ctx); err == nil && st != nil && strings.TrimSpace(st.PasswordHash) != "" {
+		return true
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cfg.BootstrapPassword != ""
@@ -201,28 +208,6 @@ func constantTimeStringEqual(a, b string) bool {
 	copy(bb[:], b)
 	lenEq := subtle.ConstantTimeEq(int32(len(a)), int32(len(b)))
 	return subtle.ConstantTimeCompare(ab[:], bb[:]) == 1 && lenEq == 1
-}
-
-// LoginBootstrap validates the shared setup password and creates a session.
-func (s *Service) LoginBootstrap(ctx context.Context, password, ip, ua string) (*models.User, string, error) {
-	s.mu.RLock()
-	bootstrapPW := s.cfg.BootstrapPassword
-	s.mu.RUnlock()
-	if bootstrapPW == "" {
-		return nil, "", fmt.Errorf("bootstrap auth is not configured")
-	}
-	if !constantTimeStringEqual(password, bootstrapPW) {
-		return nil, "", ErrInvalidCredentials
-	}
-	user, err := s.store.EnsureBootstrapUser(ctx)
-	if err != nil {
-		return nil, "", err
-	}
-	token, err := s.createSession(ctx, user.ID, ip, ua)
-	if err != nil {
-		return nil, "", err
-	}
-	return user, token, nil
 }
 
 // BeginOAuth creates PKCE state, sets an HttpOnly state cookie, and returns the Gitea authorize URL.

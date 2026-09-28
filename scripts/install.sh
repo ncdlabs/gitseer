@@ -29,7 +29,9 @@ SERVER_EXTERNAL_URL=""
 SERVER_LISTEN=""
 OAUTH_CLIENT_ID=""
 OAUTH_CLIENT_SECRET=""
-BOOTSTRAP_PASSWORD=""
+BOOTSTRAP_PASSWORD=""          # optional legacy; prefer claim on first UI visit
+BOOTSTRAP_USERNAME=""
+BOOTSTRAP_KEEP_AFTER_SETUP="true"
 ALLOW_PRIVATE_NETWORK=""
 INSTANCE_NAME=""
 DATABASE_DRIVER=""
@@ -60,8 +62,8 @@ Examples:
   ./scripts/install.sh --method binary --config config.yaml -y
 
 Required for a working install:
-  gitea url, gitea token, external url, bootstrap password
-  (oauth client id recommended for normal Gitea login)
+  gitea url, gitea token, external url
+  (bootstrap password is set in the UI on first visit; oauth client id recommended)
 EOF
 }
 
@@ -165,6 +167,8 @@ load_dotenv() {
       GITSEER_AUTH_OAUTH_CLIENT_ID) set_if_empty OAUTH_CLIENT_ID "$value" ;;
       GITSEER_AUTH_OAUTH_CLIENT_SECRET) set_if_empty OAUTH_CLIENT_SECRET "$value" ;;
       GITSEER_AUTH_BOOTSTRAP_PASSWORD) set_if_empty BOOTSTRAP_PASSWORD "$value" ;;
+      GITSEER_AUTH_BOOTSTRAP_USERNAME) set_if_empty BOOTSTRAP_USERNAME "$value" ;;
+      GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP) set_if_empty BOOTSTRAP_KEEP_AFTER_SETUP "$value" ;;
       GITSEER_GITEA_ALLOW_PRIVATE_NETWORK) set_if_empty ALLOW_PRIVATE_NETWORK "$value" ;;
       GITSEER_UI_INSTANCE_NAME) set_if_empty INSTANCE_NAME "$value" ;;
       GITSEER_DATABASE_DRIVER) set_if_empty DATABASE_DRIVER "$value" ;;
@@ -187,6 +191,8 @@ load_process_env() {
   set_if_empty OAUTH_CLIENT_ID "${GITSEER_AUTH_OAUTH_CLIENT_ID:-}"
   set_if_empty OAUTH_CLIENT_SECRET "${GITSEER_AUTH_OAUTH_CLIENT_SECRET:-}"
   set_if_empty BOOTSTRAP_PASSWORD "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}"
+  set_if_empty BOOTSTRAP_USERNAME "${GITSEER_AUTH_BOOTSTRAP_USERNAME:-}"
+  set_if_empty BOOTSTRAP_KEEP_AFTER_SETUP "${GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP:-}"
   set_if_empty ALLOW_PRIVATE_NETWORK "${GITSEER_GITEA_ALLOW_PRIVATE_NETWORK:-}"
   set_if_empty INSTANCE_NAME "${GITSEER_UI_INSTANCE_NAME:-}"
   set_if_empty DATABASE_DRIVER "${GITSEER_DATABASE_DRIVER:-}"
@@ -207,6 +213,8 @@ apply_env_overrides() {
   [[ -n "${GITSEER_AUTH_OAUTH_CLIENT_ID:-}" ]] && OAUTH_CLIENT_ID="$GITSEER_AUTH_OAUTH_CLIENT_ID"
   [[ -n "${GITSEER_AUTH_OAUTH_CLIENT_SECRET:-}" ]] && OAUTH_CLIENT_SECRET="$GITSEER_AUTH_OAUTH_CLIENT_SECRET"
   [[ -n "${GITSEER_AUTH_BOOTSTRAP_PASSWORD:-}" ]] && BOOTSTRAP_PASSWORD="$GITSEER_AUTH_BOOTSTRAP_PASSWORD"
+  [[ -n "${GITSEER_AUTH_BOOTSTRAP_USERNAME:-}" ]] && BOOTSTRAP_USERNAME="$GITSEER_AUTH_BOOTSTRAP_USERNAME"
+  [[ -n "${GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP:-}" ]] && BOOTSTRAP_KEEP_AFTER_SETUP="$GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP"
   [[ -n "${GITSEER_GITEA_ALLOW_PRIVATE_NETWORK:-}" ]] && ALLOW_PRIVATE_NETWORK="$GITSEER_GITEA_ALLOW_PRIVATE_NETWORK"
   [[ -n "${GITSEER_UI_INSTANCE_NAME:-}" ]] && INSTANCE_NAME="$GITSEER_UI_INSTANCE_NAME"
   [[ -n "${GITSEER_DATABASE_DRIVER:-}" ]] && DATABASE_DRIVER="$GITSEER_DATABASE_DRIVER"
@@ -319,6 +327,8 @@ load_config_file() {
   set_if_empty OAUTH_CLIENT_ID "$(yaml_get "$file" oauth_client_id)"
   set_if_empty OAUTH_CLIENT_SECRET "$(yaml_get "$file" oauth_client_secret)"
   set_if_empty BOOTSTRAP_PASSWORD "$(yaml_get "$file" bootstrap_password)"
+  set_if_empty BOOTSTRAP_USERNAME "$(yaml_get "$file" bootstrap_username)"
+  set_if_empty BOOTSTRAP_KEEP_AFTER_SETUP "$(yaml_get "$file" bootstrap_keep_after_setup)"
   set_if_empty ALLOW_PRIVATE_NETWORK "$(yaml_get "$file" allow_private_network)"
   set_if_empty INSTANCE_NAME "$(yaml_get "$file" instance_name)"
   set_if_empty DATABASE_DRIVER "$(yaml_get "$file" database_driver)"
@@ -334,6 +344,8 @@ load_config_file() {
   set_if_empty OAUTH_CLIENT_ID "$(yaml_get "$file" auth oauth_client_id)"
   set_if_empty OAUTH_CLIENT_SECRET "$(yaml_get "$file" auth oauth_client_secret)"
   set_if_empty BOOTSTRAP_PASSWORD "$(yaml_get "$file" auth bootstrap_password)"
+  set_if_empty BOOTSTRAP_USERNAME "$(yaml_get "$file" auth bootstrap_username)"
+  set_if_empty BOOTSTRAP_KEEP_AFTER_SETUP "$(yaml_get "$file" auth bootstrap_keep_after_setup)"
   set_if_empty INSTANCE_NAME "$(yaml_get "$file" ui instance_name)"
   set_if_empty DATABASE_DRIVER "$(yaml_get "$file" database driver)"
   set_if_empty DATABASE_PATH "$(yaml_get "$file" database path)"
@@ -449,12 +461,14 @@ gather_interactive() {
     prompt SERVER_LISTEN "Listen address" "0.0.0.0:8090"
     prompt OAUTH_CLIENT_ID "Gitea OAuth client ID (recommended)"
     prompt OAUTH_CLIENT_SECRET "Gitea OAuth client secret (optional for public PKCE)" "" --secret
-    if [[ -z "$BOOTSTRAP_PASSWORD" ]]; then
-      local gen
-      gen="$(generate_password)"
-      prompt BOOTSTRAP_PASSWORD "Bootstrap password" "$gen" --secret
-    else
-      prompt BOOTSTRAP_PASSWORD "Bootstrap password" "" --secret
+    prompt BOOTSTRAP_USERNAME "Bootstrap username (prefer not 'bootstrap')" "admin"
+    if [[ "${BOOTSTRAP_USERNAME}" == "bootstrap" ]]; then
+      warn "Keeping username 'bootstrap' is discouraged — prefer a unique name"
+    fi
+    prompt BOOTSTRAP_KEEP_AFTER_SETUP "Keep bootstrap login after setup (true=keep, false=remove)" "true"
+    if [[ -n "$BOOTSTRAP_PASSWORD" ]]; then
+      warn "Legacy bootstrap_password is set; prefer leaving it empty and claiming in the UI"
+      prompt BOOTSTRAP_PASSWORD "Bootstrap password (optional legacy; leave empty to claim in UI)" "" --secret
     fi
     prompt INSTANCE_NAME "UI instance name" "GitSeer"
     if [[ -z "$ALLOW_PRIVATE_NETWORK" ]]; then
@@ -510,28 +524,22 @@ apply_defaults() {
       DATABASE_PATH="data/gitseer.db"
     fi
   fi
-  if [[ -z "$BOOTSTRAP_PASSWORD" ]]; then
-    if [[ $NON_INTERACTIVE -eq 1 ]]; then
-      die "missing required value: bootstrap_password / GITSEER_AUTH_BOOTSTRAP_PASSWORD"
-    fi
-    BOOTSTRAP_PASSWORD="$(generate_password)"
-    warn "Generated bootstrap password (saved to .env / config.yaml)"
-  fi
+  set_if_empty BOOTSTRAP_USERNAME "admin"
+  set_if_empty BOOTSTRAP_KEEP_AFTER_SETUP "true"
 }
 
 validate_required() {
   require_value GITEA_URL "gitea_url / GITSEER_GITEA_URL"
   require_value GITEA_TOKEN "gitea_token / GITSEER_GITEA_TOKEN"
   require_value SERVER_EXTERNAL_URL "server_external_url / GITSEER_SERVER_EXTERNAL_URL"
-  require_value BOOTSTRAP_PASSWORD "bootstrap_password / GITSEER_AUTH_BOOTSTRAP_PASSWORD"
 
   [[ -n "$GITEA_URL" ]] || die "Gitea URL is required"
   [[ -n "$GITEA_TOKEN" ]] || die "Gitea API token is required"
   [[ -n "$SERVER_EXTERNAL_URL" ]] || die "external URL is required"
-  [[ -n "$BOOTSTRAP_PASSWORD" ]] || die "bootstrap password is required"
+  [[ -n "$BOOTSTRAP_USERNAME" ]] || die "bootstrap username is required"
 
   if [[ -z "$OAUTH_CLIENT_ID" ]]; then
-    warn "OAuth client ID is empty — only bootstrap password login will work until you set GITSEER_AUTH_OAUTH_CLIENT_ID"
+    warn "OAuth client ID is empty — open the App URL and claim bootstrap, or set GITSEER_AUTH_OAUTH_CLIENT_ID"
   fi
 
   case "$METHOD" in
@@ -617,6 +625,8 @@ GITSEER_SERVER_EXTERNAL_URL=${SERVER_EXTERNAL_URL}
 GITSEER_SERVER_LISTEN=${SERVER_LISTEN}
 GITSEER_AUTH_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
 GITSEER_AUTH_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
+GITSEER_AUTH_BOOTSTRAP_USERNAME=${BOOTSTRAP_USERNAME}
+GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP=${BOOTSTRAP_KEEP_AFTER_SETUP}
 GITSEER_AUTH_BOOTSTRAP_PASSWORD=${BOOTSTRAP_PASSWORD}
 GITSEER_GITEA_ALLOW_PRIVATE_NETWORK=${ALLOW_PRIVATE_NETWORK}
 GITSEER_UI_INSTANCE_NAME=${INSTANCE_NAME}
@@ -668,9 +678,11 @@ sync:
 auth:
   provider: gitea
   session_ttl: 24h
+  bootstrap_username: ${BOOTSTRAP_USERNAME}
+  bootstrap_keep_after_setup: ${BOOTSTRAP_KEEP_AFTER_SETUP}
 EOF
     [[ -n "$OAUTH_CLIENT_ID" ]] && printf '  oauth_client_id: %s\n' "$OAUTH_CLIENT_ID"
-    # secrets stay in env / .env
+    # secrets stay in env / .env; optional legacy bootstrap password via .env only
     cat <<EOF
 
 ui:
@@ -696,6 +708,8 @@ export_runtime_env() {
   export GITSEER_SERVER_LISTEN="$SERVER_LISTEN"
   export GITSEER_AUTH_OAUTH_CLIENT_ID="$OAUTH_CLIENT_ID"
   export GITSEER_AUTH_OAUTH_CLIENT_SECRET="$OAUTH_CLIENT_SECRET"
+  export GITSEER_AUTH_BOOTSTRAP_USERNAME="$BOOTSTRAP_USERNAME"
+  export GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP="$BOOTSTRAP_KEEP_AFTER_SETUP"
   export GITSEER_AUTH_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
   export GITSEER_GITEA_ALLOW_PRIVATE_NETWORK="$ALLOW_PRIVATE_NETWORK"
   export GITSEER_UI_INSTANCE_NAME="$INSTANCE_NAME"
@@ -770,18 +784,24 @@ print_summary() {
   echo "   gitea:           $GITEA_URL"
   echo "   external url:    $SERVER_EXTERNAL_URL"
   echo "   oauth client id: ${OAUTH_CLIENT_ID:-"(not set)"}"
+  echo "   bootstrap user:  $BOOTSTRAP_USERNAME"
+  if is_true "$BOOTSTRAP_KEEP_AFTER_SETUP"; then
+    echo "   bootstrap login: keep after setup"
+  else
+    echo "   bootstrap login: remove after setup (use Become Bootstrap)"
+  fi
   echo "   private network: $ALLOW_PRIVATE_NETWORK"
   echo "   config:          $ROOT/config.yaml"
   echo "   env file:        $ROOT/.env"
   echo
   echo "   Next steps:"
   echo "   1. Open ${SERVER_EXTERNAL_URL}"
-  echo "   2. Sign in (Gitea OAuth or bootstrap password)"
-  echo "   3. Click Sync now"
+  echo "   2. Claim bootstrap: set username + password on first visit (suggested user: ${BOOTSTRAP_USERNAME})"
+  echo "   3. Complete setup / Sync now"
   if [[ -n "$OAUTH_CLIENT_ID" ]]; then
     echo "   4. Confirm OAuth redirect URI is ${SERVER_EXTERNAL_URL%/}/api/v1/auth/callback"
   else
-    echo "   4. Create a Gitea OAuth app and re-run with oauth_client_id set"
+    echo "   4. Create a Gitea OAuth app and re-run with oauth_client_id set (optional)"
   fi
 }
 

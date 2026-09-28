@@ -18,7 +18,9 @@ import (
 
 	gitseercrypto "github.com/ncdlabs/gitseer/internal/crypto"
 	"github.com/ncdlabs/gitseer/internal/models"
+	"github.com/ncdlabs/gitseer/internal/realtime"
 	"github.com/ncdlabs/gitseer/internal/store"
+	"github.com/ncdlabs/gitseer/internal/webpush"
 )
 
 // SecretOpener decrypts sealed notification secrets.
@@ -65,6 +67,8 @@ type Service struct {
 	extURL  ExternalURLSource
 	log     *slog.Logger
 	http    *http.Client
+	hub     *realtime.Hub
+	push    *webpush.Sender
 }
 
 // New builds a notification service.
@@ -83,11 +87,32 @@ func New(st *store.Store, secrets SecretOpener, extURL ExternalURLSource, log *s
 	}
 }
 
+// SetHub wires SSE fan-out for in-browser / OS alerts while a tab is connected.
+func (s *Service) SetHub(hub *realtime.Hub) {
+	if s != nil {
+		s.hub = hub
+	}
+}
+
+// SetWebPush wires self-hosted Web Push delivery.
+func (s *Service) SetWebPush(push *webpush.Sender) {
+	if s != nil {
+		s.push = push
+	}
+}
+
 // OnAttentionOpened is the attention-engine hook for newly opened / reopened items.
 func (s *Service) OnAttentionOpened(ctx context.Context, item *models.AttentionItem) {
 	if s == nil || item == nil || s.store == nil {
 		return
 	}
+	deepLink := s.deepLinkFor(item)
+	s.publishAttentionSSE(item, deepLink)
+	if s.push != nil {
+		// Detach from request-scoped cancel so push fan-out can finish.
+		go s.push.NotifyAttention(context.WithoutCancel(ctx), item, deepLink)
+	}
+
 	cfg, err := s.store.GetNotificationSettings(ctx)
 	if err != nil || cfg == nil || !cfg.Enabled || !cfg.ImmediateEnabled {
 		return
@@ -99,6 +124,21 @@ func (s *Service) OnAttentionOpened(ctx context.Context, item *models.AttentionI
 	raw, _ := json.Marshal(payload)
 	dedupe := fmt.Sprintf("immediate:%s:%s", item.Fingerprint, item.OpenedAt.UTC().Format(time.RFC3339Nano))
 	s.enqueueAllChannels(ctx, cfg, store.NotifyKindImmediate, string(raw), dedupe)
+}
+
+func (s *Service) publishAttentionSSE(item *models.AttentionItem, deepLink string) {
+	if s.hub == nil || item == nil {
+		return
+	}
+	s.hub.Publish(realtime.Event{
+		Type:     "attention",
+		ID:       item.ID,
+		RepoID:   item.RepoID,
+		Title:    item.Title,
+		Severity: item.Severity,
+		RepoFull: item.RepoFull,
+		DeepLink: deepLink,
+	})
 }
 
 // MaybeEnqueueDigest queues a digest when due (daily at digest_hour_utc).
