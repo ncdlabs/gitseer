@@ -1164,6 +1164,8 @@ func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 			Path         string `json:"path"`
 			RunAttempt   int    `json:"run_attempt"`
 			RunStartedAt string `json:"run_started_at"`
+			StartedAt    string `json:"started_at"`
+			CompletedAt  string `json:"completed_at"`
 			UpdatedAt    string `json:"updated_at"`
 			CreatedAt    string `json:"created_at"`
 		} `json:"workflow_run"`
@@ -1200,13 +1202,19 @@ func (p *Processor) applyRun(ctx context.Context, ev store.WebhookEvent) error {
 	if attempt == 0 {
 		attempt = 1
 	}
-	started := parseWebhookTime(payload.WorkflowRun.RunStartedAt)
+	started := parseWebhookTime(payload.WorkflowRun.StartedAt)
+	if started == nil {
+		started = parseWebhookTime(payload.WorkflowRun.RunStartedAt)
+	}
 	if started == nil {
 		started = parseWebhookTime(payload.WorkflowRun.CreatedAt)
 	}
 	var completed *time.Time
 	if st == models.StatusCompleted {
-		completed = parseWebhookTime(payload.WorkflowRun.UpdatedAt)
+		completed = parseWebhookTime(payload.WorkflowRun.CompletedAt)
+		if completed == nil {
+			completed = parseWebhookTime(payload.WorkflowRun.UpdatedAt)
+		}
 	}
 	saved, err := p.store.UpsertWorkflowRun(ctx, repo.ID, models.WorkflowRun{
 		ExternalID:         payload.WorkflowRun.ID,

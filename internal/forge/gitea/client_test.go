@@ -81,3 +81,50 @@ func mustParse(s string) *url.URL {
 	}
 	return u
 }
+
+func TestMapRunGiteaActionsShape(t *testing.T) {
+	// Gitea 1.25 Actions: started_at/completed_at/display_title; no name/created_at/updated_at.
+	raw := `{
+		"id": 12997,
+		"display_title": "Set GA4 measurement ID",
+		"path": "deploy.yaml@refs/heads/main",
+		"event": "push",
+		"run_attempt": 0,
+		"run_number": 30,
+		"head_sha": "abc",
+		"head_branch": "main",
+		"status": "completed",
+		"conclusion": "failure",
+		"started_at": "2026-09-28T21:43:32Z",
+		"completed_at": "2026-09-28T21:45:31Z",
+		"html_url": "https://git.example.com/o/r/actions/runs/30",
+		"actor": {"login": "lou"}
+	}`
+	var gr giteaRun
+	if err := json.Unmarshal([]byte(raw), &gr); err != nil {
+		t.Fatal(err)
+	}
+	m := mapRun(gr)
+	if m.ExternalID != 12997 {
+		t.Fatalf("external_id=%d", m.ExternalID)
+	}
+	if m.Status != "completed" || m.Conclusion != "failure" {
+		t.Fatalf("status=%q conclusion=%q", m.Status, m.Conclusion)
+	}
+	if m.Name != "deploy.yaml" {
+		t.Fatalf("name=%q want deploy.yaml (path-derived; display_title is commit subject)", m.Name)
+	}
+	if m.WorkflowPath != "deploy.yaml" {
+		t.Fatalf("path=%q", m.WorkflowPath)
+	}
+	if m.RunAttempt != 1 {
+		t.Fatalf("run_attempt=%d want 1 (zero coerced)", m.RunAttempt)
+	}
+	if m.StartedAt == nil || m.CompletedAt == nil {
+		t.Fatalf("timestamps started=%v completed=%v", m.StartedAt, m.CompletedAt)
+	}
+	if m.ActorLogin != "lou" {
+		t.Fatalf("actor=%q", m.ActorLogin)
+	}
+}
+

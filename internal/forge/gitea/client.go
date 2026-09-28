@@ -260,23 +260,26 @@ type giteaPR struct {
 }
 
 type giteaRun struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Title      string `json:"title"`
-	Event      string `json:"event"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	WorkflowID int64  `json:"workflow_id"`
-	HTMLURL    string `json:"html_url"`
-	URL        string `json:"url"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
-	RunNumber  int64  `json:"run_number"`
-	RunAttempt int    `json:"run_attempt"`
-	HeadBranch string `json:"head_branch"`
-	HeadSHA    string `json:"head_sha"`
-	Path       string `json:"path"`
-	Actor      *struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Title        string `json:"title"`
+	DisplayTitle string `json:"display_title"`
+	Event        string `json:"event"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+	WorkflowID   int64  `json:"workflow_id"`
+	HTMLURL      string `json:"html_url"`
+	URL          string `json:"url"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	StartedAt    string `json:"started_at"`
+	CompletedAt  string `json:"completed_at"`
+	RunNumber    int64  `json:"run_number"`
+	RunAttempt   int    `json:"run_attempt"`
+	HeadBranch   string `json:"head_branch"`
+	HeadSHA      string `json:"head_sha"`
+	Path         string `json:"path"`
+	Actor        *struct {
 		Login string `json:"login"`
 	} `json:"actor"`
 	TriggeringActor *struct {
@@ -984,6 +987,8 @@ func mapRun(r giteaRun) models.WorkflowRun {
 		name = r.Title
 	}
 	workflowPath := workflows.NormalizeWorkflowPath(r.Path)
+	// Prefer workflow file name over display_title (Gitea uses display_title for the
+	// commit/PR subject, not the Actions workflow name).
 	name = workflows.DisplayWorkflowName(name, r.Path)
 	st, conc := forge.NormalizeStatus(r.Status)
 	if r.Conclusion != "" {
@@ -1006,6 +1011,15 @@ func mapRun(r giteaRun) models.WorkflowRun {
 	if attempt == 0 {
 		attempt = 1
 	}
+	// Gitea Actions prefers started_at/completed_at; older shapes used created_at/updated_at.
+	started := parseOptionalTime(r.StartedAt)
+	if started == nil {
+		started = parseOptionalTime(r.CreatedAt)
+	}
+	completed := parseOptionalTime(r.CompletedAt)
+	if completed == nil {
+		completed = parseOptionalTime(r.UpdatedAt)
+	}
 	return models.WorkflowRun{
 		ExternalID:         r.ID,
 		Name:               name,
@@ -1019,8 +1033,8 @@ func mapRun(r giteaRun) models.WorkflowRun {
 		ActorLogin:         actor,
 		HTMLURL:            html,
 		WorkflowPath:       workflowPath,
-		StartedAt:          parseOptionalTime(r.CreatedAt),
-		CompletedAt:        parseOptionalTime(r.UpdatedAt),
+		StartedAt:          started,
+		CompletedAt:        completed,
 		RunAttempt:         attempt,
 	}
 }

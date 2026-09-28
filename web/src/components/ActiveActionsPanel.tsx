@@ -5,7 +5,7 @@ import { api, type ActiveRunItem, type ForgeStatusRow, type Job, type User } fro
 import { useIsTerminalTheme } from "../hooks/useIsTerminalTheme";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 import { asciiBar } from "../lib/asciiGraphics";
-import { jobProgress, parseSteps, stepProgress } from "../lib/actionProgress";
+import { jobProgress, parseSteps, runStatusLabel, stepProgress } from "../lib/actionProgress";
 import { ForgeBadge } from "./ForgeBadge";
 import { WorkflowWriteActions } from "./WorkflowWriteActions";
 
@@ -27,7 +27,7 @@ function ProgressBar({ ratio, label, asciiWidth = 10 }: { ratio: number; label: 
 }
 
 function statusLabel(item: ActiveRunItem): string {
-  return item.run.conclusion || item.run.status || "—";
+  return runStatusLabel(item.run.status, item.run.conclusion);
 }
 
 function runningJobWithSteps(jobs: Job[]): { job: Job; steps: ReturnType<typeof parseSteps> } | null {
@@ -185,7 +185,7 @@ export function ActiveActionsPanel({ headerActions, onNavigate, preferOpener, cl
   const q = useQuery({
     queryKey: ["workflow-runs", "active"],
     queryFn: api.activeWorkflowRuns,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   });
 
   const total = q.data?.total ?? 0;
@@ -227,7 +227,7 @@ export function useActiveActionsCount(): number {
   const q = useQuery({
     queryKey: ["workflow-runs", "active"],
     queryFn: api.activeWorkflowRuns,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   });
   return q.data?.total ?? 0;
 }

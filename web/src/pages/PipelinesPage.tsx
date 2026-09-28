@@ -21,6 +21,7 @@ import { WorkflowWriteActions } from "../components/WorkflowWriteActions";
 import { resolveInstanceName, useForgeInventory } from "../hooks/useShowForgeUI";
 import { useTableSort } from "../hooks/useTableSort";
 import { useViewMode } from "../hooks/useViewMode";
+import { runStatusLabel } from "../lib/actionProgress";
 import { relativeAge } from "../lib/relativeAge";
 
 type ActionGroup = {
@@ -44,13 +45,13 @@ const pipelineGroupAccessors = {
   forge: (g: ActionGroup) =>
     [g.forgeType, g.instanceName].filter(Boolean).join(" ").toLowerCase() || undefined,
   latest: (g: ActionGroup) =>
-    (g.latest.conclusion || g.latest.status || "").toLowerCase() || undefined,
+    runStatusLabel(g.latest.status, g.latest.conclusion).toLowerCase() || undefined,
   runs: (g: ActionGroup) => g.runs.length,
 } as const;
 
 const pipelineJobAccessors = {
   job: (j: Job) => j.name,
-  status: (j: Job) => (j.conclusion || j.status || "").toLowerCase() || undefined,
+  status: (j: Job) => runStatusLabel(j.status, j.conclusion).toLowerCase() || undefined,
 } as const;
 
 function runTime(run: WorkflowRun): number {
@@ -103,7 +104,7 @@ function groupByAction(runs: WorkflowRun[]): ActionGroup[] {
 }
 
 function statusBadge(run: WorkflowRun) {
-  const label = run.conclusion || run.status;
+  const label = runStatusLabel(run.status, run.conclusion);
   return <span className={`badge ${label}`}>{label}</span>;
 }
 
@@ -359,7 +360,7 @@ export function PipelineDetailPage() {
   const jobStatus = useMemo(() => {
     const map: Record<string, string> = {};
     for (const job of jobs) {
-      map[job.name] = job.conclusion || job.status;
+      map[job.name] = runStatusLabel(job.status, job.conclusion);
     }
     return map;
   }, [jobs]);
@@ -377,6 +378,7 @@ export function PipelineDetailPage() {
   const { run, graph, graph_error: graphError } = q.data;
   const forgeHref = safeExternalHref(run.html_url);
   const user = (me.data as User | undefined) ?? null;
+  const runLabel = runStatusLabel(run.status, run.conclusion);
   return (
     <>
       <div className="topbar">
@@ -401,7 +403,7 @@ export function PipelineDetailPage() {
                 />
               </>
             )}{" "}
-            · <span className={`badge ${run.conclusion || run.status}`}>{run.conclusion || run.status}</span>
+            · <span className={`badge ${runLabel}`}>{runLabel}</span>
           </p>
         </div>
         <div className="topbar__actions">
@@ -443,15 +445,18 @@ export function PipelineDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {sortedJobs.map((job) => (
+            {sortedJobs.map((job) => {
+              const jobLabel = runStatusLabel(job.status, job.conclusion);
+              return (
               <tr key={job.id}>
                 <td>{job.name}</td>
-                <td><span className={`badge ${job.conclusion || job.status}`}>{job.conclusion || job.status}</span></td>
+                <td><span className={`badge ${jobLabel}`}>{jobLabel}</span></td>
                 <td>
                   <button className="btn" type="button" onClick={() => setLogJob(job.id)}>View Logs</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {sortedJobs.length === 0 && (
               <tr><td colSpan={3} className="empty">No jobs for this run.</td></tr>
             )}

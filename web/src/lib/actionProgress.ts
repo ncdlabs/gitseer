@@ -11,9 +11,24 @@ export type Progress = {
   ratio: number;
 };
 
+/** True when conclusion is a real terminal result (not empty / "unknown"). */
+export function hasTerminalConclusion(conclusion?: string | null): boolean {
+  const c = String(conclusion ?? "")
+    .trim()
+    .toLowerCase();
+  return c !== "" && c !== "unknown";
+}
+
+/** Prefer terminal conclusion for badges; fall back to execution status. */
+export function runStatusLabel(status?: string | null, conclusion?: string | null): string {
+  if (hasTerminalConclusion(conclusion)) return String(conclusion).trim();
+  const s = String(status ?? "").trim();
+  return s || "—";
+}
+
 function isDone(status?: string, conclusion?: string): boolean {
   if ((status || "").toLowerCase() === "completed") return true;
-  return Boolean(conclusion && String(conclusion).trim());
+  return hasTerminalConclusion(conclusion);
 }
 
 export function jobProgress(jobs: Array<{ status?: string; conclusion?: string }> | null | undefined): Progress {
