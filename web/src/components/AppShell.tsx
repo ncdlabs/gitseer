@@ -65,9 +65,6 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
             <Brand variant="logo" className="brand__img brand__img--logo" />
           )}
         </Link>
-        <button className="rail-toggle" type="button" onClick={() => setRailCollapsed((value) => !value)} aria-label={isRailCollapsed ? "Expand navigation" : "Collapse navigation"} title={isRailCollapsed ? "Expand navigation" : "Collapse navigation"}>
-          <Glyph name="menu" />
-        </button>
         <nav className="nav">
           <span className="nav__label">{terminal ? "// workspace" : "Workspace"}</span>
           {navigation.map(({ to, label, icon, end }) => (
@@ -78,6 +75,9 @@ export function AppShell({ user, theme, onTheme, onLogout, onSync, syncing, chil
           ))}
         </nav>
         <div className="sidebar__footer">
+          <button className="rail-toggle" type="button" onClick={() => setRailCollapsed((value) => !value)} aria-label={isRailCollapsed ? "Expand navigation" : "Collapse navigation"} title={isRailCollapsed ? "Expand navigation" : "Collapse navigation"}>
+            <Glyph name="menu" />
+          </button>
           <ActionsStatusFlyout openTick={actionsOpenTick} />
           <div className={`user-menu${userMenuOpen ? " is-open" : ""}`} ref={userMenuRef}>
             {userMenuOpen && (
