@@ -26,6 +26,8 @@ import { RepositoryDetailPage } from "./pages/RepositoryDetailPage";
 import { WallboardPage } from "./pages/WallboardPage";
 import "./styles/app.css";
 
+/** Coalesce SSE-driven invalidations so busy workflow_job chatter cannot stampede the API. */
+const SSE_INVALIDATE_MS = 1000;
 const DASHBOARD_REWARM_MS = 1500;
 
 const qc = new QueryClient({
@@ -39,7 +41,7 @@ const qc = new QueryClient({
   },
 });
 
-function invalidateKeys(queryClient: QueryClient, keys: string[]) {
+function invalidateKeys(queryClient: QueryClient, keys: Iterable<string>) {
   for (const key of keys) {
     void queryClient.invalidateQueries({ queryKey: [key] });
   }
@@ -50,13 +52,36 @@ function useRealtimeInvalidation() {
   useEffect(() => {
     const base = window.__GITSEER_BASE__ || "";
     const es = new EventSource(`${base}/api/v1/events`);
+    const pendingKeys = new Set<string>();
+    let needsRewarm = false;
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
     let rewarmTimer: ReturnType<typeof setTimeout> | undefined;
+
     const scheduleDashboardRewarm = () => {
       if (rewarmTimer) clearTimeout(rewarmTimer);
       rewarmTimer = setTimeout(() => {
         void prefetchDashboardRanges(queryClient);
       }, DASHBOARD_REWARM_MS);
     };
+
+    const flushPending = () => {
+      flushTimer = undefined;
+      if (pendingKeys.size === 0) return;
+      const keys = [...pendingKeys];
+      const rewarm = needsRewarm;
+      pendingKeys.clear();
+      needsRewarm = false;
+      invalidateKeys(queryClient, keys);
+      if (rewarm) scheduleDashboardRewarm();
+    };
+
+    const queueInvalidation = (keys: string[], rewarm: boolean) => {
+      for (const key of keys) pendingKeys.add(key);
+      if (rewarm) needsRewarm = true;
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(flushPending, SSE_INVALIDATE_MS);
+    };
+
     const onMessage = (event: MessageEvent) => {
       let type = "";
       let parsed: BrowserAlertEvent & { type?: string } = {};
@@ -64,44 +89,38 @@ function useRealtimeInvalidation() {
         parsed = JSON.parse(String(event.data ?? "")) as BrowserAlertEvent & { type?: string };
         type = typeof parsed?.type === "string" ? parsed.type : "";
       } catch {
-        /* unparseable → default invalidation */
+        /* unparseable → ignore (do not nuke the cache) */
+        return;
       }
       if (type === "attention") {
-        invalidateKeys(queryClient, ["attention", "inbox", "summary", "stats"]);
-        scheduleDashboardRewarm();
+        // Browser alerts stay synchronous; query refresh is coalesced.
         if (browserAlertsLocallyEnabled()) {
           showBrowserNotification(parsed);
         }
+        queueInvalidation(["attention", "inbox", "summary", "stats"], true);
         return;
       }
-      if (type === "workflow_run" || type === "workflow_job") {
-        invalidateKeys(queryClient, ["workflow-runs", "runs", "run", "summary", "stats", "attention", "inbox"]);
-        scheduleDashboardRewarm();
+      if (type === "workflow_job") {
+        // High-frequency step updates: runs only, no dashboard aggregates.
+        queueInvalidation(["workflow-runs", "runs", "run"], false);
+        return;
+      }
+      if (type === "workflow_run") {
+        queueInvalidation(["workflow-runs", "runs", "run", "summary", "stats"], true);
         return;
       }
       if (type === "pull_request") {
-        invalidateKeys(queryClient, ["prs", "summary", "stats", "attention", "inbox"]);
-        scheduleDashboardRewarm();
+        queueInvalidation(["prs", "summary", "stats", "attention", "inbox"], true);
         return;
       }
-      invalidateKeys(queryClient, [
-        "workflow-runs",
-        "runs",
-        "run",
-        "summary",
-        "stats",
-        "attention",
-        "inbox",
-        "prs",
-        "repositories",
-      ]);
-      scheduleDashboardRewarm();
+      // Unknown types: ignore rather than invalidating the full cache.
     };
     es.addEventListener("message", onMessage);
     es.onerror = () => {
       /* browser reconnects; avoid tight loops */
     };
     return () => {
+      if (flushTimer) clearTimeout(flushTimer);
       if (rewarmTimer) clearTimeout(rewarmTimer);
       es.removeEventListener("message", onMessage);
       es.close();
