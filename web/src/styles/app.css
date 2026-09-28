@@ -3351,10 +3351,13 @@ td.empty {
   max-height: calc(100vh - 11rem);
   padding: 8px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  /* Contrast against the elevated rail: canvas surface + accent edge */
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
   border-radius: 12px;
-  background: var(--bg-elevated);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .14);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, .22),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .actions-panel {
   display: grid;
