@@ -18,16 +18,18 @@ import { BrowserAlertsPanel } from "../components/BrowserAlertsPanel";
 import { WallboardTokensPanel } from "../components/WallboardTokensPanel";
 import { BootstrapPanel } from "../components/BootstrapPanel";
 import { BecomeBootstrapDialog } from "../components/BecomeBootstrapDialog";
+import { BootstrapAccessRequired } from "../components/BootstrapAccessRequired";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type SettingsTab = "preferences" | "integration" | "access" | "notifications" | "status" | "bootstrap";
 
-const BASE_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "preferences", label: "Preferences" },
   { id: "integration", label: "Integration" },
   { id: "access", label: "Access" },
   { id: "notifications", label: "Notifications" },
   { id: "status", label: "Status" },
+  { id: "bootstrap", label: "Bootstrap" },
 ];
 
 /** Lab: short windows for ephemeral environments. */
@@ -182,10 +184,7 @@ export function SettingsPage() {
   const elevatedUntil = meQuery.data?.bootstrap_elevated_until || null;
   const elevationActive =
     !!elevatedUntil && !Number.isNaN(Date.parse(elevatedUntil)) && Date.parse(elevatedUntil) > Date.now();
-  const SETTINGS_TABS = useMemo(() => {
-    if (!elevationActive) return BASE_SETTINGS_TABS;
-    return [...BASE_SETTINGS_TABS, { id: "bootstrap" as const, label: "Bootstrap" }];
-  }, [elevationActive]);
+  const canElevate = !!meQuery.data?.can_elevate_bootstrap;
 
   const [tab, setTab] = useState<SettingsTab>(() =>
     typeof window !== "undefined" ? tabFromHash(window.location.hash) : "preferences",
@@ -203,14 +202,9 @@ export function SettingsPage() {
   const [elevateOpen, setElevateOpen] = useState(false);
   const [grantMessage, setGrantMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (tab === "bootstrap" && !elevationActive) {
-      setTab("preferences");
-      if (window.location.hash === "#bootstrap") {
-        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#preferences`);
-      }
-    }
-  }, [elevationActive, tab]);
+  function openBecomeBootstrap() {
+    setElevateOpen(true);
+  }
 
   useEffect(() => {
     if (!elevationActive || !elevatedUntil) return;
@@ -256,7 +250,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     function onBecome() {
-      setElevateOpen(true);
+      openBecomeBootstrap();
     }
     window.addEventListener("gitseer:become-bootstrap", onBecome);
     return () => window.removeEventListener("gitseer:become-bootstrap", onBecome);
@@ -401,27 +395,7 @@ export function SettingsPage() {
           <p className="muted">
             {editable
               ? "Configure instance behavior. Changes apply immediately."
-              : "Instance configuration (read-only). "}
-            {!editable && meQuery.data?.can_elevate_bootstrap && (
-              <>
-                <button type="button" className="linkish" onClick={() => setElevateOpen(true)}>
-                  Become Bootstrap
-                </button>{" "}
-                for a 5-minute admin grant.
-              </>
-            )}
-            {!editable && !meQuery.data?.can_elevate_bootstrap && (
-              <>Bootstrap admins can edit and save.</>
-            )}
-            {editable && meQuery.data?.can_elevate_bootstrap && !elevationActive && (
-              <>
-                {" "}
-                <button type="button" className="linkish" onClick={() => setElevateOpen(true)}>
-                  Become Bootstrap
-                </button>{" "}
-                to open the password reset tab (5-minute grant).
-              </>
-            )}
+              : "Sections that change instance configuration require bootstrap admin access."}
           </p>
           {grantMessage && (
             <p className="settings-form__saved" role="status">
@@ -489,6 +463,15 @@ export function SettingsPage() {
           </div>
 
           {tab === "preferences" && (
+            !editable ? (
+              <div id="settings-panel-preferences" role="tabpanel" aria-labelledby="settings-tab-preferences">
+                <BootstrapAccessRequired
+                  message="Editing preferences requires bootstrap admin access."
+                  canElevate={canElevate}
+                  onBecomeBootstrap={openBecomeBootstrap}
+                />
+              </div>
+            ) : (
             <>
             <form
               className="panel panel--padded settings-form"
@@ -497,7 +480,7 @@ export function SettingsPage() {
               aria-labelledby="settings-tab-preferences"
               onSubmit={onSubmit}
             >
-              <fieldset className="settings-form__section" disabled={!editable || saving}>
+              <fieldset className="settings-form__section" disabled={saving}>
                 <legend>Instance</legend>
                 <div className="settings-form__field">
                   <input
@@ -530,7 +513,7 @@ export function SettingsPage() {
                 </div>
               </fieldset>
 
-              <fieldset className="settings-form__section" disabled={!editable || saving}>
+              <fieldset className="settings-form__section" disabled={saving}>
                 <legend>Sync</legend>
                 <div className="settings-form__field">
                   <input
@@ -547,7 +530,7 @@ export function SettingsPage() {
                 </div>
               </fieldset>
 
-              <fieldset className="settings-form__section" disabled={!editable || saving}>
+              <fieldset className="settings-form__section" disabled={saving}>
                 <legend>Attention</legend>
                 <div className="settings-form__field">
                   <input
@@ -563,13 +546,13 @@ export function SettingsPage() {
                 </div>
               </fieldset>
 
-              <fieldset className="settings-form__section" disabled={!editable || saving}>
+              <fieldset className="settings-form__section" disabled={saving}>
                 <legend>Retention</legend>
                 <div className="settings-form__presets">
                   <button
                     className="btn"
                     type="button"
-                    disabled={!editable || saving}
+                    disabled={saving}
                     onClick={() => applyPreset(LAB_PRESET)}
                   >
                     Apply Lab Preset
@@ -577,7 +560,7 @@ export function SettingsPage() {
                   <button
                     className="btn"
                     type="button"
-                    disabled={!editable || saving}
+                    disabled={saving}
                     onClick={() => applyPreset(PROD_PRESET)}
                   >
                     Apply Prod Preset
@@ -625,18 +608,16 @@ export function SettingsPage() {
                 <p className="settings-form__hint">
                   0 disables purge for that category. Next scheduled retention job (~6h) uses these values.
                 </p>
-                {editable && (
-                  <div className="settings-form__inline">
-                    <button
-                      className="btn"
-                      type="button"
-                      disabled={purgeBusy}
-                      onClick={() => setPurgeOpen(true)}
-                    >
-                      Purge Now
-                    </button>
-                  </div>
-                )}
+                <div className="settings-form__inline">
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={purgeBusy}
+                    onClick={() => setPurgeOpen(true)}
+                  >
+                    Purge Now
+                  </button>
+                </div>
                 {purgeMessage && (
                   <p className="settings-form__hint" role="status">
                     {purgeMessage}
@@ -647,16 +628,14 @@ export function SettingsPage() {
               {error && <p className="error" role="alert">{error}</p>}
               {savedFlash && !dirty && <p className="settings-form__saved">Saved.</p>}
 
-              {editable && (
-                <div className="settings-form__actions">
-                  <button className="btn" type="button" onClick={cancel} disabled={!dirty || saving}>
-                    Cancel
-                  </button>
-                  <button className="btn primary" type="submit" disabled={!dirty || saving}>
-                    {saving ? "Saving…" : "Save Changes"}
-                  </button>
-                </div>
-              )}
+              <div className="settings-form__actions">
+                <button className="btn" type="button" onClick={cancel} disabled={!dirty || saving}>
+                  Cancel
+                </button>
+                <button className="btn primary" type="submit" disabled={!dirty || saving}>
+                  {saving ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
             </form>
             <div className="panel panel--padded settings-severity-panel">
               <fieldset className="settings-form__section">
@@ -665,13 +644,35 @@ export function SettingsPage() {
               </fieldset>
             </div>
             </>
+            )
           )}
 
-          {tab === "integration" && <InstanceSettingsPanel editable={editable} />}
-          {tab === "access" && <AccessGrantPanel editable={editable} />}
-          {tab === "bootstrap" && elevationActive && elevatedUntil && (
-            <BootstrapPanel elevatedUntil={elevatedUntil} />
+          {tab === "integration" && (
+            <InstanceSettingsPanel
+              editable={editable}
+              canElevate={canElevate}
+              onBecomeBootstrap={openBecomeBootstrap}
+            />
           )}
+          {tab === "access" && (
+            <AccessGrantPanel
+              editable={editable}
+              canElevate={canElevate}
+              onBecomeBootstrap={openBecomeBootstrap}
+            />
+          )}
+          {tab === "bootstrap" &&
+            (elevationActive && elevatedUntil ? (
+              <BootstrapPanel elevatedUntil={elevatedUntil} />
+            ) : (
+              <div id="settings-panel-bootstrap" role="tabpanel" aria-labelledby="settings-tab-bootstrap">
+                <BootstrapAccessRequired
+                  message="Resetting the bootstrap password requires an elevated bootstrap session."
+                  canElevate={canElevate}
+                  onBecomeBootstrap={openBecomeBootstrap}
+                />
+              </div>
+            ))}
           {tab === "notifications" && (
             <div
               id="settings-panel-notifications"
@@ -679,7 +680,11 @@ export function SettingsPage() {
               aria-labelledby="settings-tab-notifications"
             >
               <BrowserAlertsPanel />
-              <NotificationsPanel editable={editable} />
+              <NotificationsPanel
+                editable={editable}
+                canElevate={canElevate}
+                onBecomeBootstrap={openBecomeBootstrap}
+              />
             </div>
           )}
 

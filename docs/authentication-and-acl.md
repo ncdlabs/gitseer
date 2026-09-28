@@ -48,7 +48,7 @@
 - **First visit:** when no bootstrap password hash (and no legacy env password) exists, the UI shows **Claim Bootstrap** — set username + password (`POST /api/v1/auth/bootstrap/claim` with CSRF). Prefer a username other than `bootstrap`.
 - **Login:** `POST /api/v1/auth/bootstrap/login` with CSRF (`username` + `password`) when login is enabled.
 - **After setup:** `auth.bootstrap_keep_after_setup` / `GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP` controls whether break-glass login remains (`true`) or is removed (`false`). Elevation still works either way.
-- **Become Bootstrap (sudo):** signed-in users call `POST /api/v1/auth/bootstrap/elevate` with the bootstrap password for a **5-minute** session grant (`bootstrap_elevated_until`). Effective bootstrap admin unlocks Settings writes. While elevated, Settings shows a **Bootstrap** tab to reset the password (`POST /api/v1/auth/bootstrap/password`).
+- **Become Bootstrap (sudo):** signed-in users call `POST /api/v1/auth/bootstrap/elevate` with the bootstrap password for a **5-minute** session grant (`bootstrap_elevated_until`). Effective bootstrap admin unlocks Settings writes. Settings always shows the **Bootstrap** tab; without elevation it prompts to **Become Bootstrap** for password reset (`POST /api/v1/auth/bootstrap/password`).
 - Password is stored as a bcrypt hash in `app_settings`. Legacy `GITSEER_AUTH_BOOTSTRAP_PASSWORD` remains a seed until claim/override.
 - Creates/uses the bootstrap admin user with allow-all repository access
 

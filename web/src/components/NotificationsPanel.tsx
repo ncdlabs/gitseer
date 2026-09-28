@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type NotificationSettings } from "../api/client";
+import { BootstrapAccessRequired } from "./BootstrapAccessRequired";
 
 type Draft = NotificationSettings & {
   smtp_password: string;
@@ -101,10 +102,12 @@ function dirty(a: Draft, b: Draft): boolean {
 
 type Props = {
   editable: boolean;
+  canElevate?: boolean;
+  onBecomeBootstrap?: () => void;
 };
 
 /** Bootstrap-admin outbound notification settings (SMTP + webhooks). */
-export function NotificationsPanel({ editable }: Props) {
+export function NotificationsPanel({ editable, canElevate, onBecomeBootstrap }: Props) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["notification-settings"],
@@ -196,9 +199,11 @@ export function NotificationsPanel({ editable }: Props) {
 
   if (!editable) {
     return (
-      <div className="panel panel--padded">
-        <p className="settings-form__hint">Notification settings are editable by the bootstrap admin only.</p>
-      </div>
+      <BootstrapAccessRequired
+        message="Outbound notification settings require bootstrap admin access."
+        canElevate={canElevate}
+        onBecomeBootstrap={onBecomeBootstrap}
+      />
     );
   }
 

@@ -80,6 +80,7 @@ export function labelForVisit(entry: VisitEntry): string {
     if (tab === "access") return "Settings · Access";
     if (tab === "notifications") return "Settings · Notifications";
     if (tab === "status") return "Settings · Status";
+    if (tab === "bootstrap") return "Settings · Bootstrap";
     return "Settings";
   }
 

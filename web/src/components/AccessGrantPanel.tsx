@@ -1,13 +1,16 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ACLUser, type InstancePublic, type Repository } from "../api/client";
+import { BootstrapAccessRequired } from "./BootstrapAccessRequired";
 
 type Props = {
   editable: boolean;
+  canElevate?: boolean;
+  onBecomeBootstrap?: () => void;
 };
 
 /** Bootstrap-admin fallback to grant GitHub (or other) repo ACL when users lack per-user OAuth tokens. */
-export function AccessGrantPanel({ editable }: Props) {
+export function AccessGrantPanel({ editable, canElevate, onBecomeBootstrap }: Props) {
   const queryClient = useQueryClient();
   const usersQuery = useQuery({
     queryKey: ["acl-users"],
@@ -101,8 +104,12 @@ export function AccessGrantPanel({ editable }: Props) {
 
   if (!editable) {
     return (
-      <div className="panel panel--padded">
-        <p className="muted">Bootstrap admin is required to grant repository access.</p>
+      <div id="settings-panel-access" role="tabpanel" aria-labelledby="settings-tab-access">
+        <BootstrapAccessRequired
+          message="Granting repository access requires bootstrap admin access."
+          canElevate={canElevate}
+          onBecomeBootstrap={onBecomeBootstrap}
+        />
       </div>
     );
   }

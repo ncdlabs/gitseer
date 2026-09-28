@@ -143,6 +143,13 @@ const COMMANDS: SearchCatalogItem[] = [
     to: "/settings#status",
     keywords: ["settings", "status", "health", "connection"],
   },
+  {
+    id: "cmd-settings-bootstrap",
+    kind: "command",
+    label: "Settings · Bootstrap",
+    to: "/settings#bootstrap",
+    keywords: ["settings", "bootstrap", "password", "elevate", "sudo"],
+  },
   ...THEME_OPTIONS.map(
     (opt): SearchCatalogItem => ({
       id: `cmd-theme-${opt.id}`,

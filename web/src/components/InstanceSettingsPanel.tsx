@@ -3,11 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
   forgeLabel,
+  forgeTokenLabel,
   type ForgeType,
   type InstancePatch,
   type InstancePublic,
 } from "../api/client";
 import { DEFAULT_GITHUB_URL } from "../lib/product";
+import { BootstrapAccessRequired } from "./BootstrapAccessRequired";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ForgeBadge } from "./ForgeBadge";
 import { GiteaPATHelp } from "./GiteaPATHelp";
@@ -101,9 +103,11 @@ function configuredFlags(inst: InstancePublic): string[] {
 
 type Props = {
   editable: boolean;
+  canElevate?: boolean;
+  onBecomeBootstrap?: () => void;
 };
 
-export function InstanceSettingsPanel({ editable }: Props) {
+export function InstanceSettingsPanel({ editable, canElevate, onBecomeBootstrap }: Props) {
   const queryClient = useQueryClient();
   const titleId = useId();
   const instancesQuery = useQuery({
@@ -262,17 +266,12 @@ export function InstanceSettingsPanel({ editable }: Props) {
 
   if (!editable) {
     return (
-      <div
-        className="panel panel--padded"
-        id="settings-panel-integration"
-        role="tabpanel"
-        aria-labelledby="settings-tab-integration"
-      >
-        <p className="muted">
-          Forge instance management is available to the bootstrap admin only. Use{" "}
-          <strong>Become Bootstrap</strong> at the top of Settings for a 5-minute grant, or see Status
-          for a read-only forge summary.
-        </p>
+      <div id="settings-panel-integration" role="tabpanel" aria-labelledby="settings-tab-integration">
+        <BootstrapAccessRequired
+          message="Forge instance management requires bootstrap admin access."
+          canElevate={canElevate}
+          onBecomeBootstrap={onBecomeBootstrap}
+        />
       </div>
     );
   }
@@ -519,15 +518,11 @@ export function InstanceSettingsPanel({ editable }: Props) {
                       value={draft.token}
                       onChange={(value) => setField("token", value)}
                       placeholder={
-                        isGitHub
-                          ? mode === "edit" && editing?.token_configured
-                            ? "GitHub PAT (leave blank to keep)"
-                            : "GitHub PAT"
-                          : mode === "edit" && editing?.token_configured
-                            ? "Service token (leave blank to keep)"
-                            : "Service token"
+                        mode === "edit" && editing?.token_configured
+                          ? `${forgeTokenLabel(draft.forge_type)} (leave blank to keep)`
+                          : forgeTokenLabel(draft.forge_type)
                       }
-                      aria-label={isGitHub ? "GitHub PAT" : "Service token"}
+                      aria-label={forgeTokenLabel(draft.forge_type)}
                       autoComplete="new-password"
                     />
                     {isGitea ? (
