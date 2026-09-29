@@ -1,5 +1,7 @@
 # Install
 
+Preferred order: **release binary** → **Docker (GHCR)** → **clone** (guided installer / Compose). Root [README quick start](../README.md#quick-start) has the copy-paste commands.
+
 ## Install with Agent
 
 Paste this prompt into your coding agent. Fill in the bracketed values first, or leave them blank and let the agent ask.
@@ -8,9 +10,9 @@ Paste this prompt into your coding agent. Fill in the bracketed values first, or
 Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer on this machine.
 
 Goals:
-1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64) or `ghcr.io/ncdlabs/gitseer:1.0.9` via Docker. Fall back to cloning and `./scripts/install.sh` / Compose / `--method binary` if needed.
+1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64), then `ghcr.io/ncdlabs/gitseer:1.0.9` via Docker. Fall back to cloning and `./scripts/install.sh` / Compose / `--method binary` if needed.
 2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (`server.external_url`), suggested bootstrap username + keep/remove-after-setup choice, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
-3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for other forges, use image/binary/Compose + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
+3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for other forges, use binary/image/Compose + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
 4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click **Sync Now**.
 5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (per-instance webhooks, OAuth redirect URI, optional `gitseer install-ui`).
 
@@ -35,7 +37,29 @@ My values (replace or leave blank to prompt me):
 
 Also listed in the root [README](../README.md#e-install-with-agent).
 
-## Guided installer (recommended)
+## Release binary
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
+```
+
+Detects OS/arch, downloads `./gitseer`, and runs `serve`. Override with `VER=1.0.9` or `--no-start`. Windows: download the `.exe` from [GitHub Releases](https://github.com/ncdlabs/gitseer/releases). Script: [`scripts/install-binary.sh`](../scripts/install-binary.sh).
+
+## Public container (Docker)
+
+```bash
+docker run --rm -p 8090:8090 \
+  --platform linux/amd64 \
+  -v gitseer-data:/data \
+  -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
+  -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
+  -e GITSEER_DATABASE_PATH=/data/gitseer.db \
+  ghcr.io/ncdlabs/gitseer:1.0.9
+```
+
+Image is **linux/amd64**. Use a named volume so the non-root container user can write SQLite.
+
+## Guided installer (clone)
 
 ```bash
 ./scripts/install.sh
@@ -57,7 +81,7 @@ Copy `install.example.yaml` → `install.yaml` (gitignored) and fill secrets, or
 
 The installer writes gitignored `.env` + `config.yaml`, checks dependencies, then runs Compose (`docker compose` preferred; Podman Compose also works) or builds `./bin/gitseer`. It currently collects **Gitea** URL + token; add GitHub in `/setup` or Settings → Integration afterward.
 
-## Binary (manual)
+## Binary (from source)
 
 1. Build: `make frontend && go build -o bin/gitseer ./cmd/gitseer`
 2. Optionally set `GITSEER_ENCRYPTION_KEY` (or generate in `/setup` Prepare) and `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`)
@@ -65,7 +89,7 @@ The installer writes gitignored `.env` + `config.yaml`, checks dependencies, the
 4. Run: `./bin/gitseer serve --config config.example.yaml`
 5. Open `:8090`, **Claim Bootstrap** (sets password), complete **Prepare → Choose Forge → Connect → Validate → Finish**, sign in, click **Sync Now**
 
-## Compose (manual)
+## Compose (from source)
 
 ```bash
 # Required when the matching forge URL is set (or use the forge-specific unsigned lab flags).

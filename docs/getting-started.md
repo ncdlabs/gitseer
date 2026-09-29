@@ -4,9 +4,9 @@
 
 | Path | When to use |
 |------|-------------|
-| **Public GHCR image** | Mac/PC demo or cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64 via Docker) — see root README |
-| **Release binary** | Native binary from GitHub Releases (linux/darwin/windows × amd64/arm64) |
-| **Guided installer** | Lab install when you already have Gitea URL/token (add other forges in wizard/Settings) |
+| **Release binary** | Default — native binary from GitHub Releases (linux/darwin/windows × amd64/arm64); `curl … \| bash` in the root README |
+| **Public GHCR image** | Container demo or cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64 via Docker) |
+| **Guided installer** | Lab install when you already have Gitea URL/token (clone + `./scripts/install.sh`; add other forges in wizard/Settings) |
 | **Compose** | Build from source with Docker Compose (or Podman Compose) |
 | **Local dev** | Contributing / iterating on UI + API (macOS/Windows OK — builds a native binary) |
 
@@ -14,12 +14,24 @@ In-repo detail: [docs/install.md](install.md).
 
 ## 1. Prerequisites
 
-- Go **1.26+** and Node **22+** (binary / local builds)
-- Podman Compose or Docker Compose (installer default)
+- Go **1.26+** and Node **22+** (from-source / local builds only)
 - At least one forge: Gitea (~1.25+), Forgejo, GitHub / GitHub Enterprise, GitLab, and/or Bitbucket Cloud with an API token that can list repos, PRs/MRs, and CI/workflows
 - Public URL for GitSeer (needed for OAuth redirect and webhook delivery)
+- Podman Compose or Docker Compose (only for guided installer / Compose paths)
 
-## 2. Run the installer
+## 2. Install
+
+**Preferred — release binary:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
+```
+
+Then open http://127.0.0.1:8090. Override with `VER=1.0.9` or `--no-start` as needed. Windows: download the `.exe` from [Releases](https://github.com/ncdlabs/gitseer/releases).
+
+**Docker** and **clone / guided installer** options: root [README](../README.md#quick-start).
+
+### Guided installer (clone)
 
 ```bash
 git clone https://github.com/ncdlabs/gitseer.git
@@ -36,7 +48,7 @@ cp install.example.yaml install.yaml
 ./scripts/install.sh --config install.yaml --non-interactive
 ```
 
-The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, then starts GitSeer. It currently requires a Gitea URL/token; for other forges (or GitHub-only), start with Compose/binary and use `/setup` to connect.
+The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, then starts GitSeer. It currently requires a Gitea URL/token; for other forges (or GitHub-only), start with the release binary or GHCR image and use `/setup` to connect.
 
 ## 3. Complete the setup wizard
 
