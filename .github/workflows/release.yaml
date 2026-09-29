@@ -64,18 +64,45 @@ jobs:
       - name: Build frontend
         run: make frontend
 
-      - name: Build linux/amd64 binary
+      - name: Build release binaries
         env:
           VER: ${{ steps.ver.outputs.version }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-            -ldflags="-s -w -X main.version=${VER}" \
-            -o "dist/gitseer_${VER}_linux_amd64" ./cmd/gitseer
+          targets=(
+            linux/amd64
+            linux/arm64
+            darwin/amd64
+            darwin/arm64
+            windows/amd64
+            windows/arm64
+          )
+          for target in "${targets[@]}"; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            out="dist/gitseer_${VER}_${os}_${arch}"
+            if [[ "$os" == "windows" ]]; then
+              out="${out}.exe"
+            fi
+            echo "building ${out}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags="-s -w -X main.version=${VER}" \
+              -o "$out" ./cmd/gitseer
+          done
           (
             cd dist
-            sha256sum "gitseer_${VER}_linux_amd64" > "gitseer_${VER}_linux_amd64.sha256"
+            bins=(
+              "gitseer_${VER}_linux_amd64"
+              "gitseer_${VER}_linux_arm64"
+              "gitseer_${VER}_darwin_amd64"
+              "gitseer_${VER}_darwin_arm64"
+              "gitseer_${VER}_windows_amd64.exe"
+              "gitseer_${VER}_windows_arm64.exe"
+            )
+            sha256sum "${bins[@]}" > "gitseer_${VER}_SHA256SUMS"
           )
+          ls -la dist/
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
@@ -199,19 +226,22 @@ jobs:
           text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
           m = re.search(rf"(?ms)^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text)
           body = (m.group(1).strip() if m else "_No CHANGELOG section found for this version._")
-          pulls = [f"podman pull ghcr.io/ncdlabs/gitseer:{ver}"]
+          pulls = [f"docker pull ghcr.io/ncdlabs/gitseer:{ver}"]
           if hub:
-              pulls.append(f"podman pull docker.io/ncdlabs/gitseer:{ver}")
+              pulls.append(f"docker pull docker.io/ncdlabs/gitseer:{ver}")
           else:
               pulls.append("# Docker Hub skipped (DOCKERHUB_* secrets unset)")
           pull_block = "\n".join(pulls)
           pathlib.Path("dist/release-notes.md").write_text(
               f"## GitSeer {ver}\n\n{body}\n\n"
+              f"### Binaries\n\n"
+              f"Download `gitseer_{ver}_<os>_<arch>` (or `.exe` on Windows) from this release.\n"
+              f"Supported: linux/darwin/windows × amd64/arm64.\n\n"
               f"### Container images\n\n"
               f"```bash\n"
               f"{pull_block}\n"
               f"```\n\n"
-              f"linux/amd64 only. Public pulls use GHCR. Lab deploys continue to use "
+              f"Container images are linux/amd64. Public pulls use GHCR. Lab deploys continue to use "
               f"`git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill.\n",
               encoding="utf-8",
           )
@@ -223,11 +253,13 @@ jobs:
           VER: ${{ steps.ver.outputs.version }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          ASSETS=(
-            "dist/gitseer_${VER}_linux_amd64"
-            "dist/gitseer_${VER}_linux_amd64.sha256"
-            "dist/gitseer-sbom.spdx.json"
-          )
+          shopt -s nullglob
+          ASSETS=(dist/gitseer_"${VER}"_* dist/gitseer-sbom.spdx.json)
+          if [[ ${#ASSETS[@]} -lt 2 ]]; then
+            echo "expected release binaries under dist/" >&2
+            ls -la dist >&2 || true
+            exit 1
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
             gh release edit "$TAG" --notes-file dist/release-notes.md

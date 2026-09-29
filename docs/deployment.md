@@ -67,8 +67,10 @@ Tagged releases publish linux/amd64 images to:
 - `ghcr.io/ncdlabs/gitseer:<version>` (also `:latest`)
 - `docker.io/ncdlabs/gitseer:<version>` (also `:latest`)
 
+The same release also attaches native binaries for **linux / darwin / windows** × **amd64 / arm64**.
+
 ```bash
-podman pull ghcr.io/ncdlabs/gitseer:1.0.2
+docker pull ghcr.io/ncdlabs/gitseer:1.0.8
 ```
 
 Maintainers cut releases via **Actions → Cut release** — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill) and may run ahead of the latest public GHCR cut (for example browser/OS alerts in `1.0.3` before that tag is published).

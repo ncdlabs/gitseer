@@ -8,9 +8,9 @@ Paste this prompt into your coding agent. Fill in the bracketed values first, or
 Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer on this machine.
 
 Goals:
-1. Clone the repo if needed, then run the guided installer (./scripts/install.sh or make install). Prefer Compose via Podman (`podman compose`); fall back to Docker Compose or `--method binary` if Compose is unavailable.
+1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64) or `ghcr.io/ncdlabs/gitseer:1.0.8` via Docker. Fall back to cloning and `./scripts/install.sh` / Compose / `--method binary` if needed.
 2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (`server.external_url`), bootstrap admin password, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
-3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for other forges, use Compose/binary + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
+3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for other forges, use image/binary/Compose + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
 4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click **Sync Now**.
 5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (per-instance webhooks, OAuth redirect URI, optional `gitseer install-ui`).
 
@@ -28,11 +28,11 @@ My values (replace or leave blank to prompt me):
 - GitSeer public URL: [http://127.0.0.1:8090]
 - Bootstrap password: [generate a strong one if blank]
 - Encryption key: [generate in Prepare | paste ≥24 chars | env]
-- Install method: [compose | binary]
+- Install method: [binary | ghcr | compose | guided-installer]
 - Private/lab forge network: [yes | no]
 ```
 
-Also listed in the root [README](../README.md#install-with-agent).
+Also listed in the root [README](../README.md#e-install-with-agent).
 
 ## Guided installer (recommended)
 
@@ -54,7 +54,7 @@ Resolution order for values: defaults → `--config` YAML → `.env` → `GITSEE
 
 Copy `install.example.yaml` → `install.yaml` (gitignored) and fill secrets, or pass a gitseer-shaped `config.yaml` (`server` / `gitea` / `github` / `auth` keys). Secrets may also live in `.env` or the environment.
 
-The installer writes gitignored `.env` + `config.yaml`, checks dependencies, then runs Compose (`podman compose` preferred) or builds `./bin/gitseer`. It currently collects **Gitea** URL + token; add GitHub in `/setup` or Settings → Integration afterward.
+The installer writes gitignored `.env` + `config.yaml`, checks dependencies, then runs Compose (`docker compose` preferred; Podman Compose also works) or builds `./bin/gitseer`. It currently collects **Gitea** URL + token; add GitHub in `/setup` or Settings → Integration afterward.
 
 ## Binary (manual)
 

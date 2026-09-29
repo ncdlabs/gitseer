@@ -90,11 +90,11 @@ The [cut-release](../.github/workflows/cut-release.yaml) workflow bumps `cmd/git
 - Publishes linux/amd64 images to `ghcr.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`)
 - Sets the GHCR package visibility to **public** (new org packages default to private)
 - Optionally also publishes to `docker.io/ncdlabs/gitseer` when Hub secrets are set
-- Creates a GitHub Release with the linux/amd64 binary, checksum, and SBOM
+- Creates a GitHub Release with linux/darwin/windows × amd64/arm64 binaries, `SHA256SUMS`, and SBOM
 
 Repo secrets:
 
-- `RELEASE_TOKEN` (**required** for cut-release and for making the GHCR package **public**) — classic PAT with `repo` plus `read:packages` / `write:packages` (and org package admin as needed), or a fine-grained token for a repo admin who can bypass the locked / PR-required `main` branch. Used to push the version commit + tag; a PAT (not `GITHUB_TOKEN`) is also required so the tag push triggers `release.yaml`. Without packages scopes, the release image may push as a private org package and anonymous `podman pull` will fail.
+- `RELEASE_TOKEN` (**required** for cut-release and for making the GHCR package **public**) — classic PAT with `repo` plus `read:packages` / `write:packages` (and org package admin as needed), or a fine-grained token for a repo admin who can bypass the locked / PR-required `main` branch. Used to push the version commit + tag; a PAT (not `GITHUB_TOKEN`) is also required so the tag push triggers `release.yaml`. Without packages scopes, the release image may push as a private org package and anonymous `docker pull` will fail.
 - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — optional Docker Hub publish (skipped when unset; GHCR still publishes and is the documented public path). GHCR uses `GITHUB_TOKEN`.
 
 ```bash
@@ -106,9 +106,9 @@ Lab / k3s-home continues to use a private registry via a local (gitignored) `val
 Pull a public image:
 
 ```bash
-podman pull ghcr.io/ncdlabs/gitseer:1.0.2
+docker pull ghcr.io/ncdlabs/gitseer:1.0.8
 # Docker Hub only if DOCKERHUB_* secrets were set for that release:
-# podman pull docker.io/ncdlabs/gitseer:1.0.2
+# docker pull docker.io/ncdlabs/gitseer:1.0.8
 ```
 
 Re-publish an existing tag (rebuild images, refresh release notes, re-assert public visibility):

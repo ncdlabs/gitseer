@@ -1,10 +1,10 @@
 # GitSeer
 
-Self-hosted CI/CD and pull-request operations console for **Gitea**, **Forgejo**, **GitHub** (github.com and Enterprise), **GitLab**, and **Bitbucket Cloud**. Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `gitseer`, env `GITSEER_*`.
+Self-hosted CI/CD and pull-request ops console for Gitea, Forgejo, GitHub (github.com and Enterprise), GitLab, and Bitbucket Cloud.
 
-Aggregates repositories, open pull requests, Actions/workflow runs, and attention items into one ACL-aware UI. Each forge stays the system of record; GitSeer syncs via API + webhooks. Login is forge OAuth (PKCE) and/or bootstrap (claimed on first visit). Inventory sync uses a per-instance service token / PAT.
+Syncs repositories, open PRs, workflow runs, and attention items into one ACL-aware UI. Each forge stays the system of record; GitSeer talks to them over API and webhooks. Login is forge OAuth (PKCE) and/or bootstrap (claimed on first visit). Inventory sync uses a per-instance service token / PAT.
 
-Maintained by **[ncdLabs](https://ncdlabs.com)**.
+Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `gitseer`, env `GITSEER_*`. Maintained by [ncdLabs](https://ncdlabs.com).
 
 **Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki) · **Compatibility:** [docs/compatibility.md](docs/compatibility.md)
 
@@ -21,14 +21,12 @@ Maintained by **[ncdLabs](https://ncdlabs.com)**.
 ## Who This Is Not For
 
 - A replacement for the forge itself (GitSeer does not host git or runners)
-- Multi-arch hosts without amd64 support (release images and binaries are **linux/amd64 only** today)
 - Multi-replica SQLite deployments (use Postgres if you need more than one replica)
+- Multi-arch **container** hosts that cannot run linux/amd64 (release images are amd64-only; native binaries cover darwin/windows/linux × amd64/arm64)
 
 ---
 
 ## Screenshots
-
-Repo names, authors, and local account labels in these shots are substituted (`org-a/repo-1`, `bot`, `admin`) so the UI is readable without exposing real inventory.
 
 **Login**
 
@@ -52,7 +50,7 @@ Repo names, authors, and local account labels in these shots are substituted (`o
 
 ### Dashboard Themes
 
-Five themes. System follows the OS preference (shown here resolving to dark).
+System follows the OS preference (shown here resolving to dark).
 
 | Light | Dark |
 |-------|------|
@@ -71,15 +69,17 @@ Five themes. System follows the OS preference (shown here resolving to dark).
 ## Features
 
 - **Dashboard** — time-scoped summary and trends (Now / 1 / 7 / 30 / 90 days); org/forge filters
-- **Attention** — discrete rules for CI failures, review waits, long-running runs, and merge conflicts
-- **Inbox** — personal queue of ACL-scoped items that need you (author, reviewer, failing CI, blocked on me)
-- **Repositories, pull requests, pipelines** — ACL-scoped lists with live SSE updates; on-demand job logs
-- **Browser & OS alerts** — in-app Notification API while a tab is open, plus self-hosted Web Push for closed tabs (Settings → Notifications; no external relay)
-- **Outbound notifications** — optional SMTP / Slack / Discord / HTTPS / incident webhooks for operators (bootstrap admin)
-- **Setup wizard** — Prepare (public URL + encryption key) → forge picker → Connect → Validate → Finish
-- **Settings** — runtime preferences and multi-instance forge integration (DB-backed secrets are write-only; instance CRUD is bootstrap-admin)
+- **Attention** — rules for CI failures, review waits, long-running runs, and merge conflicts
+- **Inbox** — ACL-scoped items that need you (author, reviewer, failing CI, blocked on me)
+- **Repositories, pull requests, pipelines** — ACL-scoped lists with SSE updates; on-demand job logs
+- **Browser & OS alerts** — Notification API while a tab is open; self-hosted Web Push for closed tabs (Settings → Notifications)
+- **Outbound notifications** — optional SMTP / Slack / Discord / HTTPS / incident webhooks (bootstrap admin)
+- **Setup wizard** — Prepare → forge picker → Connect → Validate → Finish
+- **Settings** — runtime preferences and multi-instance forge integration (DB secrets are write-only; instance CRUD is bootstrap-admin)
 - **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
-- **Ops** — Prometheus `/metrics` (session or Bearer token), retention purge, wallboard tokens, SQLite by default (Postgres supported for multi-replica)
+- **Ops** — Prometheus `/metrics`, retention purge, wallboard tokens; SQLite by default (Postgres for multi-replica)
+
+Release binaries cover **linux / darwin / windows** × **amd64 / arm64**. Container images remain **linux/amd64**. Use Postgres if you need more than one replica.
 
 ---
 
@@ -87,43 +87,61 @@ Five themes. System follows the OS preference (shown here resolving to dark).
 
 | Component | Version / notes |
 |-----------|-----------------|
-| Container or binary | **linux/amd64** release artifacts (see [Releases](#releases)) |
+| Container or binary | Native release binaries (linux/darwin/windows × amd64/arm64); container image **linux/amd64** |
 | Go / Node (from source) | Go 1.26+ (`go.mod`), Node 22+ |
 | Forge | At least one: Gitea ~1.25+, Forgejo, GitHub / GHE, GitLab, or Bitbucket Cloud |
-| Compose (installer default) | Podman Compose or Docker Compose |
+| Compose (installer default) | Docker Compose (Podman Compose also works) |
 
 ---
 
 ## Quick start
 
-Pick one path. Detail: [docs/getting-started.md](docs/getting-started.md) · [docs/install.md](docs/install.md).
+Detail: [docs/getting-started.md](docs/getting-started.md) · [docs/install.md](docs/install.md).
 
-### A. Public container (fastest cold install)
+### A. Public container
 
 ```bash
 mkdir -p gitseer-data && cd gitseer-data
-podman run --rm -p 8090:8090 \
-  --platform linux/amd64 \
+docker run --rm -p 8090:8090 \
   -v "$PWD/data:/data" \
   -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
   -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
   -e GITSEER_DATABASE_PATH=/data/gitseer.db \
-  ghcr.io/ncdlabs/gitseer:1.0.2
+  ghcr.io/ncdlabs/gitseer:1.0.8
 ```
 
-Open **http://127.0.0.1:8090**, complete **Setup** (Prepare → Choose Forge → Connect → Validate → Finish), sign in, then **Sync Now**. On Apple Silicon / ARM hosts, keep `--platform linux/amd64` (release images are amd64-only).
+Open **http://127.0.0.1:8090**, complete Setup, sign in, then **Sync Now**.
+
+Optional:
+
+- `--platform linux/amd64` — only if your host is not amd64/x86_64 and Docker cannot resolve the image arch (images are linux/amd64)
+- Pre-seed a forge before Setup: `GITSEER_GITEA_URL` / `GITSEER_GITEA_TOKEN` / `GITSEER_WEBHOOK_SECRET` (or the matching `GITSEER_GITHUB_*` / GitLab / Bitbucket vars)
+- Bootstrap username hint: `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`; claim the password in the UI)
 
 ### B. Release binary
 
+Pick the asset for your OS/arch (or let the snippet detect it):
+
 ```bash
-curl -fsSL -o gitseer https://github.com/ncdlabs/gitseer/releases/download/v1.0.2/gitseer_1.0.2_linux_amd64
+VER=1.0.8
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+esac
+curl -fsSL -o gitseer \
+  "https://github.com/ncdlabs/gitseer/releases/download/v${VER}/gitseer_${VER}_${OS}_${ARCH}"
 chmod +x gitseer
-./gitseer serve --config config.yaml   # or generate config via installer / wizard
+./gitseer serve --config config.yaml
 ```
+
+On Windows, download `gitseer_${VER}_windows_amd64.exe` (or `windows_arm64`) from the [Releases](https://github.com/ncdlabs/gitseer/releases) page instead.
 
 ### C. Guided installer (Gitea-oriented)
 
-The guided installer currently requires a Gitea URL and API token. Add other forges in Setup / Settings afterward. For GitHub-only (or non-Gitea-first), use **A**, **B**, or Compose + `/setup`.
+Requires a Gitea URL and API token. Add other forges in Setup / Settings afterward. For non-Gitea-first installs, use A, B, or Compose + `/setup`.
 
 ```bash
 git clone https://github.com/ncdlabs/gitseer.git
@@ -149,7 +167,7 @@ export GITSEER_AUTH_BOOTSTRAP_USERNAME='admin'
 # Optional pre-seed (or connect in /setup):
 # export GITSEER_GITEA_URL=… GITSEER_GITEA_TOKEN=… GITSEER_WEBHOOK_SECRET=…
 # export GITSEER_GITHUB_URL=https://github.com GITSEER_GITHUB_TOKEN=… GITSEER_GITHUB_WEBHOOK_SECRET=…
-podman compose -f compose.yaml up --build
+docker compose -f compose.yaml up --build
 ```
 
 ### E. Install with Agent
@@ -160,7 +178,7 @@ Paste this prompt into your coding agent (Cursor, Codex, Claude Code, etc.). Fil
 Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer on this machine.
 
 Goals:
-1. Prefer the public image `ghcr.io/ncdlabs/gitseer:1.0.2` (linux/amd64) or the GitHub Release binary. Fall back to cloning and `./scripts/install.sh` / Compose / `make build-go` if building from source.
+1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64) or the public image `ghcr.io/ncdlabs/gitseer:1.0.8` (linux/amd64 via Docker). Fall back to cloning and `./scripts/install.sh` / Compose / `make build-go` if building from source.
 2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (server.external_url), suggested bootstrap username + keep/remove-after-setup choice, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
 3. Guided installer currently requires Gitea URL/token; for non-Gitea-first installs use the public image/binary/Compose and complete /setup. Set the matching webhook secret whenever a forge URL is set in config. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
 4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click Sync Now.
@@ -180,7 +198,7 @@ My values (replace or leave blank to prompt me):
 - GitSeer public URL: [http://127.0.0.1:8090]
 - Bootstrap password: [generate a strong one if blank]
 - Encryption key: [generate in Prepare | paste ≥24 chars | env]
-- Install method: [ghcr | binary | compose | guided-installer]
+- Install method: [binary | ghcr | compose | guided-installer]
 - Private/lab forge network: [yes | no]
 ```
 
@@ -193,7 +211,7 @@ npm run start          # API :8090 + Vite :5173; prints URLs + claim-bootstrap h
 make test
 ```
 
-Prefer `config.yaml` over `config.example.yaml` (override with `GITSEER_CONFIG`). On first visit, **Claim Bootstrap** sets username + password (no default password). Install/local can suggest a username via `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`).
+Prefer `config.yaml` over `config.example.yaml` (override with `GITSEER_CONFIG`). On first visit, **Claim Bootstrap** sets username + password. Install/local can suggest a username via `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`).
 
 ### Optional: Gitea UI links
 
@@ -208,14 +226,11 @@ Prefer `config.yaml` over `config.example.yaml` (override with `GITSEER_CONFIG`)
 
 Defaults live in `config.example.yaml`. Environment overrides use the `GITSEER_*` prefix — see [docs/configuration.md](docs/configuration.md).
 
-Important:
-
 - Set `server.external_url` to the public URL (including subpath). GitSeer strips only that configured prefix — not client `X-Forwarded-Prefix`.
 - When a forge URL is set in config, the matching webhook secret is required unless unsigned webhooks are explicitly allowed (lab only).
 - OAuth redirects are per forge under `{external_url}/api/v1/auth/...` (see [docs/authentication-and-acl.md](docs/authentication-and-acl.md)). Inventory sync still uses a service token / PAT.
 - `GITSEER_ENCRYPTION_KEY` (env/config min **16**, prefer ≥24; wizard paste min **24**) encrypts forge secrets and OAuth tokens at rest. Required to save integration secrets to the DB; the setup wizard can generate a key file when unset.
-
-- Runtime settings and multi-instance forge integration can also be managed in the UI (`/settings`) after bootstrap login.
+- Runtime settings and multi-instance forge integration are also managed in `/settings` after bootstrap login.
 - Browser / OS alerts (Settings → **Notifications**) need a secure context (**HTTPS** or localhost) for Web Push. VAPID keys auto-generate beside the database unless `GITSEER_VAPID_*` is set.
 
 ---
@@ -229,20 +244,21 @@ Important:
 | [docs/compatibility.md](docs/compatibility.md) | Forge and runtime matrix |
 | [docs/prd-spec.md](docs/prd-spec.md) | Product requirements |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Implementation direction |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow and guidelines |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow |
 | [Wiki](https://github.com/ncdlabs/gitseer/wiki) | Same guides |
 
 ---
 
 ## Releases
 
-Tagged releases publish a **linux/amd64** binary on GitHub Releases and a container image to **GHCR** (public):
+Tagged releases publish **linux / darwin / windows** × **amd64 / arm64** binaries on GitHub Releases and a **linux/amd64** container image to **GHCR**:
 
 ```bash
-podman pull ghcr.io/ncdlabs/gitseer:1.0.2
+docker pull ghcr.io/ncdlabs/gitseer:1.0.8
 # or :latest
-# Apple Silicon / ARM: add --platform linux/amd64
 ```
+
+Optional: add `--platform linux/amd64` if Docker cannot resolve the image on a non-amd64 host.
 
 Docker Hub (`docker.io/ncdlabs/gitseer`) publishes only when `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are set.
 
@@ -250,7 +266,7 @@ Maintainers cut a release via **Actions → Cut release** (on `main`). Details: 
 
 ---
 
-## How to contribute
+## Contributing
 
 1. Fork and branch.
 2. `make deps && make test && npm run start`
@@ -261,12 +277,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ---
 
-## Attribution
-
-**GitSeer** is an [ncdLabs](https://ncdlabs.com) open-source project (repository / module path `gitseer`).
-
-Gitea®, Forgejo®, GitHub®, GitLab®, and Bitbucket® are trademarks of their respective owners. This project is not affiliated with or endorsed by those projects.
-
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
+
+Gitea®, Forgejo®, GitHub®, GitLab®, and Bitbucket® are trademarks of their respective owners. This project is not affiliated with or endorsed by those projects.

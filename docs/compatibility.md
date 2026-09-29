@@ -21,7 +21,8 @@ Capability detection is authoritative at runtime (Settings → Status). This pag
 | SSE realtime | Yes | In-process; sticky sessions or accept split streams if replicas > 1 |
 | Browser Notification API | Yes | While a signed-in tab is connected; OS banner when tab backgrounded |
 | Web Push (closed tab) | Yes | Self-hosted VAPID; requires HTTPS or localhost; per-user opt-in |
-| Image arch | linux/amd64 | Multi-arch deferred (see [Upgrade](upgrade.md)) |
+| Image arch | linux/amd64 | Multi-arch container images deferred (see [Upgrade](upgrade.md)) |
+| Release binaries | linux/darwin/windows × amd64/arm64 | Cross-compiled with `CGO_ENABLED=0` |
 | Subpath proxy | Yes | Set `server.external_url` including path |
 
 ## Gitea Actions

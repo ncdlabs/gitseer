@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to GitSeer (repository / Go module path `gitseer`).
+Repository / Go module path: `gitseer`.
 
 ## Development
 

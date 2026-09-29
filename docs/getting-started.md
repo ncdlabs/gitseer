@@ -4,12 +4,11 @@
 
 | Path | When to use |
 |------|-------------|
-| **Public GHCR image** | Fastest cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64) — see root README |
-| **Release binary** | Single process from GitHub Releases (linux/amd64) |
-| **Install with Agent** | Paste the prompt from the root README into your coding agent |
-| **Guided installer** | First lab install when you already have Gitea URL/token (add other forges in wizard/Settings) |
-| **Compose** | Build from source with Podman/Docker Compose |
-| **Local dev** | Contributing / iterating on UI + API |
+| **Public GHCR image** | Mac/PC demo or cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64 via Docker) — see root README |
+| **Release binary** | Native binary from GitHub Releases (linux/darwin/windows × amd64/arm64) |
+| **Guided installer** | Lab install when you already have Gitea URL/token (add other forges in wizard/Settings) |
+| **Compose** | Build from source with Docker Compose (or Podman Compose) |
+| **Local dev** | Contributing / iterating on UI + API (macOS/Windows OK — builds a native binary) |
 
 In-repo detail: [docs/install.md](install.md).
 

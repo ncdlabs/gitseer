@@ -1,6 +1,6 @@
 # GitSeer documentation
 
-Operator and developer guides for GitSeer (multi-forge; technical IDs are `gitseer`). Quick start: root [README](../README.md).
+Operator and developer guides. Technical IDs are `gitseer`. Quick start: root [README](../README.md).
 
 | Guide | Contents |
 |-------|----------|
