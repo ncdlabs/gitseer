@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-09-28
+
 ### Added
 
 - **Multi-arch release binaries:** GitHub Releases publish linux/darwin/windows × amd64/arm64 (plus `SHA256SUMS`); README download snippet auto-detects OS/arch.
@@ -16,7 +18,6 @@ All notable changes to this project will be documented in this file.
 - Bootstrap password stored as bcrypt in `app_settings`; `GITSEER_AUTH_BOOTSTRAP_PASSWORD` is legacy seed only.
 - `ui-config` no longer returns `dev_bootstrap_password`; exposes `bootstrap_unclaimed` / `bootstrap_username` / `bootstrap_login_enabled`.
 - README quick-start examples use Docker; container images remain linux/amd64.
-
 ## [1.0.3] - 2026-09-28
 
 ### Added
