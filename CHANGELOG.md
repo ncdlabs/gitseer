@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-09-29
+
 ### Added
 
 - Binary startup prints a GitSeer (by ncdLabs) banner with services/ports and connect instructions; setup need is derived from loaded config/encryption/forge inventory (`settings.EvaluateSetup`), not only `setup_completed`, and opens the UI when safe (`GITSEER_NO_BROWSER=1` to skip).
@@ -13,7 +15,6 @@ All notable changes to this project will be documented in this file.
 - Setup wizard **Complete Setup** no longer waits on repository sync before leaving Finishing; optional sync starts in the background after the console opens.
 - Helm chart: always emit Secret keys, optional `secretKeyRef`s, mount bootstrap username/keep, default public `ghcr.io/ncdlabs/gitseer:1.0.8`, guard Certificate when `ingress.tls` is empty; docs add `--create-namespace`.
 - README container quick start uses a named volume and `--platform linux/amd64` so first-run SQLite writes succeed on Apple Silicon.
-
 ## [1.0.8] - 2026-09-28
 
 ### Added

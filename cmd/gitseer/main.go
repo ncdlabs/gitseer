@@ -20,7 +20,7 @@ import (
 	"github.com/ncdlabs/gitseer/internal/uiinstall"
 )
 
-var version = "1.0.8"
+var version = "1.0.9"
 
 func main() {
 	if len(os.Args) < 2 {
