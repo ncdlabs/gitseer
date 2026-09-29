@@ -20,7 +20,7 @@
 | `/pipelines` | Workflow runs |
 | `/pipelines/:id` | Run detail (jobs + graph) |
 | `/actions-popout` | Active Actions detached window |
-| `/settings` | Preferences / Integration / Access / Notifications / Status tabs |
+| `/settings` | Status / Notifications / Bootstrap / Preferences / Integration / Sign In / Access tabs |
 | `/wallboard` | Public read-only wallboard (token-gated; no session required) |
 | `/setup` | First-run wizard (bootstrap admin) |
 | Login | Gitea / Forgejo / GitHub / GitLab / Bitbucket OAuth (PKCE), optional bootstrap |
@@ -88,7 +88,7 @@ Header search (⌘/Ctrl+K) is a command palette over:
 
 ## Settings
 
-- Tabbed `/settings` UI: **Preferences**, **Integration**, **Access**, **Notifications**, **Status** (hash deep-links `#preferences` / `#integration` / `#access` / `#notifications` / `#status`)
+- Tabbed `/settings` UI: **Status**, **Notifications**, **Bootstrap**, **Preferences**, **Integration**, **Sign In**, **Access** (hash deep-links `#status` / `#notifications` / `#bootstrap` / `#preferences` / `#integration` / `#signin` / `#access`; default `#status`)
 - Preferences: instance name, sync history days, long-running threshold, **Attention Severity Overrides**, retention windows, **Apply Lab Preset** / **Apply Prod Preset**, **Purge Now**, public URL
 - **Notifications** tab:
   - **Browser & OS Alerts** (any signed-in user): Web Notification API while a tab is open (OS banner when backgrounded) plus self-hosted Web Push / service worker for closed tabs. Per-user severity filter; **Enable Alerts** / **Disable Alerts** / **Send Test Push**. VAPID keys auto-generate beside the DB (`gitseer.vapid.json`) or via `notifications.vapid_*` / `GITSEER_VAPID_*`.

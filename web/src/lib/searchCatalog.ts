@@ -109,6 +109,27 @@ const COMMANDS: SearchCatalogItem[] = [
     keywords: ["inbox", "review", "requested", "reviewer"],
   },
   {
+    id: "cmd-settings-status",
+    kind: "command",
+    label: "Settings · Status",
+    to: "/settings#status",
+    keywords: ["settings", "status", "health", "connection"],
+  },
+  {
+    id: "cmd-settings-notifications",
+    kind: "command",
+    label: "Settings · Notifications",
+    to: "/settings#notifications",
+    keywords: ["settings", "notifications", "smtp", "slack", "discord", "webhook", "digest"],
+  },
+  {
+    id: "cmd-settings-bootstrap",
+    kind: "command",
+    label: "Settings · Bootstrap",
+    to: "/settings#bootstrap",
+    keywords: ["settings", "bootstrap", "password", "elevate", "sudo"],
+  },
+  {
     id: "cmd-settings-preferences",
     kind: "command",
     label: "Settings · Preferences",
@@ -135,27 +156,6 @@ const COMMANDS: SearchCatalogItem[] = [
     label: "Settings · Access",
     to: "/settings#access",
     keywords: ["settings", "access", "acl", "grant", "users", "github"],
-  },
-  {
-    id: "cmd-settings-notifications",
-    kind: "command",
-    label: "Settings · Notifications",
-    to: "/settings#notifications",
-    keywords: ["settings", "notifications", "smtp", "slack", "discord", "webhook", "digest"],
-  },
-  {
-    id: "cmd-settings-status",
-    kind: "command",
-    label: "Settings · Status",
-    to: "/settings#status",
-    keywords: ["settings", "status", "health", "connection"],
-  },
-  {
-    id: "cmd-settings-bootstrap",
-    kind: "command",
-    label: "Settings · Bootstrap",
-    to: "/settings#bootstrap",
-    keywords: ["settings", "bootstrap", "password", "elevate", "sudo"],
   },
   ...THEME_OPTIONS.map(
     (opt): SearchCatalogItem => ({

@@ -32,13 +32,13 @@ type SettingsTab =
   | "bootstrap";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: "status", label: "Status" },
+  { id: "notifications", label: "Notifications" },
+  { id: "bootstrap", label: "Bootstrap" },
   { id: "preferences", label: "Preferences" },
   { id: "integration", label: "Integration" },
   { id: "signin", label: "Sign In" },
   { id: "access", label: "Access" },
-  { id: "notifications", label: "Notifications" },
-  { id: "status", label: "Status" },
-  { id: "bootstrap", label: "Bootstrap" },
 ];
 
 /** Lab: short windows for ephemeral environments. */
@@ -76,7 +76,7 @@ function tabFromHash(hash: string): SettingsTab {
   ) {
     return id;
   }
-  return "preferences";
+  return "status";
 }
 
 function emptySettings(): GitSeerSettings {
@@ -706,12 +706,8 @@ export function SettingsPage() {
           )}
 
           {tab === "status" && (
-            <div
-              className="panel panel--padded"
-              id="settings-panel-status"
-              role="tabpanel"
-              aria-labelledby="settings-tab-status"
-            >
+            <div id="settings-panel-status" role="tabpanel" aria-labelledby="settings-tab-status">
+            <div className="panel panel--padded">
               <h2 className="settings-status__title">Integration Status</h2>
               <dl className="settings-status">
                 {status.map((row) => (
@@ -846,8 +842,9 @@ export function SettingsPage() {
                 );
               })}
             </div>
+            {editable ? <WallboardTokensPanel /> : null}
+            </div>
           )}
-          {editable ? <WallboardTokensPanel /> : null}
         </>
       )}
 
