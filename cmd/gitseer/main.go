@@ -29,7 +29,7 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		serveCmd(os.Args[2:])
-	case "version":
+	case "version", "-v", "--version":
 		fmt.Println(version)
 	case "install-ui":
 		uiinstall.InstallCmd(os.Args[2:])
@@ -51,7 +51,7 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Fprintf(os.Stderr, `GitSeer — CI/CD and PR operations console for Gitea and GitHub
+	fmt.Fprintf(os.Stderr, `GitSeer — CI/CD and PR operations console for Gitea, Forgejo, GitHub, GitLab, and Bitbucket
 
 Usage:
   gitseer serve [flags]
