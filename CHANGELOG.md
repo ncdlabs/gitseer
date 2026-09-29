@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-09-29
+
 ### Fixed
 
 - Point the curl|bash installer and public chart/docs image pins at **1.0.9**; teach `cut-release` to bump `scripts/install-binary.sh` and `deploy/helm/gitseer/values.yaml` with each release.
@@ -13,7 +15,6 @@ All notable changes to this project will be documented in this file.
 
 - Docs/README install order is **release binary → Docker → clone** (guided installer / Compose).
 - CLI help blurb lists all five forges (Gitea, Forgejo, GitHub, GitLab, Bitbucket).
-
 ## [1.0.9] - 2026-09-29
 
 ### Added
