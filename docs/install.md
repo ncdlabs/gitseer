@@ -15,7 +15,7 @@ Goals:
 5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (per-instance webhooks, OAuth redirect URI, optional `gitseer install-ui`).
 
 Constraints:
-- Do not commit secrets, .env, config.yaml, or install.yaml.
+- Do not commit secrets, `.env`, `config.yaml`, `install.yaml`, `compose.override.yaml`, `values-k3s-home.yaml`, or `values-secret.yaml` (use the `*.example*` copies).
 - Prefer .yaml over .yml for new config files.
 - Follow docs/install.md and README.md; do not invent Redis, WebSockets, or undocumented forge types.
 - Ask before destructive changes or removing existing services.

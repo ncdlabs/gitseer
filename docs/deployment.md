@@ -33,6 +33,14 @@ Settings → Integration also offers **Download Gitea UI Snippets** (same marker
 
 Chart: [`deploy/helm/gitseer`](https://github.com/ncdlabs/gitseer/tree/main/deploy/helm/gitseer)
 
+Site overlays are gitignored. Start from the examples:
+
+```bash
+cp deploy/helm/gitseer/values-k3s-home.example.yaml deploy/helm/gitseer/values-k3s-home.yaml
+# optional when secret.create=true:
+cp deploy/helm/gitseer/values-secret.example.yaml deploy/helm/gitseer/values-secret.yaml
+```
+
 Example upgrade:
 
 ```bash
@@ -41,7 +49,7 @@ helm upgrade --install gitseer deploy/helm/gitseer \
   -f deploy/helm/gitseer/values-k3s-home.yaml
 ```
 
-Provide secrets via a Kubernetes Secret (`GITSEER_GITEA_TOKEN`, bootstrap password, OAuth, `GITSEER_WEBHOOK_SECRET`, `GITSEER_ENCRYPTION_KEY`, and GitHub vars when used). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup. When `GITSEER_GITHUB_URL` is set, `GITSEER_GITHUB_WEBHOOK_SECRET` must be present unless unsigned webhooks are allowed for GitHub.
+Provide secrets via a Kubernetes Secret (`GITSEER_GITEA_TOKEN`, bootstrap password, OAuth, `GITSEER_WEBHOOK_SECRET`, `GITSEER_ENCRYPTION_KEY`, and GitHub vars when used), or via a local `values-secret.yaml` (gitignored). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup. When `GITSEER_GITHUB_URL` is set, `GITSEER_GITHUB_WEBHOOK_SECRET` must be present unless unsigned webhooks are allowed for GitHub.
 
 ### Replicas
 

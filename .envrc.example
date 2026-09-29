@@ -1,0 +1,8 @@
+# Example direnv file (optional). Copy to .envrc (gitignored) if you use direnv.
+#
+#   cp .envrc.example .envrc
+#   direnv allow
+#
+# Prefer loading secrets from a gitignored .env rather than hardcoding here.
+
+dotenv_if_exists .env

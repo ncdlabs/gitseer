@@ -24,7 +24,8 @@ kubectl -n gitseer get deploy gitseer -o jsonpath='{.spec.template.spec.containe
 Use a **new immutable image tag** each ship (`pullPolicy: IfNotPresent`).
 
 ```bash
-# bump image.tag in values, then:
+# copy site overlay if needed, bump image.tag, then:
+#   cp deploy/helm/gitseer/values-k3s-home.example.yaml deploy/helm/gitseer/values-k3s-home.yaml
 helm upgrade --install gitseer deploy/helm/gitseer \
   -n gitseer \
   -f deploy/helm/gitseer/values-k3s-home.yaml
@@ -100,7 +101,7 @@ Repo secrets:
 gh secret set RELEASE_TOKEN --repo ncdlabs/gitseer
 ```
 
-Lab / k3s-home continues to use `git.ncdlabs.com/ncdlabs/gitseer` via the deploy skill — that registry is **not** updated by this workflow. Do not bump `values-k3s-home.yaml` from cut-release.
+Lab / k3s-home continues to use a private registry via a local (gitignored) `values-k3s-home.yaml` — that registry is **not** updated by this workflow. Do not bump site overlays from cut-release; start from `values-k3s-home.example.yaml` if you need a fresh overlay.
 
 Pull a public image:
 

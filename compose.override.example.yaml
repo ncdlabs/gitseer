@@ -1,0 +1,16 @@
+# Example Compose overrides for local development.
+#
+# Copy to compose.override.yaml (gitignored). Podman/Docker Compose merges
+# this automatically with compose.yaml when present:
+#   cp compose.override.example.yaml compose.override.yaml
+#   podman compose up --build
+
+services:
+  gitseer:
+    ports:
+      - "8090:8090"
+    environment:
+      # GITSEER_GITEA_ALLOW_PRIVATE_NETWORK: "true"
+      # GITSEER_ALLOW_SKIP_SETUP: "true"
+      # GITSEER_AUTH_COOKIE_SECURE: "false"
+      GITSEER_LOG_FORMAT: text

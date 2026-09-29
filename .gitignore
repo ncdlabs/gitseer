@@ -1,18 +1,75 @@
+# Binaries / build
 bin/
 build/
 .build-image/
+vendor/
+*.test
+*.exe
+__debug_bin*
+*.prof
+
+# Runtime data / local DB
 data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Frontend (embedded UI lives in internal/server/ui/dist — keep that tracked)
 node_modules/
 web/node_modules/
 web/dist/
-*.db
-*.db-*
-.DS_Store
+.vite/
+web/.vite/
+*.tsbuildinfo
+
+# Local config / secrets (*.example* stay tracked)
 config.yaml
 install.yaml
+compose.override.yaml
 .env
+.env.*
+!.env.example
+.envrc
 *.encryption_key
 gitseer.encryption_key
 *.vapid.json
 gitseer.vapid.json
+*.pem
+*.p12
+*.pfx
+
+# Helm site overlays / secret values (see *.example.yaml)
+deploy/helm/gitseer/values-k3s-home.yaml
+deploy/helm/gitseer/values-secret.yaml
+**/values*.local.yaml
+
+# Backup / restore output
+backup/
+backups/
+*.sql.gz
+*.dump
+
+# Scratch
+tmp/
+.tmp/
+
+# Tests / coverage
 coverage/
+coverage.out
+*.coverprofile
+profile.cov
+
+# Local agent / project scratch (not product docs)
+PROJECT_SHARED_STATE.md
+
+# OS / editor / logs
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+.agents/
+*.log
+*.swp
+*~
