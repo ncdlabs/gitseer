@@ -27,10 +27,12 @@ Use a **new immutable image tag** each ship (`pullPolicy: IfNotPresent`).
 # copy site overlay if needed, bump image.tag, then:
 #   cp deploy/helm/gitseer/values-k3s-home.example.yaml deploy/helm/gitseer/values-k3s-home.yaml
 helm upgrade --install gitseer deploy/helm/gitseer \
-  -n gitseer \
+  --create-namespace -n gitseer \
   -f deploy/helm/gitseer/values-k3s-home.yaml
 kubectl -n gitseer rollout status deploy/gitseer --timeout=180s
 ```
+
+Before upgrade, confirm the cluster Secret (if used) still has the keys listed in [Deployment → Helm](deployment.md#helm) (`GITSEER_WEBHOOK_SECRET` non-empty when a forge URL is set in values `env`).
 
 Goose migrations run on process start. Migrations `00014`–`00018` (node IDs, wallboard, runner signals, multi-forge OAuth columns, Web Push prefs/subscriptions) are additive; expect a short lock during apply on SQLite.
 

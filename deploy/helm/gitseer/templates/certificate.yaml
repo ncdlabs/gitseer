@@ -1,4 +1,4 @@
-{{- if and .Values.ingress.enabled .Values.certificate.enabled }}
+{{- if and .Values.ingress.enabled .Values.certificate.enabled (gt (len .Values.ingress.tls) 0) }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

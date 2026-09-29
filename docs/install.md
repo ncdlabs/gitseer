@@ -9,7 +9,7 @@ Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer o
 
 Goals:
 1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64) or `ghcr.io/ncdlabs/gitseer:1.0.8` via Docker. Fall back to cloning and `./scripts/install.sh` / Compose / `--method binary` if needed.
-2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (`server.external_url`), bootstrap admin password, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
+2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (`server.external_url`), suggested bootstrap username + keep/remove-after-setup choice, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
 3. Write gitignored `.env` + `config.yaml` (or use install.yaml + `--non-interactive`). The guided installer currently requires Gitea URL/token; for other forges, use image/binary/Compose + /setup. Set GITSEER_WEBHOOK_SECRET whenever Gitea URL is set, and GITSEER_GITHUB_WEBHOOK_SECRET whenever GitHub URL is set. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
 4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click **Sync Now**.
 5. Report the App URL, how to stop/restart, bootstrap vs OAuth login, and any remaining manual steps (per-instance webhooks, OAuth redirect URI, optional `gitseer install-ui`).
@@ -26,7 +26,8 @@ My values (replace or leave blank to prompt me):
 - GitHub URL: [https://github.com or blank]
 - GitHub PAT: [paste or blank]
 - GitSeer public URL: [http://127.0.0.1:8090]
-- Bootstrap password: [generate a strong one if blank]
+- Bootstrap username: [admin | other; claim password in UI on first visit]
+- Bootstrap keep after setup: [true | false]
 - Encryption key: [generate in Prepare | paste ≥24 chars | env]
 - Install method: [binary | ghcr | compose | guided-installer]
 - Private/lab forge network: [yes | no]

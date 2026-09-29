@@ -33,6 +33,8 @@ Settings → Integration also offers **Download Gitea UI Snippets** (same marker
 
 Chart: [`deploy/helm/gitseer`](https://github.com/ncdlabs/gitseer/tree/main/deploy/helm/gitseer)
 
+Default chart image is public `ghcr.io/ncdlabs/gitseer:1.0.8` (SQLite + PVC). Postgres is bring-your-own: set `GITSEER_DATABASE_DRIVER` / `GITSEER_DATABASE_DSN` in `env`.
+
 Site overlays are gitignored. Start from the examples:
 
 ```bash
@@ -41,15 +43,42 @@ cp deploy/helm/gitseer/values-k3s-home.example.yaml deploy/helm/gitseer/values-k
 cp deploy/helm/gitseer/values-secret.example.yaml deploy/helm/gitseer/values-secret.yaml
 ```
 
-Example upgrade:
+### Dev / first try (wizard)
+
+No Secret required. Claim bootstrap in the UI; generate encryption in `/setup` Prepare.
 
 ```bash
 helm upgrade --install gitseer deploy/helm/gitseer \
-  -n gitseer \
+  --create-namespace -n gitseer
+```
+
+### Prod (existing Secret)
+
+Create a Secret with these keys (empty string OK except webhook when a forge URL is set in `env`):
+
+```text
+GITSEER_GITEA_TOKEN
+GITSEER_AUTH_BOOTSTRAP_USERNAME
+GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP
+GITSEER_AUTH_BOOTSTRAP_PASSWORD   # legacy seed only — prefer empty; claim in UI
+GITSEER_AUTH_OAUTH_CLIENT_ID
+GITSEER_AUTH_OAUTH_CLIENT_SECRET
+GITSEER_WEBHOOK_SECRET            # required non-empty if GITSEER_GITEA_URL is set
+GITSEER_ENCRYPTION_KEY            # or generate in /setup Prepare
+GITSEER_METRICS_TOKEN             # optional
+```
+
+GitHub / other forge vars (e.g. `GITSEER_GITHUB_TOKEN`, `GITSEER_GITHUB_WEBHOOK_SECRET`) go in the same Secret or `env` when you pre-seed those forges.
+
+Example upgrade with a site overlay:
+
+```bash
+helm upgrade --install gitseer deploy/helm/gitseer \
+  --create-namespace -n gitseer \
   -f deploy/helm/gitseer/values-k3s-home.yaml
 ```
 
-Provide secrets via a Kubernetes Secret (`GITSEER_GITEA_TOKEN`, bootstrap password, OAuth, `GITSEER_WEBHOOK_SECRET`, `GITSEER_ENCRYPTION_KEY`, and GitHub vars when used), or via a local `values-secret.yaml` (gitignored). When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup. When `GITSEER_GITHUB_URL` is set, `GITSEER_GITHUB_WEBHOOK_SECRET` must be present unless unsigned webhooks are allowed for GitHub.
+When `GITSEER_GITEA_URL` is set, `GITSEER_WEBHOOK_SECRET` must be present at startup. When `GITSEER_GITHUB_URL` is set, `GITSEER_GITHUB_WEBHOOK_SECRET` must be present unless unsigned webhooks are allowed for GitHub.
 
 ### Replicas
 
@@ -102,7 +131,7 @@ Restart Gitea so custom templates load. Markers: `<!-- BEGIN GITSEER -->` / `<!-
 - [ ] Per-instance webhook URLs registered (Gitea / GitHub / GitLab / Bitbucket / Forgejo as used) with matching secrets
 - [ ] Config URL set ⇒ matching webhook secret present at startup (or lab unsigned flag for that forge)
 - [ ] OAuth app redirect matches `{external_url}/api/v1/auth/callback` (Gitea) and `/api/v1/auth/{github|gitlab|bitbucket|forgejo}/callback` when those providers are enabled
-- [ ] Bootstrap password set for first admin **or** OAuth ready
+- [ ] Bootstrap claimed in UI on first visit (or forge OAuth ready); optional suggested username via `GITSEER_AUTH_BOOTSTRAP_USERNAME`
 - [ ] Private forge? `allow_private_network` / `GITSEER_GITEA_ALLOW_PRIVATE_NETWORK` / `GITSEER_GITHUB_ALLOW_PRIVATE_NETWORK` (and per-instance flags for other forges)
 - [ ] `GITSEER_SERVER_TRUSTED_PROXIES` set to Traefik/Ingress CIDRs (never `0.0.0.0/0`); `replicaCount: 1` for SQLite
 - [ ] First sync completed

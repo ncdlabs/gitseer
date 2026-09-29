@@ -46,37 +46,55 @@ spec:
             - name: GITSEER_GITEA_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_GITEA_TOKEN
+                  optional: true
+            - name: GITSEER_AUTH_BOOTSTRAP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gitseer.secretName" . }}
+                  key: GITSEER_AUTH_BOOTSTRAP_USERNAME
+                  optional: true
+            - name: GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gitseer.secretName" . }}
+                  key: GITSEER_AUTH_BOOTSTRAP_KEEP_AFTER_SETUP
+                  optional: true
             - name: GITSEER_AUTH_BOOTSTRAP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_AUTH_BOOTSTRAP_PASSWORD
+                  optional: true
             - name: GITSEER_AUTH_OAUTH_CLIENT_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_AUTH_OAUTH_CLIENT_ID
+                  optional: true
             - name: GITSEER_AUTH_OAUTH_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_AUTH_OAUTH_CLIENT_SECRET
+                  optional: true
             - name: GITSEER_WEBHOOK_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_WEBHOOK_SECRET
+                  optional: true
             - name: GITSEER_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_ENCRYPTION_KEY
+                  optional: true
             - name: GITSEER_METRICS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.secret.existingSecret }}{{ .Values.secret.existingSecret }}{{ else }}{{ include "gitseer.fullname" . }}{{ end }}
+                  name: {{ include "gitseer.secretName" . }}
                   key: GITSEER_METRICS_TOKEN
                   optional: true
             {{- end }}

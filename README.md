@@ -6,6 +6,18 @@ Syncs repositories, open PRs, workflow runs, and attention items into one ACL-aw
 
 Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `gitseer`, env `GITSEER_*`. Maintained by [ncdLabs](https://ncdlabs.com).
 
+**Quick start** (macOS / Linux):
+
+```bash
+VER=1.0.8
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
+curl -fsSL -o gitseer "https://github.com/ncdlabs/gitseer/releases/download/v${VER}/gitseer_${VER}_${OS}_${ARCH}"
+chmod +x gitseer && ./gitseer serve
+```
+
+Then open http://127.0.0.1:8090. Windows: grab the `.exe` from [Releases](https://github.com/ncdlabs/gitseer/releases). More options below.
+
 **Docs:** [docs/](docs/README.md) · **Wiki:** [github.com/ncdlabs/gitseer/wiki](https://github.com/ncdlabs/gitseer/wiki) · **Compatibility:** [docs/compatibility.md](docs/compatibility.md)
 
 ![GitSeer dashboard](docs/screenshots/dashboard.png)
@@ -120,21 +132,79 @@ Optional:
 
 ### B. Release binary
 
-Pick the asset for your OS/arch (or let the snippet detect it):
+```bash
+curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
+```
+
+That detects OS/arch, downloads `./gitseer`, and runs `serve`. Override version with `VER=1.0.8`, or pass `--no-start` to download only:
 
 ```bash
-VER=1.0.8
+VER=1.0.8 curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash -s -- --no-start
+```
+
+Script ([`scripts/install-binary.sh`](scripts/install-binary.sh)):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+VER="${VER:-1.0.8}"
+START=1
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-start) START=0 ;;
+    -h|--help)
+      cat <<'EOF'
+Download a GitSeer release binary for this OS/arch.
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
+  curl -fsSL … | bash -s -- --no-start
+  VER=1.0.8 curl -fsSL … | bash
+
+Options:
+  --no-start   Download and chmod only; do not run ./gitseer serve
+  -h, --help   Show this help
+EOF
+      exit 0
+      ;;
+    *)
+      printf '✗ unknown option: %s\n' "$1" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64|amd64) ARCH=amd64 ;;
   aarch64|arm64) ARCH=arm64 ;;
-  *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+  *)
+    printf '✗ unsupported arch: %s\n' "$ARCH" >&2
+    exit 1
+    ;;
 esac
-curl -fsSL -o gitseer \
-  "https://github.com/ncdlabs/gitseer/releases/download/v${VER}/gitseer_${VER}_${OS}_${ARCH}"
+
+case "$OS" in
+  linux|darwin) ;;
+  *)
+    printf '✗ unsupported OS: %s (download a Windows .exe from GitHub Releases)\n' "$OS" >&2
+    exit 1
+    ;;
+esac
+
+URL="https://github.com/ncdlabs/gitseer/releases/download/v${VER}/gitseer_${VER}_${OS}_${ARCH}"
+printf '==> downloading %s\n' "$URL"
+curl -fsSL -o gitseer "$URL"
 chmod +x gitseer
-./gitseer serve --config config.yaml
+printf '✓ installed ./gitseer (v%s %s/%s)\n' "$VER" "$OS" "$ARCH"
+
+if [[ "$START" -eq 1 ]]; then
+  exec ./gitseer serve --config config.yaml
+fi
 ```
 
 On Windows, download `gitseer_${VER}_windows_amd64.exe` (or `windows_arm64`) from the [Releases](https://github.com/ncdlabs/gitseer/releases) page instead.
@@ -196,7 +266,8 @@ My values (replace or leave blank to prompt me):
 - Forge token/PAT: [paste or point to a secret]
 - Additional forges: [none | list]
 - GitSeer public URL: [http://127.0.0.1:8090]
-- Bootstrap password: [generate a strong one if blank]
+- Bootstrap username: [admin | other; claim password in UI on first visit]
+- Bootstrap keep after setup: [true | false]
 - Encryption key: [generate in Prepare | paste ≥24 chars | env]
 - Install method: [binary | ghcr | compose | guided-installer]
 - Private/lab forge network: [yes | no]
