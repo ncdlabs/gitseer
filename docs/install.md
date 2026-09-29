@@ -60,10 +60,10 @@ The installer writes gitignored `.env` + `config.yaml`, checks dependencies, the
 ## Binary (manual)
 
 1. Build: `make frontend && go build -o bin/gitseer ./cmd/gitseer`
-2. Set `GITSEER_AUTH_BOOTSTRAP_PASSWORD` and optionally `GITSEER_ENCRYPTION_KEY`
+2. Optionally set `GITSEER_ENCRYPTION_KEY` (or generate in `/setup` Prepare) and `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`)
 3. Optionally set `GITSEER_GITEA_*` / `GITSEER_GITHUB_*` (or connect forges only in `/setup`)
 4. Run: `./bin/gitseer serve --config config.example.yaml`
-5. Open `:8090`, complete **Prepare → Choose Forge → Connect → Validate → Finish**, sign in, click **Sync Now**
+5. Open `:8090`, **Claim Bootstrap** (sets password), complete **Prepare → Choose Forge → Connect → Validate → Finish**, sign in, click **Sync Now**
 
 ## Compose (manual)
 
@@ -71,8 +71,8 @@ The installer writes gitignored `.env` + `config.yaml`, checks dependencies, the
 # Required when the matching forge URL is set (or use the forge-specific unsigned lab flags).
 export GITSEER_WEBHOOK_SECRET=replace-me
 # export GITSEER_GITHUB_WEBHOOK_SECRET=replace-me
-# Optional bootstrap login (empty disables it).
-export GITSEER_AUTH_BOOTSTRAP_PASSWORD=replace-me
+# Optional suggested username (claim password in the UI). Do not set GITSEER_AUTH_BOOTSTRAP_PASSWORD for new installs.
+export GITSEER_AUTH_BOOTSTRAP_USERNAME=admin
 export GITSEER_GITEA_URL=https://git.example.com
 export GITSEER_GITEA_TOKEN=...
 # export GITSEER_GITHUB_URL=https://github.com

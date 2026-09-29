@@ -57,7 +57,7 @@ Ensure the SPA received a CSRF token (`/api/v1/ui-config` or `/auth/me`) and sen
 
 ## Bootstrap login unavailable
 
-Empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` disables bootstrap auth. Set a password or use forge OAuth.
+On first visit, **Claim Bootstrap** sets the username + password (empty `GITSEER_AUTH_BOOTSTRAP_PASSWORD` is normal for new installs). After setup, if `bootstrap_keep_after_setup` is false, break-glass login is removed — use Settings → **Become Bootstrap** or forge OAuth.
 
 ## Integration list empty / 403
 

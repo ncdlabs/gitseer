@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Helm chart: always emit Secret keys, optional `secretKeyRef`s, mount bootstrap username/keep, default public `ghcr.io/ncdlabs/gitseer:1.0.8`, guard Certificate when `ingress.tls` is empty; docs add `--create-namespace`.
+- README container quick start uses a named volume and `--platform linux/amd64` so first-run SQLite writes succeed on Apple Silicon.
+
 ## [1.0.8] - 2026-09-28
 
 ### Added

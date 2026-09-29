@@ -109,21 +109,22 @@ Detail: [docs/getting-started.md](docs/getting-started.md) · [docs/install.md](
 ### A. Public container
 
 ```bash
-mkdir -p gitseer-data && cd gitseer-data
 docker run --rm -p 8090:8090 \
-  -v "$PWD/data:/data" \
+  --platform linux/amd64 \
+  -v gitseer-data:/data \
   -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
   -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
   -e GITSEER_DATABASE_PATH=/data/gitseer.db \
   ghcr.io/ncdlabs/gitseer:1.0.8
 ```
 
-Open **http://127.0.0.1:8090**, complete Setup, sign in, then **Sync Now**.
+Open **http://127.0.0.1:8090**, complete Setup (claim bootstrap password in the UI), sign in, then **Sync Now**.
 
-Optional:
+Notes:
 
-- `--platform linux/amd64` — only if your host is not amd64/x86_64 and Docker cannot resolve the image arch (images are linux/amd64)
-- Pre-seed a forge before Setup: `GITSEER_GITEA_URL` / `GITSEER_GITEA_TOKEN` / `GITSEER_WEBHOOK_SECRET` (or the matching `GITSEER_GITHUB_*` / GitLab / Bitbucket vars)
+- Image is **linux/amd64**. `--platform linux/amd64` is required on Apple Silicon / arm64 hosts (and harmless on amd64).
+- Prefer a **named volume** (`gitseer-data`) so the non-root container user (uid 10001) can write the SQLite DB. A host bind mount needs ownership/permissions for uid 10001.
+- Pre-seed a forge before Setup (optional): `GITSEER_GITEA_URL` / `GITSEER_GITEA_TOKEN` / `GITSEER_WEBHOOK_SECRET` (or matching `GITSEER_GITHUB_*` / GitLab / Bitbucket vars)
 - Bootstrap username hint: `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`; claim the password in the UI)
 
 ### B. Release binary
@@ -321,11 +322,11 @@ Defaults live in `config.example.yaml`. Environment overrides use the `GITSEER_*
 Tagged releases publish **linux / darwin / windows** × **amd64 / arm64** binaries on GitHub Releases and a **linux/amd64** container image to **GHCR**:
 
 ```bash
-docker pull ghcr.io/ncdlabs/gitseer:1.0.8
+docker pull --platform linux/amd64 ghcr.io/ncdlabs/gitseer:1.0.8
 # or :latest
 ```
 
-Optional: add `--platform linux/amd64` if Docker cannot resolve the image on a non-amd64 host.
+On Apple Silicon / arm64 hosts, keep `--platform linux/amd64` (images are amd64-only).
 
 Docker Hub (`docker.io/ncdlabs/gitseer`) publishes only when `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are set.
 
