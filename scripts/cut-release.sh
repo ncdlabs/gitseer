@@ -17,6 +17,8 @@ cd "$ROOT"
 
 MAIN_GO="cmd/gitseer/main.go"
 CHART="deploy/helm/gitseer/Chart.yaml"
+CHART_VALUES="deploy/helm/gitseer/values.yaml"
+INSTALL_BIN="scripts/install-binary.sh"
 CHANGELOG="CHANGELOG.md"
 
 PUSH=0
@@ -109,8 +111,24 @@ PY
 
 perl -i -pe "s/^var version = \".*\"/var version = \"$next\"/" "$MAIN_GO"
 perl -i -pe "s/^version: .*/version: $next/; s/^appVersion: .*/appVersion: \"$next\"/" "$CHART"
+# Keep the curl|bash installer and public chart image pin on the release just cut.
+python3 - "$INSTALL_BIN" "$current" "$next" <<'PY'
+import sys
+path, cur, nxt = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path, encoding="utf-8").read()
+old_default = f'VER="${{VER:-{cur}}}"'
+new_default = f'VER="${{VER:-{nxt}}}"'
+if old_default not in text:
+    sys.exit(f"{path}: missing {old_default}")
+text = text.replace(old_default, new_default).replace(f"VER={cur}", f"VER={nxt}")
+open(path, "w", encoding="utf-8").write(text)
+PY
+if [[ -f "$CHART_VALUES" ]]; then
+  perl -i -pe "s/^(  tag: )\".*\"/\$1\"$next\"/" "$CHART_VALUES"
+fi
 
-git add "$MAIN_GO" "$CHART" "$CHANGELOG"
+git add "$MAIN_GO" "$CHART" "$CHANGELOG" "$INSTALL_BIN"
+[[ -f "$CHART_VALUES" ]] && git add "$CHART_VALUES"
 git commit -m "$(cat <<EOF
 release: v${next}
 

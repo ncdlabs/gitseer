@@ -33,7 +33,7 @@ Settings → Integration also offers **Download Gitea UI Snippets** (same marker
 
 Chart: [`deploy/helm/gitseer`](https://github.com/ncdlabs/gitseer/tree/main/deploy/helm/gitseer)
 
-Default chart image is public `ghcr.io/ncdlabs/gitseer:1.0.8` (SQLite + PVC). Postgres is bring-your-own: set `GITSEER_DATABASE_DRIVER` / `GITSEER_DATABASE_DSN` in `env`.
+Default chart image is public `ghcr.io/ncdlabs/gitseer:1.0.9` (SQLite + PVC). Postgres is bring-your-own: set `GITSEER_DATABASE_DRIVER` / `GITSEER_DATABASE_DSN` in `env`.
 
 Site overlays are gitignored. Start from the examples:
 
@@ -99,7 +99,7 @@ Tagged releases publish linux/amd64 images to:
 The same release also attaches native binaries for **linux / darwin / windows** × **amd64 / arm64**.
 
 ```bash
-docker pull ghcr.io/ncdlabs/gitseer:1.0.8
+docker pull ghcr.io/ncdlabs/gitseer:1.0.9
 ```
 
 Maintainers cut releases via **Actions → Cut release** — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill) and may run ahead of the latest public GHCR cut (for example browser/OS alerts in `1.0.3` before that tag is published).

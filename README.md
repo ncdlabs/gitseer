@@ -115,7 +115,7 @@ docker run --rm -p 8090:8090 \
   -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
   -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
   -e GITSEER_DATABASE_PATH=/data/gitseer.db \
-  ghcr.io/ncdlabs/gitseer:1.0.8
+  ghcr.io/ncdlabs/gitseer:1.0.9
 ```
 
 Open **http://127.0.0.1:8090**, complete Setup (claim bootstrap password in the UI), sign in, then **Sync Now**.
@@ -133,10 +133,10 @@ Notes:
 curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
 ```
 
-That detects OS/arch, downloads `./gitseer`, and runs `serve`. On first run the binary prints the Setup Wizard banner and opens the UI locally when safe. Override version with `VER=1.0.8`, or pass `--no-start` to download only:
+That detects OS/arch, downloads `./gitseer`, and runs `serve`. On first run the binary prints the Setup Wizard banner and opens the UI locally when safe. Override version with `VER=1.0.9`, or pass `--no-start` to download only:
 
 ```bash
-VER=1.0.8 curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash -s -- --no-start
+VER=1.0.9 curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash -s -- --no-start
 ```
 
 Script ([`scripts/install-binary.sh`](scripts/install-binary.sh)):
@@ -145,7 +145,7 @@ Script ([`scripts/install-binary.sh`](scripts/install-binary.sh)):
 #!/usr/bin/env bash
 set -euo pipefail
 
-VER="${VER:-1.0.8}"
+VER="${VER:-1.0.9}"
 START=1
 
 while [[ $# -gt 0 ]]; do
@@ -158,7 +158,7 @@ Download a GitSeer release binary for this OS/arch.
 Usage:
   curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
   curl -fsSL … | bash -s -- --no-start
-  VER=1.0.8 curl -fsSL … | bash
+  VER=1.0.9 curl -fsSL … | bash
 
 Options:
   --no-start   Download and chmod only; do not run ./gitseer serve
@@ -245,7 +245,7 @@ Paste this prompt into your coding agent (Cursor, Codex, Claude Code, etc.). Fil
 Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer on this machine.
 
 Goals:
-1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64) or the public image `ghcr.io/ncdlabs/gitseer:1.0.8` (linux/amd64 via Docker). Fall back to cloning and `./scripts/install.sh` / Compose / `make build-go` if building from source.
+1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64) or the public image `ghcr.io/ncdlabs/gitseer:1.0.9` (linux/amd64 via Docker). Fall back to cloning and `./scripts/install.sh` / Compose / `make build-go` if building from source.
 2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (server.external_url), suggested bootstrap username + keep/remove-after-setup choice, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
 3. Guided installer currently requires Gitea URL/token; for non-Gitea-first installs use the public image/binary/Compose and complete /setup. Set the matching webhook secret whenever a forge URL is set in config. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
 4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click Sync Now.
@@ -322,7 +322,7 @@ Defaults live in `config.example.yaml`. Environment overrides use the `GITSEER_*
 Tagged releases publish **linux / darwin / windows** × **amd64 / arm64** binaries on GitHub Releases and a **linux/amd64** container image to **GHCR**:
 
 ```bash
-docker pull --platform linux/amd64 ghcr.io/ncdlabs/gitseer:1.0.8
+docker pull --platform linux/amd64 ghcr.io/ncdlabs/gitseer:1.0.9
 # or :latest
 ```
 

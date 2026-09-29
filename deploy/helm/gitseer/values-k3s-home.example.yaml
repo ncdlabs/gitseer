@@ -10,7 +10,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/ncdlabs/gitseer
-  tag: "1.0.8"
+  tag: "1.0.9"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

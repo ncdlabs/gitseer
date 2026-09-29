@@ -5,13 +5,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
 #
 # Override version:
-#   VER=1.0.8 curl -fsSL … | bash
+#   VER=1.0.9 curl -fsSL … | bash
 #
 # Download only (do not start):
 #   curl -fsSL … | bash -s -- --no-start
 set -euo pipefail
 
-VER="${VER:-1.0.8}"
+VER="${VER:-1.0.9}"
 START=1
 
 while [[ $# -gt 0 ]]; do
@@ -24,7 +24,7 @@ Download a GitSeer release binary for this OS/arch.
 Usage:
   curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
   curl -fsSL … | bash -s -- --no-start
-  VER=1.0.8 curl -fsSL … | bash
+  VER=1.0.9 curl -fsSL … | bash
 
 Options:
   --no-start   Download and chmod only; do not run ./gitseer serve

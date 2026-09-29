@@ -108,9 +108,9 @@ Lab / k3s-home continues to use a private registry via a local (gitignored) `val
 Pull a public image:
 
 ```bash
-docker pull ghcr.io/ncdlabs/gitseer:1.0.8
+docker pull ghcr.io/ncdlabs/gitseer:1.0.9
 # Docker Hub only if DOCKERHUB_* secrets were set for that release:
-# docker pull docker.io/ncdlabs/gitseer:1.0.8
+# docker pull docker.io/ncdlabs/gitseer:1.0.9
 ```
 
 Re-publish an existing tag (rebuild images, refresh release notes, re-assert public visibility):
