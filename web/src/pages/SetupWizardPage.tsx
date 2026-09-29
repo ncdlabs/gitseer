@@ -221,7 +221,7 @@ function validateConnectFields(
 }
 
 type Props = {
-  onComplete: () => void;
+  onComplete: (opts?: { syncAfter?: boolean }) => void | Promise<void>;
   onLogout: () => void;
 };
 
@@ -885,22 +885,11 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     setFinishing(true);
     setError(null);
     try {
+      // Mark setup done and leave the wizard immediately. Optional catalog sync
+      // runs in the main app — awaiting it here left the UI stuck on Finishing
+      // for the entire (often long) sync-repos call.
       await api.completeSetup();
-      if (syncAfter) {
-        try {
-          await api.syncRepos();
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? `Setup complete, but sync failed: ${err.message}`
-              : "Setup complete, but sync failed.",
-          );
-          await queryClient.invalidateQueries({ queryKey: ["settings"] });
-          return;
-        }
-      }
-      await queryClient.invalidateQueries();
-      onComplete();
+      await onComplete({ syncAfter });
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to complete setup");
     } finally {
@@ -914,8 +903,7 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
     setError(null);
     try {
       await api.completeSetup();
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
-      onComplete();
+      await onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to skip setup");
     } finally {
@@ -1518,8 +1506,8 @@ export function SetupWizardPage({ onComplete, onLogout }: Props) {
           {step === "finish" && (
             <div className="settings-form__section">
               <p className="muted">
-                Mark setup complete. Optionally sync repositories so the catalog starts filling in.
-                You can add another forge later under Settings → Integration.
+                Mark setup complete and open the console. Optionally start a repository sync in the
+                background afterward. You can add another forge later under Settings → Integration.
               </p>
               <label className="settings-form__check">
                 <input

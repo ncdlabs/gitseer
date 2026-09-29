@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, setUnauthorizedHandler, type User } from "./api/client";
 import { AppShell } from "./components/AppShell";
@@ -173,6 +173,7 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const pendingSyncAfterSetup = useRef(false);
   useRealtimeInvalidation();
   useActionsPopoutNavigation();
 
@@ -212,6 +213,22 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
     }
   }
 
+  useEffect(() => {
+    if (needsSetup || !pendingSyncAfterSetup.current) return;
+    pendingSyncAfterSetup.current = false;
+    setSyncing(true);
+    void (async () => {
+      try {
+        await api.syncRepos();
+        await queryClient.invalidateQueries();
+      } catch (err) {
+        setSyncError(err instanceof Error ? err.message : "Sync failed.");
+      } finally {
+        setSyncing(false);
+      }
+    })();
+  }, [needsSetup, queryClient]);
+
   if (setupGateLoading) {
     return <div className="loading">Loading…</div>;
   }
@@ -228,8 +245,9 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
           element={
             <SetupWizardPage
               onLogout={onLogout}
-              onComplete={() => {
-                void queryClient.invalidateQueries({ queryKey: ["settings"] });
+              onComplete={async ({ syncAfter } = {}) => {
+                pendingSyncAfterSetup.current = Boolean(syncAfter);
+                await queryClient.invalidateQueries({ queryKey: ["settings"] });
               }}
             />
           }

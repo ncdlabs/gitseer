@@ -44,7 +44,7 @@ Optional multi-forge OAuth setup for logging into GitSeer (not forge sync). List
 
 ### 6. Finish
 
-`POST /api/v1/setup/complete` marks setup done (requires encryption key + at least one forge). Forge credentials stay under Settings → Integration; OAuth apps under Settings → Sign In.
+`POST /api/v1/setup/complete` marks setup done (requires encryption key + at least one forge). The wizard then exits immediately. Optional **Sync repositories after finishing** starts `POST /api/v1/setup/sync-repos` in the background from the main console (same Sync indicator / error dialog as **Sync Now**). Forge credentials stay under Settings → Integration; OAuth apps under Settings → Sign In.
 
 ## Related APIs
 
