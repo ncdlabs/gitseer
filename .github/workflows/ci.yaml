@@ -33,7 +33,9 @@ jobs:
           format: spdx-json
           output-file: gitseer-sbom.spdx.json
           upload-artifact: true
-          upload-artifact-name: gitseer-sbom
+          artifact-name: gitseer-sbom
+          # Release publishes its own SBOM; CI must not attach assets on tag runs.
+          upload-release-assets: false
 
   frontend:
     runs-on: ubuntu-latest
