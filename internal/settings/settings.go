@@ -524,7 +524,9 @@ func (m *Manager) IntegrationPublic() IntegrationPublic {
 	return publicFrom(m.integ, m.github)
 }
 
-// AnyForgeConfigured reports whether at least one forge has URL + token.
+// AnyForgeConfigured reports whether at least one forge has URL + token in the
+// effective in-memory Gitea/GitHub integration (from config file/env and DB).
+// Prefer HasUsableForge when DB instances (GitLab/Bitbucket/Forgejo) must count.
 func (m *Manager) AnyForgeConfigured() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

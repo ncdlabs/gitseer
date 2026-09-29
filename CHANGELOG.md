@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Binary startup prints a GitSeer (by ncdLabs) banner with services/ports and connect instructions; setup need is derived from loaded config/encryption/forge inventory (`settings.EvaluateSetup`), not only `setup_completed`, and opens the UI when safe (`GITSEER_NO_BROWSER=1` to skip).
+
 ### Fixed
 
 - Helm chart: always emit Secret keys, optional `secretKeyRef`s, mount bootstrap username/keep, default public `ghcr.io/ncdlabs/gitseer:1.0.8`, guard Certificate when `ingress.tls` is empty; docs add `--create-namespace`.

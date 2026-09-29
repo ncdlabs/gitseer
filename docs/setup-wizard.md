@@ -2,6 +2,8 @@
 
 Shown at `/setup` for bootstrap admins when `setup_completed` is false (gated in the SPA). Other users do not drive setup.
 
+**Binary first run / misconfigured:** When `gitseer serve` starts, `settings.EvaluateSetup` checks the loaded config (encryption key from env/file/wizard path) and forge readiness (config URL+token or DB instances with a sync token), not only `setup_completed`. If anything required is missing, the banner shows **First Run — Setup Wizard** or **Setup Required — Incomplete Configuration**, lists what is missing, and opens the UI when safe (interactive TTY; skipped for CI, containers/Kubernetes, or `GITSEER_NO_BROWSER=1`). SPA bootstrap admins use `needs_setup` the same way.
+
 **Local skip:** When `dev.allow_skip_setup` / `GITSEER_ALLOW_SKIP_SETUP=true` (set automatically by `npm run start`), the wizard shows **Skip Setup** in the top bar. That marks setup complete without Prepare/Connect/Validate/Finish. Do not enable in production — rejected when `server.external_url` is non-local.
 
 ## Steps

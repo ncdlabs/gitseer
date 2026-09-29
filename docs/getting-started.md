@@ -40,7 +40,7 @@ The installer writes gitignored `.env` + `config.yaml`, verifies dependencies, t
 
 ## 3. Complete the setup wizard
 
-On first bootstrap-admin visit (when `setup_completed` is false), GitSeer opens **`/setup`**:
+On first run or when configuration is incomplete (`needs_setup`: missing encryption key, no usable forge URL+token in config/instances, or unfinished wizard), `gitseer serve` prints a Setup Wizard banner and opens the UI in a local browser when safe (interactive TTY; skipped in CI/containers or with `GITSEER_NO_BROWSER=1`). Claim Bootstrap, then GitSeer routes bootstrap admins to **`/setup`**:
 
 1. **Prepare** — public GitSeer URL + generate or paste encryption key (required to store secrets)
 2. **Forge picker** — Gitea, GitHub, GitLab, Bitbucket, or Forgejo

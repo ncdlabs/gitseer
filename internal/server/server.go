@@ -45,6 +45,7 @@ type Server struct {
 	notify  *notify.Service
 	api     *api.Handler
 	auth    *auth.Service
+	setup   settings.SetupStatus
 }
 
 // New constructs a ready-to-run server.
@@ -198,6 +199,7 @@ func New(cfg config.Config, log *slog.Logger, version string) (*Server, error) {
 		notify:  notifier,
 		api:     apiHandler,
 		auth:    authsvc,
+		setup:   settingsMgr.EvaluateSetup(context.Background(), cfg.Dev.AllowSkipSetup),
 		http: &http.Server{
 			Addr:              cfg.Server.Listen,
 			Handler:           r,
@@ -234,6 +236,8 @@ func (s *Server) Run(ctx context.Context) error {
 		})
 	}
 
+	PrintStartupBanner(nil, s.cfg, s.version, s.setup)
+
 	errCh := make(chan error, 1)
 	go func() {
 		s.log.Info("listening",
@@ -241,12 +245,16 @@ func (s *Server) Run(ctx context.Context) error {
 			"version", s.version,
 			"path_prefix", s.cfg.PathPrefix(),
 			"oauth", s.auth.OAuthEnabled(),
+			"needs_setup", s.setup.NeedsSetup,
 		)
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 		close(errCh)
 	}()
+
+	// Unconfigured / first-run: open Setup Wizard in a local browser when safe.
+	MaybeOpenSetupWizard(nil, s.cfg, s.setup)
 
 	select {
 	case <-ctx.Done():

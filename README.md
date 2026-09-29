@@ -133,7 +133,7 @@ Notes:
 curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
 ```
 
-That detects OS/arch, downloads `./gitseer`, and runs `serve`. Override version with `VER=1.0.8`, or pass `--no-start` to download only:
+That detects OS/arch, downloads `./gitseer`, and runs `serve`. On first run the binary prints the Setup Wizard banner and opens the UI locally when safe. Override version with `VER=1.0.8`, or pass `--no-start` to download only:
 
 ```bash
 VER=1.0.8 curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash -s -- --no-start

@@ -1007,6 +1007,7 @@ func (h *Handler) buildSystemStatus(ctx context.Context, redactSensitive bool) m
 		"webhook_hmac":              webhookHMAC,
 		"github_webhook_hmac":       githubWebhookHMAC,
 		"setup_completed":           setupCompleted,
+		"needs_setup":               h.settings != nil && h.settings.NeedsSetup(ctx, h.cfg.Dev.AllowSkipSetup),
 		"encryption_configured":     h.settings != nil && h.settings.EncryptionConfigured(),
 		"oauth_redirect_uri":        h.auth.RedirectURI(),
 		"github_oauth_redirect_uri": h.auth.GitHubRedirectURI(),
@@ -1069,13 +1070,14 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		integ.GitHubAllowUnsignedWebhooks = false
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"editable":               editable,
-		"settings":               h.settings.Get(),
-		"integration":            integ,
-		"setup_completed":        h.settings.SetupCompleted(),
-		"encryption_configured":  h.settings.EncryptionConfigured(),
-		"encryption_source":      h.settings.EncryptionSource(),
-		"status":                 h.buildSystemStatus(r.Context(), !editable),
+		"editable":              editable,
+		"settings":              h.settings.Get(),
+		"integration":           integ,
+		"setup_completed":       h.settings.SetupCompleted(),
+		"needs_setup":           h.settings.NeedsSetup(r.Context(), h.cfg.Dev.AllowSkipSetup),
+		"encryption_configured": h.settings.EncryptionConfigured(),
+		"encryption_source":     h.settings.EncryptionSource(),
+		"status":                h.buildSystemStatus(r.Context(), !editable),
 	})
 }
 
@@ -1135,6 +1137,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 		"settings":        updated,
 		"integration":     integ,
 		"setup_completed": h.settings.SetupCompleted(),
+		"needs_setup":     h.settings.NeedsSetup(r.Context(), h.cfg.Dev.AllowSkipSetup),
 		"status":          h.buildSystemStatus(r.Context(), false),
 	})
 }
@@ -1809,8 +1812,8 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "set an encryption key before completing setup")
 		return
 	}
-	if !h.settings.AnyForgeConfigured() && !h.cfg.Dev.AllowSkipSetup {
-		writeError(w, http.StatusBadRequest, "configure at least one forge (Gitea or GitHub) before completing setup")
+	if !h.settings.HasUsableForge(r.Context()) && !h.cfg.Dev.AllowSkipSetup {
+		writeError(w, http.StatusBadRequest, "configure at least one forge before completing setup")
 		return
 	}
 	if err := h.settings.SetSetupCompleted(r.Context(), true); err != nil {
@@ -1819,6 +1822,7 @@ func (h *Handler) setupComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"setup_completed": true,
+		"needs_setup":     h.settings.NeedsSetup(r.Context(), h.cfg.Dev.AllowSkipSetup),
 		"status":          h.buildSystemStatus(r.Context(), false),
 	})
 }

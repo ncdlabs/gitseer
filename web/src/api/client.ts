@@ -663,6 +663,7 @@ export type SystemStatus = {
   webhook_hmac?: boolean;
   github_webhook_hmac?: boolean;
   setup_completed?: boolean;
+  needs_setup?: boolean;
   encryption_configured?: boolean;
   encryption_source?: string;
   encryption_healthy?: boolean;
@@ -714,6 +715,8 @@ export type SettingsResponse = {
   settings: GitSeerSettings;
   integration: IntegrationPublic;
   setup_completed: boolean;
+  /** True when encryption/forge/setup_completed are incomplete (not only the DB flag). */
+  needs_setup?: boolean;
   encryption_configured?: boolean;
   encryption_source?: string;
   status: SystemStatus;

@@ -195,7 +195,10 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
 
   const setupGateLoading = user.is_bootstrap_admin && settingsQuery.isLoading;
   const needsSetup =
-    user.is_bootstrap_admin && settingsQuery.isSuccess && settingsQuery.data.setup_completed === false;
+    user.is_bootstrap_admin &&
+    settingsQuery.isSuccess &&
+    (settingsQuery.data.needs_setup === true ||
+      (settingsQuery.data.needs_setup === undefined && settingsQuery.data.setup_completed === false));
 
   async function syncNow() {
     setSyncing(true);
