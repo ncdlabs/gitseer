@@ -122,16 +122,29 @@ if [[ ! -x "$CONCURRENTLY" ]]; then
   npm install --no-audit --no-fund
 fi
 
+# Job control so concurrently gets its own process group (reliable CTRL-C teardown).
+set -m
 "$CONCURRENTLY" -k -n api,web -c blue,green \
   "npm run start:api" \
   "npm run start:web" &
 START_PID=$!
 
+# CTRL-C / SIGTERM / script exit: stop concurrently and any orphaned
+# go/vite listeners still holding :8090 / :5173.
+CLEANED=0
 cleanup() {
-  if kill -0 "$START_PID" 2>/dev/null; then
-    kill "$START_PID" 2>/dev/null || true
+  [[ "$CLEANED" -eq 1 ]] && return 0
+  CLEANED=1
+  trap - EXIT INT TERM
+  echo ""
+  echo "Stopping GitSeer (CTRL-C / quit)…"
+  if [[ -n "${START_PID:-}" ]] && kill -0 "$START_PID" 2>/dev/null; then
+    kill -INT "$START_PID" 2>/dev/null || true
+    # concurrently may leave `go run` / vite children; kill its process group too
+    kill -INT -- "-$START_PID" 2>/dev/null || true
     wait "$START_PID" 2>/dev/null || true
   fi
+  bash "$ROOT/scripts/dev-stop.sh" || true
 }
 trap cleanup EXIT INT TERM
 
@@ -146,5 +159,5 @@ fi
 
 wait "$START_PID"
 status=$?
-trap - EXIT INT TERM
+cleanup
 exit "$status"
