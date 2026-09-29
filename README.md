@@ -9,11 +9,7 @@ Technical IDs: Go module `github.com/ncdlabs/gitseer`, binary `gitseer`, Helm `g
 **Quick start** (macOS / Linux):
 
 ```bash
-VER=1.0.8
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
-curl -fsSL -o gitseer "https://github.com/ncdlabs/gitseer/releases/download/v${VER}/gitseer_${VER}_${OS}_${ARCH}"
-chmod +x gitseer && ./gitseer serve
+curl -fsSL https://raw.githubusercontent.com/ncdlabs/gitseer/main/scripts/install-binary.sh | bash
 ```
 
 Then open http://127.0.0.1:8090. Windows: grab the `.exe` from [Releases](https://github.com/ncdlabs/gitseer/releases). More options below.
