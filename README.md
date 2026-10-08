@@ -30,7 +30,7 @@ Then open http://127.0.0.1:8090. Windows: grab the `.exe` from [Releases](https:
 
 - A replacement for the forge itself (GitSeer does not host git or runners)
 - Multi-replica SQLite deployments (use Postgres if you need more than one replica)
-- Multi-arch **container** hosts that cannot run linux/amd64 (release images are amd64-only; native binaries cover darwin/windows/linux × amd64/arm64)
+- Hosts that need a container for a non-linux OS (use native release binaries for darwin/windows)
 
 ---
 
@@ -87,7 +87,7 @@ System follows the OS preference (shown here resolving to dark).
 - **Gitea UI hooks** — optional `install-ui` links from Gitea nav / repo tabs
 - **Ops** — Prometheus `/metrics`, retention purge, wallboard tokens; SQLite by default (Postgres for multi-replica)
 
-Release binaries cover **linux / darwin / windows** × **amd64 / arm64**. Container images remain **linux/amd64**. Use Postgres if you need more than one replica.
+Release binaries cover **linux / darwin / windows** × **amd64 / arm64**. Container images are **linux/amd64** + **linux/arm64**. Use Postgres if you need more than one replica.
 
 ---
 
@@ -95,7 +95,7 @@ Release binaries cover **linux / darwin / windows** × **amd64 / arm64**. Contai
 
 | Component | Version / notes |
 |-----------|-----------------|
-| Container or binary | Native release binaries (linux/darwin/windows × amd64/arm64); container image **linux/amd64** |
+| Container or binary | Native release binaries (linux/darwin/windows × amd64/arm64); container image **linux/amd64** + **linux/arm64** |
 | Go / Node (from source) | Go 1.26+ (`go.mod`), Node 22+ |
 | Forge | At least one: Gitea ~1.25+, Forgejo, GitHub / GHE, GitLab, or Bitbucket Cloud |
 | Compose (installer default) | Docker Compose (Podman Compose also works) |
@@ -189,7 +189,6 @@ On Windows, download `gitseer_${VER}_windows_amd64.exe` (or `windows_arm64`) fro
 
 ```bash
 docker run --rm -p 8090:8090 \
-  --platform linux/amd64 \
   -v gitseer-data:/data \
   -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
   -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
@@ -201,7 +200,7 @@ Open **http://127.0.0.1:8090**, complete Setup (claim bootstrap password in the 
 
 Notes:
 
-- Image is **linux/amd64**. `--platform linux/amd64` is required on Apple Silicon / arm64 hosts (and harmless on amd64).
+- Image is multi-arch **linux/amd64** + **linux/arm64** (Docker picks the matching digest).
 - Prefer a **named volume** (`gitseer-data`) so the non-root container user (uid 10001) can write the SQLite DB. A host bind mount needs ownership/permissions for uid 10001.
 - Pre-seed a forge before Setup (optional): `GITSEER_GITEA_URL` / `GITSEER_GITEA_TOKEN` / `GITSEER_WEBHOOK_SECRET` (or matching `GITSEER_GITHUB_*` / GitLab / Bitbucket vars)
 - Bootstrap username hint: `GITSEER_AUTH_BOOTSTRAP_USERNAME` (default `admin`; claim the password in the UI)
@@ -245,7 +244,7 @@ Paste this prompt into your coding agent (Cursor, Codex, Claude Code, etc.). Fil
 Install GitSeer (repo ncdlabs/gitseer) from https://github.com/ncdlabs/gitseer on this machine.
 
 Goals:
-1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64), then the public image `ghcr.io/ncdlabs/gitseer:1.0.9` (linux/amd64 via Docker). Fall back to cloning and `./scripts/install.sh` / Compose / `make build-go` if building from source.
+1. Prefer a native GitHub Release binary (linux/darwin/windows × amd64/arm64), then the public image `ghcr.io/ncdlabs/gitseer:1.0.9` (linux/amd64 + linux/arm64 via Docker). Fall back to cloning and `./scripts/install.sh` / Compose / `make build-go` if building from source.
 2. Collect or confirm: forge plan (Gitea, Forgejo, GitHub, GitLab, and/or Bitbucket), forge base URL + API token/PAT, GitSeer public URL (server.external_url), suggested bootstrap username + keep/remove-after-setup choice, and encryption key (env or /setup Prepare). OAuth client id/secret are optional — the Setup wizard can create or paste them later.
 3. Guided installer currently requires Gitea URL/token; for non-Gitea-first installs use the release binary or public image (or Compose) and complete /setup. Set the matching webhook secret whenever a forge URL is set in config. Use GITSEER_*_ALLOW_PRIVATE_NETWORK=true only for private/lab forge URLs.
 4. Start GitSeer, open the printed URL (default http://127.0.0.1:8090), complete /setup if shown (Prepare → Choose Forge → Connect → Validate → Finish), sign in, and click Sync Now.
@@ -319,14 +318,12 @@ Defaults live in `config.example.yaml`. Environment overrides use the `GITSEER_*
 
 ## Releases
 
-Tagged releases publish **linux / darwin / windows** × **amd64 / arm64** binaries on GitHub Releases and a **linux/amd64** container image to **GHCR**:
+Tagged releases publish **linux / darwin / windows** × **amd64 / arm64** binaries on GitHub Releases and a multi-arch (**linux/amd64** + **linux/arm64**) container image to **GHCR**:
 
 ```bash
-docker pull --platform linux/amd64 ghcr.io/ncdlabs/gitseer:1.0.9
+docker pull ghcr.io/ncdlabs/gitseer:1.0.9
 # or :latest
 ```
-
-On Apple Silicon / arm64 hosts, keep `--platform linux/amd64` (images are amd64-only).
 
 Docker Hub (`docker.io/ncdlabs/gitseer`) publishes only when `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are set.
 

@@ -89,7 +89,7 @@ Public releases are **tag-gated** and cut from GitHub Actions (not locally):
 
 The [cut-release](../.github/workflows/cut-release.yaml) workflow bumps `cmd/gitseer/main.go`, Helm `Chart.yaml` (`version` / `appVersion`), and moves `CHANGELOG.md` `[Unreleased]` into `## [X.Y.Z] - date`, then commits and pushes annotated tag `vX.Y.Z`. That tag runs CI, then [`.github/workflows/release.yaml`](../.github/workflows/release.yaml), which:
 
-- Publishes linux/amd64 images to `ghcr.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`)
+- Publishes multi-arch (**linux/amd64** + **linux/arm64**) images to `ghcr.io/ncdlabs/gitseer:X.Y.Z` (+ `:latest`)
 - Sets the GHCR package visibility to **public** (new org packages default to private)
 - Optionally also publishes to `docker.io/ncdlabs/gitseer` when Hub secrets are set
 - Creates a GitHub Release with linux/darwin/windows × amd64/arm64 binaries, `SHA256SUMS`, and SBOM
@@ -121,9 +121,8 @@ gh workflow run release.yaml --repo ncdlabs/gitseer -f tag=v1.0.2
 
 ## Deferred release hardening
 
-Tracked for follow-up; not blockers for public amd64 releases:
+Tracked for follow-up; not blockers for public multi-arch releases:
 
-- Multi-architecture container images (host cross-compile is amd64-only; QEMU multi-stage `go build` is unreliable here)
 - Cosign-signed release images (needs operator key/CI secrets)
 - Published integration matrix CI against every supported Gitea/GitLab version
 

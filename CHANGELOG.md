@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Public container images are multi-arch **linux/amd64** + **linux/arm64** (host cross-compile + runtime Containerfile; Buildx provenance attestations disabled so GHCR OS/Arch is not polluted with `unknown`).
+
 ## [1.0.10] - 2026-09-29
 
 ### Fixed

@@ -1,11 +1,21 @@
 # syntax=docker/dockerfile:1
 # Runtime image for a prebuilt static binary (avoids QEMU go toolchain crashes).
+#
+# Multi-arch release context expects:
+#   gitseer_linux_amd64  gitseer_linux_arm64
+# BuildKit sets TARGETARCH per platform (amd64 / arm64).
+#
+# Single-arch lab builds can pass --build-arg BINARY_NAME=gitseer after placing
+# a file named gitseer in the build context.
+ARG TARGETARCH
 FROM alpine:3.21
+ARG TARGETARCH
+ARG BINARY_NAME=gitseer_linux_${TARGETARCH}
 RUN apk add --no-cache ca-certificates wget \
   && adduser -D -H -u 10001 gitseer
 USER gitseer
 WORKDIR /data
-COPY gitseer /usr/local/bin/gitseer
+COPY ${BINARY_NAME} /usr/local/bin/gitseer
 EXPOSE 8090
 VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/gitseer"]

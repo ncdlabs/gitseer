@@ -1817,7 +1817,7 @@ SBOM generation (CI; shipped),
 
 signed releases/container images (deferred),
 
-multi-architecture images (deferred — amd64 only today),
+multi-architecture container images (linux/amd64 + linux/arm64),
 
 documented upgrade process (shipped),
 

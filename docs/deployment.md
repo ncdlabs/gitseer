@@ -91,7 +91,7 @@ Default `replicaCount: 1`. Raising replicas is supported only with caveats:
 
 ## Public container images
 
-Tagged releases publish linux/amd64 images to:
+Tagged releases publish multi-arch (**linux/amd64** + **linux/arm64**) images to:
 
 - `ghcr.io/ncdlabs/gitseer:<version>` (also `:latest`)
 - `docker.io/ncdlabs/gitseer:<version>` (also `:latest`)
@@ -104,7 +104,7 @@ docker pull ghcr.io/ncdlabs/gitseer:1.0.9
 
 Maintainers cut releases via **Actions → Cut release** — see [Upgrade](upgrade.md#cutting-a-public-release). Lab/k3s images on `git.ncdlabs.com` are separate (deploy skill) and may run ahead of the latest public GHCR cut (for example browser/OS alerts in `1.0.3` before that tag is published).
 
-Image builds for some environments use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) when full multi-stage `go build` under QEMU is unreliable.
+Image builds for lab and public releases use host cross-compile + [`deploy/docker/Containerfile.runtime`](https://github.com/ncdlabs/gitseer/tree/main/deploy/docker) (public GHCR tags are a multi-arch index of linux/amd64 + linux/arm64). Lab single-arch builds can pass `--build-arg BINARY_NAME=gitseer` after placing a `gitseer` binary in the build context.
 
 ## Reverse proxy
 
