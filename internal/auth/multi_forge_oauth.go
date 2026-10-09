@@ -138,25 +138,29 @@ func (s *Service) CompleteGitLabOAuth(ctx context.Context, r *http.Request, w ht
 
 func (s *Service) exchangeGitLabCode(ctx context.Context, code, verifier string) (*tokenResponse, error) {
 	s.mu.RLock()
-	clientID := s.cfg.GitLabOAuthClientID
-	clientSecret := s.cfg.GitLabOAuthClientSecret
-	baseURL := s.cfg.GitLabBaseURL
-	redirectURI := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/gitlab/callback"
-	client := s.gitlabClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn:  func() (string, error) { return gitlab.TokenEndpoint(s.cfg.GitLabBaseURL) },
+		client:      s.gitlabClient,
+		clientID:    s.cfg.GitLabOAuthClientID,
+		secret:      s.cfg.GitLabOAuthClientSecret,
+		style:       tokenExchangeForm,
+		redirectURI: strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/gitlab/callback",
+	}
 	s.mu.RUnlock()
-	return s.exchangeFormToken(ctx, client, func() (string, error) { return gitlab.TokenEndpoint(baseURL) },
-		clientID, clientSecret, redirectURI, code, verifier)
+	return exchanger.exchange(ctx, code, verifier)
 }
 
 func (s *Service) refreshGitLabAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {
 	s.mu.RLock()
-	clientID := s.cfg.GitLabOAuthClientID
-	clientSecret := s.cfg.GitLabOAuthClientSecret
-	baseURL := s.cfg.GitLabBaseURL
-	client := s.gitlabClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) { return gitlab.TokenEndpoint(s.cfg.GitLabBaseURL) },
+		client:     s.gitlabClient,
+		clientID:   s.cfg.GitLabOAuthClientID,
+		secret:     s.cfg.GitLabOAuthClientSecret,
+		style:      tokenExchangeForm,
+	}
 	s.mu.RUnlock()
-	return s.refreshFormToken(ctx, client, func() (string, error) { return gitlab.TokenEndpoint(baseURL) },
-		clientID, clientSecret, refreshToken, false)
+	return exchanger.refresh(ctx, refreshToken)
 }
 
 func (s *Service) fetchGitLabUser(ctx context.Context, accessToken string) (*models.User, error) {
@@ -319,97 +323,31 @@ func (s *Service) CompleteBitbucketOAuth(ctx context.Context, r *http.Request, w
 
 func (s *Service) exchangeBitbucketToken(ctx context.Context, code, verifier string) (*tokenResponse, error) {
 	s.mu.RLock()
-	clientID := s.cfg.BitbucketOAuthClientID
-	clientSecret := s.cfg.BitbucketOAuthClientSecret
-	baseURL := s.cfg.BitbucketBaseURL
-	redirectURI := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/bitbucket/callback"
-	client := s.bitbucketClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn:  func() (string, error) { return bitbucket.TokenEndpoint(s.cfg.BitbucketBaseURL) },
+		client:      s.bitbucketClient,
+		clientID:    s.cfg.BitbucketOAuthClientID,
+		secret:      s.cfg.BitbucketOAuthClientSecret,
+		style:       tokenExchangeForm,
+		basicAuth:   true,
+		redirectURI: strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/bitbucket/callback",
+	}
 	s.mu.RUnlock()
-	endpoint, err := bitbucket.TokenEndpoint(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	form := url.Values{}
-	form.Set("grant_type", "authorization_code")
-	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
-	form.Set("code_verifier", verifier)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	req.SetBasicAuth(clientID, clientSecret)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("bitbucket token exchange failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, err
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("bitbucket token response missing access_token")
-	}
-	return &tok, nil
+	return exchanger.exchange(ctx, code, verifier)
 }
 
 func (s *Service) refreshBitbucketAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {
 	s.mu.RLock()
-	clientID := s.cfg.BitbucketOAuthClientID
-	clientSecret := s.cfg.BitbucketOAuthClientSecret
-	baseURL := s.cfg.BitbucketBaseURL
-	client := s.bitbucketClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) { return bitbucket.TokenEndpoint(s.cfg.BitbucketBaseURL) },
+		client:     s.bitbucketClient,
+		clientID:   s.cfg.BitbucketOAuthClientID,
+		secret:     s.cfg.BitbucketOAuthClientSecret,
+		style:      tokenExchangeForm,
+		basicAuth:  true,
+	}
 	s.mu.RUnlock()
-	endpoint, err := bitbucket.TokenEndpoint(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	if client == nil {
-		client = bitbucket.NewHTTPClient(s.cfg.BitbucketAllowPrivateNet, 30*time.Second)
-	}
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", refreshToken)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	req.SetBasicAuth(clientID, clientSecret)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("bitbucket token refresh failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, err
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("bitbucket token refresh missing access_token")
-	}
-	if tok.RefreshToken == "" {
-		tok.RefreshToken = refreshToken
-	}
-	return &tok, nil
+	return exchanger.refresh(ctx, refreshToken)
 }
 
 func (s *Service) fetchBitbucketUser(ctx context.Context, accessToken string) (*models.User, error) {
@@ -584,98 +522,33 @@ func (s *Service) CompleteForgejoOAuth(ctx context.Context, r *http.Request, w h
 
 func (s *Service) exchangeForgejoCode(ctx context.Context, code, verifier string) (*tokenResponse, error) {
 	s.mu.RLock()
-	baseURL := s.cfg.ForgejoBaseURL
-	clientID := s.cfg.ForgejoOAuthClientID
-	clientSecret := s.cfg.ForgejoOAuthClientSecret
-	redirectURI := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/forgejo/callback"
-	client := s.forgejoClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) {
+			return strings.TrimRight(s.cfg.ForgejoBaseURL, "/") + "/login/oauth/access_token", nil
+		},
+		client:      s.forgejoClient,
+		clientID:    s.cfg.ForgejoOAuthClientID,
+		secret:      s.cfg.ForgejoOAuthClientSecret,
+		style:       tokenExchangeJSON,
+		redirectURI: strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/forgejo/callback",
+	}
 	s.mu.RUnlock()
-	endpoint := strings.TrimRight(baseURL, "/") + "/login/oauth/access_token"
-	body := map[string]string{
-		"client_id": clientID, "code": code, "grant_type": "authorization_code",
-		"redirect_uri": redirectURI, "code_verifier": verifier,
-	}
-	if clientSecret != "" {
-		body["client_secret"] = clientSecret
-	}
-	payload, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("forgejo token exchange failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, err
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("forgejo token response missing access_token")
-	}
-	return &tok, nil
+	return exchanger.exchange(ctx, code, verifier)
 }
 
 func (s *Service) refreshForgejoAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {
 	s.mu.RLock()
-	baseURL := s.cfg.ForgejoBaseURL
-	clientID := s.cfg.ForgejoOAuthClientID
-	clientSecret := s.cfg.ForgejoOAuthClientSecret
-	client := s.forgejoClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) {
+			return strings.TrimRight(s.cfg.ForgejoBaseURL, "/") + "/login/oauth/access_token", nil
+		},
+		client:   s.forgejoClient,
+		clientID: s.cfg.ForgejoOAuthClientID,
+		secret:   s.cfg.ForgejoOAuthClientSecret,
+		style:    tokenExchangeJSON,
+	}
 	s.mu.RUnlock()
-	endpoint := strings.TrimRight(baseURL, "/") + "/login/oauth/access_token"
-	body := map[string]string{
-		"client_id":     clientID,
-		"grant_type":    "refresh_token",
-		"refresh_token": refreshToken,
-	}
-	if clientSecret != "" {
-		body["client_secret"] = clientSecret
-	}
-	payload, _ := json.Marshal(body)
-	if client == nil {
-		client = gitea.NewHTTPClient(s.cfg.ForgejoAllowPrivateNet, 30*time.Second)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("forgejo token refresh failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, err
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("forgejo token refresh missing access_token")
-	}
-	if tok.RefreshToken == "" {
-		tok.RefreshToken = refreshToken
-	}
-	return &tok, nil
+	return exchanger.refresh(ctx, refreshToken)
 }
 
 func (s *Service) fetchForgejoUser(ctx context.Context, accessToken string) (*models.User, error) {
@@ -747,102 +620,6 @@ func (s *Service) takeOAuthState(r *http.Request, w http.ResponseWriter, code, s
 		return "", "", meta, fmt.Errorf("oauth state provider mismatch")
 	}
 	return verifier, SafeRedirectPath(redirectTo), meta, nil
-}
-
-func (s *Service) exchangeFormToken(ctx context.Context, client *http.Client, endpointFn func() (string, error), clientID, clientSecret, redirectURI, code, verifier string) (*tokenResponse, error) {
-	if client == nil {
-		return nil, fmt.Errorf("oauth http client not configured")
-	}
-	endpoint, err := endpointFn()
-	if err != nil {
-		return nil, err
-	}
-	form := url.Values{}
-	form.Set("client_id", clientID)
-	form.Set("code", code)
-	form.Set("grant_type", "authorization_code")
-	form.Set("redirect_uri", redirectURI)
-	form.Set("code_verifier", verifier)
-	if clientSecret != "" {
-		form.Set("client_secret", clientSecret)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("token exchange failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, err
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("token response missing access_token")
-	}
-	return &tok, nil
-}
-
-func (s *Service) refreshFormToken(ctx context.Context, client *http.Client, endpointFn func() (string, error), clientID, clientSecret, refreshToken string, basicAuth bool) (*tokenResponse, error) {
-	if client == nil {
-		return nil, fmt.Errorf("oauth http client not configured")
-	}
-	endpoint, err := endpointFn()
-	if err != nil {
-		return nil, err
-	}
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", refreshToken)
-	if !basicAuth {
-		form.Set("client_id", clientID)
-		if clientSecret != "" {
-			form.Set("client_secret", clientSecret)
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	if basicAuth {
-		req.SetBasicAuth(clientID, clientSecret)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("token refresh failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, err
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("token refresh missing access_token")
-	}
-	if tok.RefreshToken == "" {
-		tok.RefreshToken = refreshToken
-	}
-	return &tok, nil
 }
 
 func oauthInstanceID(meta store.OAuthStateMeta, fallback func() (*models.Instance, error)) int64 {

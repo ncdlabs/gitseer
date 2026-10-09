@@ -26,6 +26,15 @@ type repoWithHealth struct {
 	Health *models.RepoHealth `json:"health,omitempty"`
 }
 
+// repoIDSlice extracts IDs from a slice of repositories.
+func repoIDSlice(repos []models.Repository) []int64 {
+	ids := make([]int64, 0, len(repos))
+	for i := range repos {
+		ids = append(ids, repos[i].ID)
+	}
+	return ids
+}
+
 func (h *Handler) healthOptsFromQuery(r *http.Request) store.RepoHealthOpts {
 	q := r.URL.Query()
 	days, _ := strconv.Atoi(q.Get("days"))
@@ -56,14 +65,14 @@ func (h *Handler) resolveAccessibleRepo(w http.ResponseWriter, r *http.Request) 
 		candidates = repos
 	}
 
+	accessibleIDs, err := h.authz.CanAccessRepos(r.Context(), user, repoIDSlice(candidates))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return nil, false
+	}
 	var accessible []models.Repository
 	for i := range candidates {
-		ok, err := h.authz.CanAccessRepo(r.Context(), user, candidates[i].ID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return nil, false
-		}
-		if ok {
+		if accessibleIDs[candidates[i].ID] {
 			accessible = append(accessible, candidates[i])
 		}
 	}

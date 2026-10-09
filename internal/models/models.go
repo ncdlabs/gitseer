@@ -3,6 +3,7 @@ package models
 
 import (
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,18 +35,29 @@ func IsSupportedForgeType(ft string) bool {
 	}
 }
 
+// forgeTokenLabelCache caches ForgeTokenLabel results to avoid repeated string allocations
+// in hot paths (e.g. ops_status rendering).
+var forgeTokenLabelCache sync.Map
+
 // ForgeTokenLabel returns the provider's user-facing name for the sync API credential.
 func ForgeTokenLabel(forgeType string) string {
-	switch strings.ToLower(strings.TrimSpace(forgeType)) {
-	case ForgeTypeGitHub, ForgeTypeGitLab:
-		return "Personal Access Token"
-	case ForgeTypeBitbucket:
-		return "HTTP Access Token"
-	case ForgeTypeGitea, ForgeTypeForgejo:
-		return "Access Token"
-	default:
-		return "Access Token"
+	key := strings.ToLower(strings.TrimSpace(forgeType))
+	if v, ok := forgeTokenLabelCache.Load(key); ok {
+		return v.(string)
 	}
+	var label string
+	switch key {
+	case ForgeTypeGitHub, ForgeTypeGitLab:
+		label = "Personal Access Token"
+	case ForgeTypeBitbucket:
+		label = "HTTP Access Token"
+	case ForgeTypeGitea, ForgeTypeForgejo:
+		label = "Access Token"
+	default:
+		label = "Access Token"
+	}
+	forgeTokenLabelCache.Store(key, label)
+	return label
 }
 
 type Instance struct {

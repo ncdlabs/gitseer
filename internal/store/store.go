@@ -231,60 +231,27 @@ func (s *Store) GetPrimaryInstance(ctx context.Context) (*models.Instance, error
 
 // GetPrimaryGiteaInstance returns the Gitea instance preferred for OAuth and legacy
 // webhook fallback: OAuth client id+secret configured first, else lowest id.
+// Also matches rows with empty/NULL forge_type (legacy Gitea default).
 func (s *Store) GetPrimaryGiteaInstance(ctx context.Context) (*models.Instance, error) {
-	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
-WHERE forge_type = ?
-  AND TRIM(COALESCE(oauth_client_id, '')) != ''
-  AND TRIM(COALESCE(oauth_client_secret_ciphertext, '')) != ''
-ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitea)
-	inst, err := scanInstance(row)
-	if err == nil {
-		return inst, nil
-	}
-	if err != sql.ErrNoRows {
-		return nil, err
-	}
-	row = s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
-WHERE forge_type = ? OR forge_type = '' OR forge_type IS NULL
-ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitea)
-	inst, err = scanInstance(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return inst, err
+	return s.GetPrimaryInstanceForForge(ctx, models.ForgeTypeGitea, true)
 }
 
 // GetPrimaryGitHubInstance returns the GitHub instance preferred for OAuth:
 // OAuth client id+secret configured first, else lowest id.
 func (s *Store) GetPrimaryGitHubInstance(ctx context.Context) (*models.Instance, error) {
-	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
-WHERE forge_type = ?
-  AND TRIM(COALESCE(oauth_client_id, '')) != ''
-  AND TRIM(COALESCE(oauth_client_secret_ciphertext, '')) != ''
-ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitHub)
-	inst, err := scanInstance(row)
-	if err == nil {
-		return inst, nil
-	}
-	if err != sql.ErrNoRows {
-		return nil, err
-	}
-	row = s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
-WHERE forge_type = ?
-ORDER BY id ASC LIMIT 1`, models.ForgeTypeGitHub)
-	inst, err = scanInstance(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return inst, err
+	return s.GetPrimaryInstanceForForge(ctx, models.ForgeTypeGitHub)
 }
+
 // GetPrimaryInstanceForForge returns the instance preferred for OAuth for forgeType:
 // OAuth client id+secret configured first, else lowest id.
-func (s *Store) GetPrimaryInstanceForForge(ctx context.Context, forgeType string) (*models.Instance, error) {
+// When matchEmptyForge is true, the fallback query also matches rows with
+// empty/NULL forge_type (Gitea legacy default).
+func (s *Store) GetPrimaryInstanceForForge(ctx context.Context, forgeType string, matchEmptyForge ...bool) (*models.Instance, error) {
 	forgeType = strings.TrimSpace(strings.ToLower(forgeType))
 	if forgeType == "" {
 		forgeType = models.ForgeTypeGitea
 	}
+	matchEmpty := len(matchEmptyForge) > 0 && matchEmptyForge[0]
 	row := s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
 WHERE forge_type = ?
   AND TRIM(COALESCE(oauth_client_id, '')) != ''
@@ -297,8 +264,12 @@ ORDER BY id ASC LIMIT 1`, forgeType)
 	if err != sql.ErrNoRows {
 		return nil, err
 	}
+	fallbackWhere := "forge_type = ?"
+	if matchEmpty {
+		fallbackWhere = "forge_type = ? OR forge_type = '' OR forge_type IS NULL"
+	}
 	row = s.queryRow(ctx, `SELECT`+instanceSelectCols+` FROM instances
-WHERE forge_type = ?
+WHERE `+fallbackWhere+`
 ORDER BY id ASC LIMIT 1`, forgeType)
 	inst, err = scanInstance(row)
 	if err == sql.ErrNoRows {
@@ -318,7 +289,6 @@ func (s *Store) GetPrimaryBitbucketInstance(ctx context.Context) (*models.Instan
 func (s *Store) GetPrimaryForgejoInstance(ctx context.Context) (*models.Instance, error) {
 	return s.GetPrimaryInstanceForForge(ctx, models.ForgeTypeForgejo)
 }
-
 
 func scanInstance(row scanner) (*models.Instance, error) {
 	var inst models.Instance
@@ -524,18 +494,7 @@ func scanRepo(row scanner) (*models.Repository, error) {
 	); err != nil {
 		return nil, err
 	}
-	if orgID.Valid {
-		v := orgID.Int64
-		r.OrgID = &v
-	}
-	r.Private = private != 0
-	r.Archived = archived != 0
-	r.Empty = empty != 0
-	r.Fork = fork != 0
-	r.LastSyncedAt = nullTime(lastSynced)
-	r.DeletedAt = nullTime(deleted)
-	r.CreatedAt, _ = parseTime(created.String)
-	r.UpdatedAt, _ = parseTime(updated.String)
+	applyRepoFields(&r, orgID, private, archived, empty, fork, lastSynced, deleted, created, updated)
 	return &r, nil
 }
 
@@ -553,6 +512,17 @@ func scanRepoWithForge(row scanner) (*models.Repository, error) {
 	); err != nil {
 		return nil, err
 	}
+	applyRepoFields(&r, orgID, private, archived, empty, fork, lastSynced, deleted, created, updated)
+	r.ForgeType = forgeType
+	if r.ForgeType == "" {
+		r.ForgeType = models.ForgeTypeGitea
+	}
+	r.InstanceName = strings.TrimSpace(instanceName)
+	return &r, nil
+}
+
+// applyRepoFields populates the common repository fields shared by scanRepo and scanRepoWithForge.
+func applyRepoFields(r *models.Repository, orgID sql.NullInt64, private, archived, empty, fork int, lastSynced, deleted, created, updated sql.NullString) {
 	if orgID.Valid {
 		v := orgID.Int64
 		r.OrgID = &v
@@ -561,16 +531,10 @@ func scanRepoWithForge(row scanner) (*models.Repository, error) {
 	r.Archived = archived != 0
 	r.Empty = empty != 0
 	r.Fork = fork != 0
-	r.ForgeType = forgeType
-	if r.ForgeType == "" {
-		r.ForgeType = models.ForgeTypeGitea
-	}
-	r.InstanceName = strings.TrimSpace(instanceName)
 	r.LastSyncedAt = nullTime(lastSynced)
 	r.DeletedAt = nullTime(deleted)
 	r.CreatedAt, _ = parseTime(created.String)
 	r.UpdatedAt, _ = parseTime(updated.String)
-	return &r, nil
 }
 
 type ListRepositoriesOpts struct {
