@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Product logo (`docs/branding/gitseer-logo.png`), now shown in the README header; removed the unreferenced pre-rename Gitea Lens branding PNGs.
+
 ## [1.0.10] - 2026-09-29
 
 ### Fixed

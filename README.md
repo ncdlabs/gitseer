@@ -1,5 +1,9 @@
 # GitSeer
 
+<p align="center">
+  <img src="docs/branding/gitseer-logo.png" alt="GitSeer logo" width="180">
+</p>
+
 Self-hosted CI/CD and pull-request ops console for Gitea, Forgejo, GitHub (github.com and Enterprise), GitLab, and Bitbucket Cloud.
 
 Syncs repositories, open PRs, workflow runs, and attention items into one ACL-aware UI. Each forge stays the system of record; GitSeer talks to them over API and webhooks. Login is forge OAuth (PKCE) and/or bootstrap (claimed on first visit). Inventory sync uses a per-instance service token / PAT.
