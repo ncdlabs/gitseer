@@ -1061,6 +1061,61 @@ WHERE ura.user_id=? AND ura.repo_id=? AND r.deleted_at IS NULL`, userID, repoID)
 	return n > 0, err
 }
 
+// UserCanAccessRepos batch-checks ACL for multiple repos in a single query.
+// Returns a set of repo IDs the user can access.
+func (s *Store) UserCanAccessRepos(ctx context.Context, userID int64, repoIDs []int64) (map[int64]bool, error) {
+	out := make(map[int64]bool, len(repoIDs))
+	if len(repoIDs) == 0 {
+		return out, nil
+	}
+	ph, args := placeholders(repoIDs)
+	rows, err := s.query(ctx, `
+SELECT ura.repo_id FROM user_repository_access ura
+JOIN repositories r ON r.id = ura.repo_id
+WHERE ura.user_id=? AND ura.repo_id IN (`+ph+`) AND r.deleted_at IS NULL`, append([]any{userID}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// GetRepositoriesByIDs fetches multiple repositories by ID in a single query.
+func (s *Store) GetRepositoriesByIDs(ctx context.Context, ids []int64) ([]models.Repository, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	unique := uniquePositiveIDs(ids)
+	if len(unique) == 0 {
+		return nil, nil
+	}
+	ph, args := placeholders(unique)
+	rows, err := s.query(ctx, `
+SELECT id, instance_id, org_id, external_id, node_id, owner, name, full_name, default_branch,
+       private, archived, empty, fork, html_url, last_synced_at, deleted_at, created_at, updated_at
+FROM repositories WHERE id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.Repository
+	for rows.Next() {
+		r, err := scanRepo(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ReplaceUserRepoAccess(ctx context.Context, userID int64, repoIDs []int64) error {
 	return s.ReplaceUserRepoAccessForInstances(ctx, userID, nil, repoIDs)
 }

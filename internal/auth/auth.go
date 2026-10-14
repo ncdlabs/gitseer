@@ -39,34 +39,34 @@ var ErrOAuthNotConfigured = errors.New("oauth is not configured")
 
 // Config holds auth runtime settings.
 type Config struct {
-	BootstrapPassword       string
-	BootstrapUsername       string
-	BootstrapKeepAfterSetup *bool
-	SessionTTL              time.Duration
-	CookieSecure            bool
-	CookiePath              string
-	GiteaBaseURL            string
-	OAuthClientID           string
-	OAuthClientSecret       string
-	GitHubBaseURL           string
-	GitHubOAuthClientID     string
-	GitHubOAuthClientSecret string
-	GitHubAllowPrivateNet   bool
-	GitLabBaseURL             string
-	GitLabOAuthClientID       string
-	GitLabOAuthClientSecret   string
-	GitLabAllowPrivateNet     bool
-	BitbucketBaseURL             string
-	BitbucketOAuthClientID       string
-	BitbucketOAuthClientSecret   string
-	BitbucketAllowPrivateNet     bool
+	BootstrapPassword          string
+	BootstrapUsername          string
+	BootstrapKeepAfterSetup    *bool
+	SessionTTL                 time.Duration
+	CookieSecure               bool
+	CookiePath                 string
+	GiteaBaseURL               string
+	OAuthClientID              string
+	OAuthClientSecret          string
+	GitHubBaseURL              string
+	GitHubOAuthClientID        string
+	GitHubOAuthClientSecret    string
+	GitHubAllowPrivateNet      bool
+	GitLabBaseURL              string
+	GitLabOAuthClientID        string
+	GitLabOAuthClientSecret    string
+	GitLabAllowPrivateNet      bool
+	BitbucketBaseURL           string
+	BitbucketOAuthClientID     string
+	BitbucketOAuthClientSecret string
+	BitbucketAllowPrivateNet   bool
 	ForgejoBaseURL             string
 	ForgejoOAuthClientID       string
 	ForgejoOAuthClientSecret   string
 	ForgejoAllowPrivateNet     bool
-	ExternalURL       string // public GitSeer URL (used for redirect_uri)
-	AllowPrivateNet   bool
-	EncryptionKey     string
+	ExternalURL                string // public GitSeer URL (used for redirect_uri)
+	AllowPrivateNet            bool
+	EncryptionKey              string
 }
 
 // Service manages login and sessions.
@@ -355,50 +355,18 @@ type tokenResponse struct {
 
 func (s *Service) exchangeCode(ctx context.Context, code, verifier string) (*tokenResponse, error) {
 	s.mu.RLock()
-	baseURL := s.cfg.GiteaBaseURL
-	clientID := s.cfg.OAuthClientID
-	clientSecret := s.cfg.OAuthClientSecret
-	redirectURI := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/callback"
-	client := s.client
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) {
+			return strings.TrimRight(s.cfg.GiteaBaseURL, "/") + "/login/oauth/access_token", nil
+		},
+		client:      s.client,
+		clientID:    s.cfg.OAuthClientID,
+		secret:      s.cfg.OAuthClientSecret,
+		style:       tokenExchangeJSON,
+		redirectURI: strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/v1/auth/callback",
+	}
 	s.mu.RUnlock()
-	endpoint := strings.TrimRight(baseURL, "/") + "/login/oauth/access_token"
-	body := map[string]string{
-		"client_id":     clientID,
-		"code":          code,
-		"grant_type":    "authorization_code",
-		"redirect_uri":  redirectURI,
-		"code_verifier": verifier,
-	}
-	if clientSecret != "" {
-		body["client_secret"] = clientSecret
-	}
-	payload, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("token exchange failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("token response missing access_token")
-	}
-	return &tok, nil
+	return exchanger.exchange(ctx, code, verifier)
 }
 
 func (s *Service) fetchGiteaUser(ctx context.Context, accessToken string) (*models.User, error) {
@@ -552,50 +520,17 @@ func (s *Service) refreshAccessTokenForInstance(ctx context.Context, instanceID 
 
 func (s *Service) refreshAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {
 	s.mu.RLock()
-	baseURL := s.cfg.GiteaBaseURL
-	clientID := s.cfg.OAuthClientID
-	clientSecret := s.cfg.OAuthClientSecret
-	client := s.client
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) {
+			return strings.TrimRight(s.cfg.GiteaBaseURL, "/") + "/login/oauth/access_token", nil
+		},
+		client:   s.client,
+		clientID: s.cfg.OAuthClientID,
+		secret:   s.cfg.OAuthClientSecret,
+		style:    tokenExchangeJSON,
+	}
 	s.mu.RUnlock()
-	endpoint := strings.TrimRight(baseURL, "/") + "/login/oauth/access_token"
-	body := map[string]string{
-		"client_id":     clientID,
-		"grant_type":    "refresh_token",
-		"refresh_token": refreshToken,
-	}
-	if clientSecret != "" {
-		body["client_secret"] = clientSecret
-	}
-	payload, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("token refresh failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("token refresh missing access_token")
-	}
-	if tok.RefreshToken == "" {
-		tok.RefreshToken = refreshToken
-	}
-	return &tok, nil
+	return exchanger.refresh(ctx, refreshToken)
 }
 
 func (s *Service) UserFromRequest(ctx context.Context, r *http.Request) (*models.User, *models.Session, error) {

@@ -202,103 +202,41 @@ func (s *Service) CompleteGitHubOAuth(ctx context.Context, r *http.Request, w ht
 
 func (s *Service) exchangeGitHubCode(ctx context.Context, code, verifier string) (*tokenResponse, error) {
 	s.mu.RLock()
-	baseURL := s.cfg.GitHubBaseURL
-	clientID := s.cfg.GitHubOAuthClientID
-	clientSecret := s.cfg.GitHubOAuthClientSecret
-	redirectURI := s.gitHubOAuthRedirectURILocked()
-	client := s.githubClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) {
+			webBase, err := github.OAuthWebBase(s.cfg.GitHubBaseURL)
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimRight(webBase, "/") + "/login/oauth/access_token", nil
+		},
+		client:      s.githubClient,
+		clientID:    s.cfg.GitHubOAuthClientID,
+		secret:      s.cfg.GitHubOAuthClientSecret,
+		style:       tokenExchangeForm,
+		redirectURI: s.gitHubOAuthRedirectURILocked(),
+	}
 	s.mu.RUnlock()
-
-	webBase, err := github.OAuthWebBase(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	endpoint := strings.TrimRight(webBase, "/") + "/login/oauth/access_token"
-	form := url.Values{}
-	form.Set("client_id", clientID)
-	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
-	form.Set("code_verifier", verifier)
-	if clientSecret != "" {
-		form.Set("client_secret", clientSecret)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("github token exchange failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, fmt.Errorf("decode github token response: %w", err)
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("github token response missing access_token")
-	}
-	return &tok, nil
+	return exchanger.exchange(ctx, code, verifier)
 }
 
 func (s *Service) refreshGitHubAccessToken(ctx context.Context, refreshToken string) (*tokenResponse, error) {
 	s.mu.RLock()
-	baseURL := s.cfg.GitHubBaseURL
-	clientID := s.cfg.GitHubOAuthClientID
-	clientSecret := s.cfg.GitHubOAuthClientSecret
-	client := s.githubClient
+	exchanger := &oauthTokenExchanger{
+		endpointFn: func() (string, error) {
+			webBase, err := github.OAuthWebBase(s.cfg.GitHubBaseURL)
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimRight(webBase, "/") + "/login/oauth/access_token", nil
+		},
+		client:   s.githubClient,
+		clientID: s.cfg.GitHubOAuthClientID,
+		secret:   s.cfg.GitHubOAuthClientSecret,
+		style:    tokenExchangeForm,
+	}
 	s.mu.RUnlock()
-
-	webBase, err := github.OAuthWebBase(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	endpoint := strings.TrimRight(webBase, "/") + "/login/oauth/access_token"
-	form := url.Values{}
-	form.Set("client_id", clientID)
-	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", refreshToken)
-	if clientSecret != "" {
-		form.Set("client_secret", clientSecret)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("github token refresh failed: %s: %s", resp.Status, truncate(string(raw), 200))
-	}
-	var tok tokenResponse
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return nil, fmt.Errorf("decode github token refresh: %w", err)
-	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("github token refresh missing access_token")
-	}
-	if tok.RefreshToken == "" {
-		tok.RefreshToken = refreshToken
-	}
-	return &tok, nil
+	return exchanger.refresh(ctx, refreshToken)
 }
 
 func (s *Service) fetchGitHubUser(ctx context.Context, accessToken string) (*models.User, error) {
