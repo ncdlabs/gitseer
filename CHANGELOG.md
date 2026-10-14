@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Product logo (`docs/branding/gitseer-logo.png`), now shown in the README header; removed the unreferenced pre-rename Gitea Lens branding PNGs.
+
 ### Changed
 
 - Public container images are multi-arch **linux/amd64** + **linux/arm64** (host cross-compile + runtime Containerfile; Buildx provenance attestations disabled so GHCR OS/Arch is not polluted with `unknown`).
