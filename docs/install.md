@@ -49,7 +49,6 @@ Detects OS/arch, downloads `./gitseer`, and runs `serve`. Override with `VER=1.0
 
 ```bash
 docker run --rm -p 8090:8090 \
-  --platform linux/amd64 \
   -v gitseer-data:/data \
   -e GITSEER_SERVER_LISTEN=0.0.0.0:8090 \
   -e GITSEER_SERVER_EXTERNAL_URL=http://127.0.0.1:8090 \
@@ -57,7 +56,7 @@ docker run --rm -p 8090:8090 \
   ghcr.io/ncdlabs/gitseer:1.0.9
 ```
 
-Image is **linux/amd64**. Use a named volume so the non-root container user can write SQLite.
+Image is multi-arch **linux/amd64** + **linux/arm64**. Use a named volume so the non-root container user can write SQLite.
 
 ## Guided installer (clone)
 

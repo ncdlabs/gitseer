@@ -5,7 +5,7 @@
 | Path | When to use |
 |------|-------------|
 | **Release binary** | Default — native binary from GitHub Releases (linux/darwin/windows × amd64/arm64); `curl … \| bash` in the root README |
-| **Public GHCR image** | Container demo or cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64 via Docker) |
+| **Public GHCR image** | Container demo or cold install (`ghcr.io/ncdlabs/gitseer`, linux/amd64 + linux/arm64 via Docker) |
 | **Guided installer** | Lab install when you already have Gitea URL/token (clone + `./scripts/install.sh`; add other forges in wizard/Settings) |
 | **Compose** | Build from source with Docker Compose (or Podman Compose) |
 | **Local dev** | Contributing / iterating on UI + API (macOS/Windows OK — builds a native binary) |
