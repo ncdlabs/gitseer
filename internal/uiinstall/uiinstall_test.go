@@ -50,23 +50,46 @@ func TestInstallPreservesAdminContent(t *testing.T) {
 	}
 }
 
-func TestInstallIncludesInstanceID(t *testing.T) {
+func TestInstallIsHeaderOnly(t *testing.T) {
 	dir := t.TempDir()
 	custom := filepath.Join(dir, "custom")
 	if err := Install(custom, "https://gitseer.example.com", 42); err != nil {
 		t.Fatal(err)
 	}
-	tabs := filepath.Join(custom, "templates", "custom", "extra_tabs.tmpl")
-	b, err := os.ReadFile(tabs)
+	// Header link must exist.
+	b, err := os.ReadFile(filepath.Join(custom, "templates", "custom", ExtraLinksRel))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(b)
-	if !strings.Contains(s, "instance_id=42") {
-		t.Fatalf("missing instance_id query: %s", s)
+	if !strings.Contains(string(b), beginLinks) || !strings.Contains(string(b), "GitSeer") {
+		t.Fatalf("header link missing: %s", string(b))
 	}
-	if !strings.Contains(s, "/repositories/{{.Owner.Name}}/{{.Repository.Name}}?instance_id=42") {
-		t.Fatalf("unexpected repo deep link: %s", s)
+	// No repo-tab file may be created.
+	if _, err := os.Stat(filepath.Join(custom, "templates", "custom", ExtraTabsRel)); !os.IsNotExist(err) {
+		t.Fatal("extra_tabs.tmpl must not be installed (header navbar only)")
+	}
+}
+
+func TestInstallStripsLegacyRepoTabs(t *testing.T) {
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom")
+	tmpl := filepath.Join(custom, "templates", "custom")
+	if err := os.MkdirAll(tmpl, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy install wrote both files; re-install must leave header only.
+	legacyTabs := beginTabs + "\n<a>GitSeer</a>\n" + endTabs + "\n"
+	if err := os.WriteFile(filepath.Join(tmpl, ExtraTabsRel), []byte(legacyTabs), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(custom, "https://gitseer.example.com", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpl, ExtraTabsRel)); !os.IsNotExist(err) {
+		rem, _ := os.ReadFile(filepath.Join(tmpl, ExtraTabsRel))
+		if strings.Contains(string(rem), beginTabs) {
+			t.Fatalf("legacy tab block not stripped: %s", string(rem))
+		}
 	}
 }
 
@@ -148,14 +171,17 @@ func TestSnippetFilesMatchesInstall(t *testing.T) {
 	if !strings.Contains(files[ExtraLinksRel], beginLinks) {
 		t.Fatal("links missing markers")
 	}
-	if !strings.Contains(files[ExtraTabsRel], "instance_id=7") {
-		t.Fatalf("tabs=%s", files[ExtraTabsRel])
+	if _, ok := files[ExtraTabsRel]; ok {
+		t.Fatal("header-only: no extra_tabs snippet expected")
 	}
 	concat, err := ConcatenatedSnippets("https://gitseer.example.com", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(concat, "===== extra_links.tmpl =====") || !strings.Contains(concat, "===== extra_tabs.tmpl =====") {
-		t.Fatalf("concat missing headers: %s", concat)
+	if !strings.Contains(concat, "===== extra_links.tmpl =====") {
+		t.Fatalf("concat missing links header: %s", concat)
+	}
+	if strings.Contains(concat, "extra_tabs.tmpl") {
+		t.Fatalf("concat must not include tabs: %s", concat)
 	}
 }

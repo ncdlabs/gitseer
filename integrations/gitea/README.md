@@ -1,14 +1,16 @@
 # Gitea custom UI integration
 
-`gitseer install-ui` writes marker-bounded snippets into:
+`gitseer install-ui` writes a marker-bounded snippet into:
 
-- `custom/templates/custom/extra_links.tmpl`
-- `custom/templates/custom/extra_tabs.tmpl`
+- `custom/templates/custom/extra_links.tmpl` (header navbar: Issues, Pull Requests, Milestones, Explore, GitSeer)
+
+Header-only by design — no repo-tab (`extra_tabs.tmpl`) snippet. `install-ui` strips any
+previously-installed `<!-- BEGIN GITSEER-TABS -->` … `<!-- END GITSEER-TABS -->` block.
 
 Markers:
 
 - `<!-- BEGIN GITSEER -->` … `<!-- END GITSEER -->`
-- `<!-- BEGIN GITSEER-TABS -->` … `<!-- END GITSEER-TABS -->`
+- `<!-- BEGIN GITSEER-TABS -->` … `<!-- END GITSEER-TABS -->` (legacy cleanup only)
 
 Admin content outside markers is preserved. `uninstall-ui` removes only marker blocks.
 `install-ui` strips every existing marker pair before writing, so re-runs cannot double-insert.

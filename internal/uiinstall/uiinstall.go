@@ -56,29 +56,21 @@ const (
 	ExtraTabsRel  = "extra_tabs.tmpl"
 )
 
-// SnippetFiles returns marker-wrapped template bodies keyed by relative path
-// (extra_links.tmpl, extra_tabs.tmpl). Same content Install writes; safe for download.
+// SnippetFiles returns the marker-wrapped header-navbar snippet (extra_links.tmpl).
+// Header-only by design: GitSeer appears in the top navbar (Issues, Pull Requests,
+// Milestones, Explore) — never as a repo tab. Same content Install writes; safe for download.
 func SnippetFiles(gitseerURL string, instanceID int64) (map[string]string, error) {
 	safeURL, err := sanitizeGitSeerURL(gitseerURL)
 	if err != nil {
 		return nil, err
 	}
 	href := html.EscapeString(safeURL)
-	repoPath := fmt.Sprintf("%s/repositories/{{.Owner.Name}}/{{.Repository.Name}}", href)
-	if instanceID > 0 {
-		repoPath = fmt.Sprintf("%s?instance_id=%d", repoPath, instanceID)
-	}
 	linksSnippet := fmt.Sprintf(`%s
 <a class="item" href="%s" target="_blank" rel="noopener noreferrer">GitSeer</a>
 %s
 `, beginLinks, href, endLinks)
-	tabsSnippet := fmt.Sprintf(`%s
-<a class="item" href="%s" target="_blank" rel="noopener noreferrer">GitSeer</a>
-%s
-`, beginTabs, repoPath, endTabs)
 	return map[string]string{
 		ExtraLinksRel: linksSnippet,
-		ExtraTabsRel:  tabsSnippet,
 	}, nil
 }
 
@@ -89,7 +81,7 @@ func ConcatenatedSnippets(gitseerURL string, instanceID int64) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	order := []string{ExtraLinksRel, ExtraTabsRel}
+	order := []string{ExtraLinksRel}
 	for i, name := range order {
 		if i > 0 {
 			b.WriteString("\n")
@@ -117,7 +109,9 @@ func Install(customPath, gitseerURL string, instanceID int64) error {
 	if err := upsertMarkedFile(filepath.Join(templates, ExtraLinksRel), beginLinks, endLinks, files[ExtraLinksRel]); err != nil {
 		return err
 	}
-	return upsertMarkedFile(filepath.Join(templates, ExtraTabsRel), beginTabs, endTabs, files[ExtraTabsRel])
+	// Header navbar only: strip any previously-installed repo-tab block so GitSeer
+	// doesn't appear twice. Admin content outside markers is preserved.
+	return stripMarkedFile(filepath.Join(templates, ExtraTabsRel), beginTabs, endTabs)
 }
 
 func Uninstall(customPath string) error {

@@ -74,7 +74,7 @@ func (h *Handler) downloadGiteaUISnippets(w http.ResponseWriter, r *http.Request
 	case "zip":
 		var buf bytes.Buffer
 		zw := zip.NewWriter(&buf)
-		for _, name := range []string{uiinstall.ExtraLinksRel, uiinstall.ExtraTabsRel} {
+		for _, name := range []string{uiinstall.ExtraLinksRel} {
 			content := files[name]
 			fw, zerr := zw.Create("templates/custom/" + name)
 			if zerr != nil {
@@ -89,13 +89,12 @@ func (h *Handler) downloadGiteaUISnippets(w http.ResponseWriter, r *http.Request
 				return
 			}
 		}
-		readme := fmt.Sprintf(`GitSeer Gitea UI snippets (instance_id=%d)
+		readme := fmt.Sprintf(`GitSeer Gitea UI snippet (instance_id=%d)
 
-Extract into Gitea's custom/ directory so paths become:
-  custom/templates/custom/extra_links.tmpl
-  custom/templates/custom/extra_tabs.tmpl
+Extract into Gitea's custom/ directory so the path becomes:
+  custom/templates/custom/extra_links.tmpl (header navbar only)
 
-Markers are BEGIN/END GITSEER and GITSEER-TABS — merge-safe with existing admin content.
+Markers are BEGIN/END GITSEER — merge-safe with existing admin content.
 Prefer "gitseer install-ui --custom-path DIR --gitseer-url URL --instance-id %d" for in-place install on the Gitea host.
 Restart Gitea after installing templates.
 `, inst.ID, inst.ID)
