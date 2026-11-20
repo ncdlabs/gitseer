@@ -154,7 +154,7 @@ func TestDownloadGiteaUISnippetsZip(t *testing.T) {
 	names := map[string]bool{}
 	for _, f := range zr.File {
 		names[f.Name] = true
-		if strings.HasSuffix(f.Name, "extra_tabs.tmpl") {
+		if strings.HasSuffix(f.Name, "extra_links.tmpl") {
 			rc, err := f.Open()
 			if err != nil {
 				t.Fatal(err)
@@ -162,16 +162,19 @@ func TestDownloadGiteaUISnippetsZip(t *testing.T) {
 			body, _ := io.ReadAll(rc)
 			_ = rc.Close()
 			s := string(body)
-			if !strings.Contains(s, "BEGIN GITSEER-TABS") {
-				t.Fatalf("missing tabs marker: %s", s)
+			if !strings.Contains(s, "BEGIN GITSEER") {
+				t.Fatalf("missing header marker: %s", s)
 			}
-			if !strings.Contains(s, "instance_id="+strconv.FormatInt(inst.ID, 10)) {
-				t.Fatalf("missing instance_id: %s", s)
+			if !strings.Contains(s, "GitSeer") {
+				t.Fatalf("missing GitSeer link: %s", s)
 			}
 		}
 	}
-	if !names["templates/custom/extra_links.tmpl"] || !names["templates/custom/extra_tabs.tmpl"] {
+	if !names["templates/custom/extra_links.tmpl"] {
 		t.Fatalf("zip entries=%v", names)
+	}
+	if names["templates/custom/extra_tabs.tmpl"] {
+		t.Fatalf("header-only: extra_tabs.tmpl must not be in zip: %v", names)
 	}
 }
 
